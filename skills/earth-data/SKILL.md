@@ -25,6 +25,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 - Cloud filtering: pass `max_cloud_cover=20` for optical searches by default; relax only if nothing comes back.
 - Sentinel-2 true color: `assets=["visual"]` — one COG, no rescale needed. Landsat: `["red","green","blue"]` with `rescale="0,0.3"` (surface reflectance floats) — check `describe_collection` if colors look wrong.
 - NDVI on Sentinel-2 (earth-search): `expression="(nir-red)/(nir+red)"`. NDWI: `"(green-nir)/(green+nir)"`. Asset names, not band numbers — translation to TiTiler band indices happens for you.
+- **Index layers on maps**: pass the same `expression` on the `render_map` item layer with `rescale="-1,1"` and `colormap_name="rdylgn"` (never bare `assets=[nir, red]` — that renders raw reflectance, which shows as blank).
 - Comparing two dates: search with two `datetime_range` windows, then `render_map` with both items as layers (newest on top) so the user can toggle. Name layers with their dates.
 - VEDA layers usually want `assets=["cog_default"]` plus a `rescale`/`colormap_name`; check the collection's `renders` metadata via `describe_collection` when unsure.
 

@@ -286,6 +286,23 @@ def search_imagery(
 # ---------------------------------------------------------------- rasters
 
 
+def _expression_to_bands(expression: str, assets: list[str] | None) -> tuple[str, list[str]]:
+    # titiler.xyz /stac merges the assets list into bands b1..bN, so a friendly
+    # expression like (nir-red)/(nir+red) must become (b1-b2)/(b1+b2) with
+    # assets=[nir, red] in matching order.
+    funcs = {"where", "abs", "sqrt", "min", "max", "log", "exp", "sin", "cos", "b"}
+    idents = [
+        t
+        for t in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", expression)
+        if t not in funcs and not re.fullmatch(r"b\d+", t)
+    ]
+    if not assets:
+        assets = list(dict.fromkeys(idents))  # order of first appearance
+    for i, a in enumerate(assets, start=1):
+        expression = re.sub(rf"\b{re.escape(a)}\b", f"b{i}", expression)
+    return expression, assets
+
+
 def _default_assets(collection: str) -> list[str]:
     if "sentinel-2" in collection:
         return ["visual"]
@@ -356,19 +373,7 @@ def compute_statistics(
     self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
     params: list[tuple[str, str]] = [("url", self_url), ("max_size", "512")]
     if expression:
-        # titiler.xyz /stac merges the assets list into bands b1..bN, so a
-        # friendly expression like (nir-red)/(nir+red) must become (b1-b2)/(b1+b2)
-        # with assets=[nir, red] in matching order.
-        funcs = {"where", "abs", "sqrt", "min", "max", "log", "exp", "sin", "cos", "b"}
-        idents = [
-            t
-            for t in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", expression)
-            if t not in funcs and not re.fullmatch(r"b\d+", t)
-        ]
-        if not assets:
-            assets = list(dict.fromkeys(idents))  # order of first appearance
-        for i, a in enumerate(assets, start=1):
-            expression = re.sub(rf"\b{re.escape(a)}\b", f"b{i}", expression)
+        expression, assets = _expression_to_bands(expression, assets)
         params.append(("expression", expression))
     for a in assets or _default_assets(collection_id) or ["visual"]:
         params.append(("assets", a))
@@ -405,9 +410,16 @@ def tile_url_template(
     assets: list[str] | None = None,
     rescale: str | None = None,
     colormap_name: str | None = None,
+    expression: str | None = None,
 ) -> str:
-    """XYZ tile URL template ({z}/{x}/{y}) for a STAC item, for web maps."""
-    assets = assets or _default_assets(collection_id)
+    """XYZ tile URL template ({z}/{x}/{y}) for a STAC item, for web maps.
+
+    For index layers (NDVI etc.) pass expression over asset names, e.g.
+    "(nir-red)/(nir+red)" with rescale="-1,1" and colormap_name="rdylgn" —
+    supported on earth-search; ignored for veda/planetary-computer.
+    """
+    # with an expression, assets must be the expression's bands, never defaults
+    assets = assets or ([] if expression else _default_assets(collection_id))
     if catalog == "planetary-computer":
         params = [("collection", collection_id), ("item", item_id)] + [
             ("assets", a) for a in assets
@@ -431,7 +443,11 @@ def tile_url_template(
             "/tiles/WebMercatorQuad/{z}/{x}/{y}.png?" + q
         )
     self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
-    params = [("url", self_url)] + [("assets", a) for a in assets]
+    params = [("url", self_url)]
+    if expression:
+        expression, assets = _expression_to_bands(expression, assets or None)
+        params.append(("expression", expression))
+    params += [("assets", a) for a in assets]
     if rescale:
         params.append(("rescale", rescale))
     if colormap_name:
@@ -523,7 +539,8 @@ def render_map(
 
     layers is a list of:
       {"type": "item", "name": ..., "catalog": ..., "collection_id": ...,
-       "item_id": ..., "assets": [...], "rescale": "0,3000", "colormap_name": ...}
+       "item_id": ..., "assets": [...], "rescale": "0,3000", "colormap_name": ...,
+       "expression": "(nir-red)/(nir+red)"}  # expression for index layers
       {"type": "raster", "name": ..., "tiles": "https://..{z}/{x}/{y}.."}
       {"type": "geojson", "name": ..., "data": <FeatureCollection>, "color": "#hex"}
     Item layers resolve to the right tiling backend automatically. The HTML
@@ -543,6 +560,7 @@ def render_map(
                         l.get("assets"),
                         l.get("rescale"),
                         l.get("colormap_name"),
+                        l.get("expression"),
                     ),
                     "opacity": l.get("opacity", 1),
                 }

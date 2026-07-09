@@ -159,8 +159,11 @@ def api_ask(req: AskReq):
     prompt = (
         "You have groundstation MCP tools (Earth observation: geocode, STAC search, previews, "
         "statistics, render_map, events, weather). Answer the user's question with them. "
-        "If the answer is spatial, finish with render_map and state the map file path on its own "
-        "final line as MAP: <path>. Be concise.\n\nQuestion: " + req.question
+        "For vegetation/water index layers on maps, pass expression (e.g. '(nir-red)/(nir+red)') "
+        "with rescale='-1,1' and colormap_name='rdylgn' on the render_map item layer — never bare "
+        "nir/red assets, that renders blank. If the answer is spatial, finish with render_map and "
+        "state the map file path on its own final line as MAP: <path>. Be concise, use markdown.\n\n"
+        "Question: " + req.question
     )
     return {"job": _start_job(argv, input_text=prompt)}
 
