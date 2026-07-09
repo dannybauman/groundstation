@@ -62,9 +62,19 @@ Gathers active events, weather, and fresh imagery for the AOI, computes an NDVI 
 
 Fleet mode runs a list of AOIs and writes a morning-sweep index page, sorted ACT → WATCH → CALM, one card per place. That's the ambient story: every area you care about, triaged before you sit down.
 
-### MCP server vs brief script — which one when
+## Web console
 
-Two doors into the same tool functions:
+```bash
+uv run --group web groundstation-web   # open http://127.0.0.1:8765
+```
+
+The no-CLI, no-chat-client door: type a place, and imagery, active events, and weather populate in parallel while the clearest scene streams onto the map through TiTiler. NDVI stats, Earth brief generation, and a free-text "ask the agent" (headless Claude + this MCP server) are one click each. Deep exploration hands off to [stac-map](https://github.com/developmentseed/stac-map) — Pete Gadomski's map-first STAC visualizer, which renders COGs client-side via Kyle Barron's [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster) — via embedded panel and per-scene links, so the console stays thin and the heavy viz rides on tools the team already builds.
+
+### Console vs MCP server vs brief script — which one when
+
+Three doors into the same tool functions:
+
+- **Web console**: for humans without a terminal — demos, partners, quick looks. Browser UI, zero setup beyond `uv run`.
 
 - **MCP server** (`claude mcp add ...`): the conversational door. You ask, an agent answers with tools — including brief-style questions ("brief me on Efate"). Interactive, exploratory, great for watching the agent think. You never run anything by hand.
 - **`brief.py`**: the unprompted door. Nobody asks — the script runs on a schedule (cron, CI, a Slack webhook) and Earth reports in with a polished standalone HTML page. This is the point of #155: the value is that it arrives without a conversation.
