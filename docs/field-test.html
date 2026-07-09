@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>groundstation field test — 20 examples, actually run</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
+  --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
+  --calm: #2e7d32; --blue: #1d4e8f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
+header { border-bottom: 2px solid var(--ink); padding: 42px 24px 30px; }
+.wrap { max-width: 1060px; margin: 0 auto; }
+header h1 { font: 700 34px/1.1 'Roboto Condensed', sans-serif; margin: 0 0 6px; letter-spacing: .02em; }
+header h1 .dot { display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); margin-right: 12px; }
+header .sub { font: 500 11.5px 'Roboto Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--mid); }
+header p.lede { max-width: 760px; font-size: 16px; margin: 16px 0 0; color: var(--mid); }
+
+.stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 26px auto 0; max-width: 1060px; padding: 0; }
+.stat { flex: 1; min-width: 160px; background: var(--white); border: 1px solid var(--rule); border-top: 3px solid var(--accent); padding: 12px 16px; }
+.stat b { display: block; font: 600 30px 'Roboto Condensed', sans-serif; color: var(--accent); }
+.stat span { font-size: 12px; color: var(--mid); }
+
+main { padding: 10px 24px 60px; }
+h2.round {
+  font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
+  display: flex; align-items: center; gap: 12px; margin: 44px 0 18px;
+}
+h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 16px; }
+@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+
+.card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.card .top { display: flex; align-items: center; gap: 10px; }
+.card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.card .tag { font: 500 10px 'Roboto Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); border: 1px solid var(--rule); padding: 3px 8px; }
+.card .who { margin-left: auto; font: 400 10.5px 'Roboto Mono', monospace; color: var(--muted); }
+.label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
+.answer { font-size: 13.5px; color: var(--mid); }
+.answer b { color: var(--ink); }
+.learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
+.learning b { color: var(--accent); font-style: normal; }
+.shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+
+.repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 0 40px; }
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <h1><span class="dot"></span>THE FIELD TEST</h1>
+  <div class="sub">groundstation · 20 prompts · 2 rounds · July 9, 2026 · Development Seed labs</div>
+  <p class="lede">Every example below was run for real: a headless Claude session with the groundstation MCP tools
+  and the earth-data skill, answering the prompt with live data. Outputs are excerpts from the actual runs.
+  Every miss became a fix the same day — the field test is the product loop.</p>
+</div></header>
+
+<div class="stats wrap" style="padding: 0 24px">
+  <div class="stat"><b>20/20</b><span>correct answers with working maps</span></div>
+  <div class="stat"><b>8</b><span>improvements shipped from what the runs exposed</span></div>
+  <div class="stat"><b>0</b><span>API keys or accounts needed for any of it</span></div>
+  <div class="stat"><b>3</b><span>eval layers guarding it (unit · live · grounding)</span></div>
+</div>
+
+<main class="wrap">
+
+<h2 class="round">Round 1 — the core workflows</h2>
+<div class="grid">
+
+<div class="card"><div class="top"><div class="num">1</div><div class="tag">live events</div><div class="who">disaster response</div></div>
+<div><div class="label">Input</div><div class="prompt">Find the clearest Sentinel-2 scene of Lake Chelan from the past two weeks, tell me what's burning nearby, and give me a map I can share.</div></div>
+<div class="answer"><div class="label">Output</div>Found both active wildfires (<b>Navarre Coulee</b>, <b>Chelan Hills</b>), picked the <b>0.7% cloud July 5 scene</b> over a newer 20%-cloud one, and mapped the fires as markers on the imagery.</div>
+<div class="shows">scene judgment + live event feeds in one answer</div></div>
+
+<div class="card"><div class="top"><div class="num">2</div><div class="tag">year over year</div><div class="who">forest health</div></div>
+<div><div class="label">Input</div><div class="prompt">Compare NDVI east of the Cascades near Wenatchee between now and the same window last July. Same collection, low cloud. Map both dates so I can toggle.</div></div>
+<div class="answer"><div class="label">Output</div>Same tile, both years near cloud-free: <b>0.626 vs 0.622 — "noise-level, not a real vegetation change."</b> No drought signal, no false alarm.</div>
+<div class="shows">an honest null result is a result</div></div>
+
+<div class="card"><div class="top"><div class="num">3</div><div class="tag">radar</div><div class="who">wet-season monitoring</div></div>
+<div><div class="label">Input</div><div class="prompt">Optical is useless over the Barotse Floodplain in the wet season. Find recent Sentinel-1 radar scenes there instead and map one — check the collection's assets for the right rescale.</div></div>
+<div class="answer"><div class="label">Output</div>Chose Sentinel-1 VV, <b>ran statistics first and derived the stretch (30–380) from actual pixel percentiles</b> instead of guessing a dB rescale, and flagged that the floodplain sits on a swath seam.</div>
+<div class="learning"><b>Learning →</b> the S1 digital-numbers recipe is now codified in the skill, so the next agent doesn't have to derive it.</div></div>
+
+<div class="card"><div class="top"><div class="num">4</div><div class="tag">water index</div><div class="who">hydrology</div></div>
+<div><div class="label">Input</div><div class="prompt">How much surface water is on the Barotse Floodplain right now vs early March? Use NDWI on Sentinel-2, give me the numbers and a two-layer map.</div></div>
+<div class="answer"><div class="label">Output</div>NDWI <b>−0.29 → −0.48, a 64% relative decline</b>, correctly read as the expected seasonal Zambezi drawdown — "not an anomaly" — with a swipe map.</div>
+<div class="shows">index math + hydrological domain reading</div></div>
+
+<div class="card"><div class="top"><div class="num">5</div><div class="tag">nasa products</div><div class="who">post-fire recovery</div></div>
+<div><div class="label">Input</div><div class="prompt">What does NASA VEDA have on the Caldor fire? Put the burn severity layer on a map over a current Sentinel-2 scene of the Eldorado National Forest.</div></div>
+<div class="answer"><div class="label">Output</div>Found both VEDA Caldor products, read the categorical stats (<b>majority class 3, moderate severity</b>), and layered the 2021 severity raster over a current 0.1%-cloud scene — 2021 damage against present-day forest.</div>
+<div class="learning"><b>Learning →</b> this map exposed that "two rasters → swipe" was wrong for overlays. Maps now swipe only for same-collection pairs; thematic overlays stack with opacity.</div></div>
+
+<div class="card"><div class="top"><div class="num">6</div><div class="tag">hi-res mosaic</div><div class="who">municipal GIS</div></div>
+<div><div class="label">Input</div><div class="prompt">Show the newest NAIP aerial imagery of Des Plaines, Illinois with ESA WorldCover land cover from Planetary Computer as a toggleable layer on top.</div></div>
+<div class="answer"><div class="label">Output</div>Mosaicked <b>7 NAIP tiles</b> (all from the same 2023-07-10 capture) plus <b>2 WorldCover tiles split at the 42°N seam</b>, cross-catalog, as toggleable layers.</div>
+<div class="shows">multi-tile mosaics across two catalogs</div></div>
+
+<div class="card"><div class="top"><div class="num">7</div><div class="tag">flood watch</div><div class="who">emergency management</div></div>
+<div><div class="label">Input</div><div class="prompt">Any active flood alerts along the Rio Grande between El Paso and Laredo? Show me alerts, week-ahead rain, and the latest usable imagery on one map.</div></div>
+<div class="answer"><div class="label">Output</div>No active alerts — so it found the forward signal instead: <b>Del Rio and Eagle Pass tracking toward a 40–60mm rain event July 14–15</b>, "the stretch most likely to generate a flood watch if it verifies."</div>
+<div class="shows">synthesis across feeds, looking forward not just backward</div></div>
+
+<div class="card"><div class="top"><div class="num">8</div><div class="tag">data quality</div><div class="who">EUDR / supply chain</div></div>
+<div><div class="label">Input</div><div class="prompt">For the Yirgacheffe coffee region in Ethiopia, compare vegetation between January and this month with NDVI stats, and tell me which scenes you'd trust given cloud cover.</div></div>
+<div class="answer"><div class="label">Output</div>Recovered from a stadium-point geocode by widening to the growing zone, then refused to trust its own number: July's best scene is 53% cloud (Kiremt rains), so <b>"trust the direction, not the magnitude — or switch to Sentinel-1."</b></div>
+<div class="learning"><b>Learning →</b> region-scale geocode sanity checks are now in the skill.</div></div>
+
+<div class="card"><div class="top"><div class="num">9</div><div class="tag">situational brief</div><div class="who">pacific islands</div></div>
+<div><div class="label">Input</div><div class="prompt">Brief me on Efate, Vanuatu: any open storm or disaster alerts, the week ahead in weather, and the most recent cloud-free Sentinel-2, all on a map.</div></div>
+<div class="answer"><div class="label">Output</div>One distant Green-level quake correctly dismissed, dry-season weather read, and <b>two adjacent tiles stitched to span the island</b> (June 1 beat a cloudier July 8 scene).</div>
+<div class="shows">alert triage + multi-tile AOIs</div></div>
+
+<div class="card"><div class="top"><div class="num">10</div><div class="tag">urban analysis</div><div class="who">infrastructure</div></div>
+<div><div class="label">Input</div><div class="prompt">Show the Ashburn, Virginia data center corridor: newest NAIP at full resolution plus a Sentinel-2 from this month as toggle layers, and give me the NDVI stats for the corridor.</div></div>
+<div class="answer"><div class="label">Output</div>Newest <em>fully covering</em> NAIP (2021 — and it said so: "won't reflect the last ~5 years of construction") + current Sentinel-2; read NDVI's spread (<b>mean 0.38, std 0.30</b>) as "the signature of tree cover mixed with rooftops and pavement."</div>
+<div class="shows">distributions over averages; resolution tradeoffs named</div></div>
+
+</div>
+
+<h2 class="round">Round 2 — different shapes, partner-shaped</h2>
+<div class="grid">
+
+<div class="card"><div class="top"><div class="num">11</div><div class="tag">snow index</div><div class="who">water security</div></div>
+<div><div class="label">Input</div><div class="prompt">How much snow is left in the North Cascades compared to early May? Use NDSI (green-swir16)/(green+swir16) on Sentinel-2, give me the numbers and a swipe map.</div></div>
+<div class="answer"><div class="label">Output</div>Snow-covered <em>fraction</em> via the standard 0.4 threshold: <b>27.6% → 5.9% since early May, "a 4.7× drop"</b> — and explained May's lower valid-pixel share as terrain shadow from the low sun angle.</div>
+<div class="learning"><b>Learning →</b> NDSI (with its threshold) and NBR joined the skill's index recipes.</div></div>
+
+<div class="card"><div class="top"><div class="num">12</div><div class="tag">global triage</div><div class="who">humanitarian response</div></div>
+<div><div class="label">Input</div><div class="prompt">What are the most severe disaster alerts anywhere in the world right now? Give me the top three by severity and map the worst one with recent imagery.</div></div>
+<div class="answer"><div class="label">Output</div>GDACS's only <b>Red alert: Super Typhoon Bavi</b>, mapped with a same-day Sentinel-2 pass <em>through the typhoon itself</em>; China floods and Iberian fires ranked next, a chronic drought sensibly demoted.</div>
+<div class="shows">worldwide triage with no AOI given</div></div>
+
+<div class="card"><div class="top"><div class="num">13</div><div class="tag">epistemics</div><div class="who">marine / coastal</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me the Wadden Sea tidal flats: latest cloud-free Sentinel-2, compute NDWI, and tell me honestly what you can and cannot say about tide state from one scene.</div></div>
+<div class="answer"><div class="label">Output</div>What one scene proves: flats exposed at 11:06 UTC. What it can't: position in the tidal cycle — <b>"NDWI has no time derivative and no absolute datum"</b> — naming Rijkswaterstaat gauges as the missing reference.</div>
+<div class="shows">the limits of the data, stated before anyone asks</div></div>
+
+<div class="card"><div class="top"><div class="num">14</div><div class="tag">decadal change</div><div class="who">urban / ports</div></div>
+<div><div class="label">Input</div><div class="prompt">Compare Jakarta's northern coastline between 2019 and now using Landsat — is there visible land change or new construction along the bay?</div></div>
+<div class="answer"><div class="label">Output</div>Hit <b>AccessDenied on earth-search's requester-pays Landsat bucket</b>, recovered by switching to Planetary Computer's copy, then spotted the <b>Tanjung Priok port expansion</b> projecting into the bay in the 2019-vs-2026 swipe.</div>
+<div class="learning"><b>Learning →</b> Landsat routing is now codified: earth-search Landsat won't tile, planetary-computer is the path.</div></div>
+
+<div class="card"><div class="top"><div class="num">15</div><div class="tag">verification</div><div class="who">EUDR / due diligence</div></div>
+<div><div class="label">Input</div><div class="prompt">A client claims the area around Ouarzazate, Morocco has greened significantly since 2022 due to agroforestry. Verify: compare vegetation then vs now and tell me if the greening is real.</div></div>
+<div class="answer"><div class="label">Output</div>+0.008 NDVI spread <em>uniformly across the whole distribution including bare rock</em>, 98th percentile flat: <b>"more consistent with interannual variability… the data don't support 'greened significantly'"</b> — with an offer to re-run on the exact plot.</div>
+<div class="shows">claim verification a due-diligence team could cite</div></div>
+
+<div class="card"><div class="top"><div class="num">16</div><div class="tag">null result</div><div class="who">aviation / ash</div></div>
+<div><div class="label">Input</div><div class="prompt">Is there any current volcanic activity in Iceland? If so, show the site on recent imagery and check whether the week's winds would push ash toward Reykjavik.</div></div>
+<div class="answer"><div class="label">Output</div>No eruption — and it <b>verified the feed wasn't down</b> (it had flagged Etna's July 6 eruption), imaged the Sundhnúkagígar fissures anyway, and <b>declined to fabricate an ash analysis</b>, reporting that the weather tool lacked wind direction.</div>
+<div class="learning"><b>Learning →</b> dominant wind direction added to <code>weather_summary</code> the same day — plume questions need it.</div></div>
+
+<div class="card"><div class="top"><div class="num">17</div><div class="tag">terrain</div><div class="who">flood journalism</div></div>
+<div><div class="label">Input</div><div class="prompt">I need elevation context for a flood story in Cologne: map the Copernicus DEM with a terrain colormap plus the latest imagery of the Rhine, and tell me the elevation range of the city.</div></div>
+<div class="answer"><div class="label">Output</div>Four DEM tiles + fresh Rhine imagery, and it separated the bbox artifact (240m foothills caught at the corner) from the answer that matters: <b>the city core sits at 37–65m, "the relevant band for flood exposure."</b></div>
+<div class="shows">terrain data + spatial-artifact awareness</div></div>
+
+<div class="card"><div class="top"><div class="num">18</div><div class="tag">discovery</div><div class="who">development / urban growth</div></div>
+<div><div class="label">Input</div><div class="prompt">What datasets can you reach about nighttime lights or human settlement, and which would you use to show urbanization around Nairobi? Show one on a map.</div></div>
+<div class="answer"><div class="label">Output</div>Surveyed VEDA's event nightlights, GRDI, HREA, and io-lulc across catalogs — then argued lights <b>"saturate over a dense core"</b> and swiped io-lulc's built-up class 2017 vs 2023 instead: sprawl toward Kajiado and Kiambu, visible.</div>
+<div class="shows">dataset discovery with an opinion, not a list</div></div>
+
+<div class="card"><div class="top"><div class="num">19</div><div class="tag">burn severity</div><div class="who">wildfire response</div></div>
+<div><div class="label">Input</div><div class="prompt">Assess burn severity around the Navarre Coulee fire near Chelan using NBR (nir-swir22)/(nir+swir22): compare the latest scene against pre-fire, give me the delta, and map both.</div></div>
+<div class="answer"><div class="label">Output</div>Pre/post dNBR (<b>mean −0.033, median −0.045</b> in two weeks) with the dilution explained (steppe, lake pixels), a smoke-vs-cloud caveat, and <b>"the burn may still be spreading past what this scene captures."</b></div>
+<div class="shows">the assessment a response team actually needs, caveats included</div></div>
+
+<div class="card"><div class="top"><div class="num">20</div><div class="tag">catalog trust</div><div class="who">data providers</div></div>
+<div><div class="label">Input</div><div class="prompt">Find the same recent Sentinel-2 scene over Munich in both earth-search and planetary-computer, compare their reported cloud cover, preview both, and tell me if the catalogs agree.</div></div>
+<div class="answer"><div class="label">Output</div><b>Exact agreement: 0.606% cloud in both catalogs</b> — same ESA product under different ID conventions, both previews clear. The catalogs check out.</div>
+<div class="shows">cross-catalog consistency, verified not assumed</div></div>
+
+</div>
+
+<div class="repro">
+  <div class="label">Reproduce any of these</div>
+  <code>claude -p "&lt;prompt&gt;. Finish with the map path as MAP: &lt;path&gt;." \
+  --mcp-config '{"mcpServers":{"groundstation":{"command":"uv","args":["--directory","&lt;repo&gt;","run","groundstation"]}}}' \
+  --strict-mcp-config --allowedTools "mcp__groundstation" \
+  --append-system-prompt "$(cat skills/earth-data/SKILL.md)"</code>
+</div>
+
+</main>
+<footer>groundstation · Development Seed labs · STAC + TiTiler + EONET + GDACS + Open-Meteo · all runs 2026-07-09</footer>
+</body>
+</html>

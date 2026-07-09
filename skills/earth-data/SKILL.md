@@ -16,7 +16,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 ## Which catalog for what
 
-- **earth-search** — fresh raw imagery. Sentinel-2 (`sentinel-2-l2a`), Sentinel-1 (`sentinel-1-grd`), Landsat (`landsat-c2-l2`), NAIP, Copernicus DEM. First stop for "recent imagery of X".
+- **earth-search** — fresh raw imagery. Sentinel-2 (`sentinel-2-l2a`), Sentinel-1 (`sentinel-1-grd`), NAIP, Copernicus DEM. First stop for "recent imagery of X". **Landsat exception**: earth-search's `landsat-c2-l2` assets live in a requester-pays bucket the tiler cannot read (AccessDenied on every band) — for Landsat, search and preview on planetary-computer instead.
 - **veda** — NASA-curated analysis products: fire severity, air quality, climate indicators, disaster layers. First stop for "what does NASA have on X event".
 - **planetary-computer** — deep archive breadth: MODIS, land cover (`io-lulc-annual-v02`, `esa-worldcover`), biomass, DEMs. First stop for historical or thematic layers. Previews use the item's `rendered_preview`; statistics aren't wired yet.
 
@@ -24,7 +24,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 - Cloud filtering: pass `max_cloud_cover=20` for optical searches by default; relax only if nothing comes back.
 - Sentinel-2 true color: `assets=["visual"]` — one COG, no rescale needed. Landsat: `["red","green","blue"]` with `rescale="0,0.3"` (surface reflectance floats) — check `describe_collection` if colors look wrong.
-- NDVI on Sentinel-2 (earth-search): `expression="(nir-red)/(nir+red)"`. NDWI: `"(green-nir)/(green+nir)"`. Asset names, not band numbers — translation to TiTiler band indices happens for you.
+- NDVI on Sentinel-2 (earth-search): `expression="(nir-red)/(nir+red)"`. NDWI: `"(green-nir)/(green+nir)"`. NBR (burn severity): `"(nir-swir22)/(nir+swir22)"` — compare pre/post fire. NDSI (snow): `"(green-swir16)/(green+swir16)"`, snow-covered where > 0.4. Asset names, not band numbers — translation to TiTiler band indices happens for you.
 - **Index layers on maps**: pass the same `expression` on the `render_map` item layer with `rescale="-1,1"` and `colormap_name="rdylgn"` (never bare `assets=[nir, red]` — that renders raw reflectance, which shows as blank).
 - **Overlay vs compare**: two rasters of the same collection auto-render as a swipe comparison; different collections stack as toggleable overlays (pass `compare` to override). A thematic layer over imagery (burn severity, land cover) should carry `opacity` ~0.75 so the imagery shows through.
 - **Sentinel-1 GRD** (earth-search): `vv`/`vh` assets are unscaled digital numbers, not dB — don't guess a rescale, run `compute_statistics` first and stretch to roughly the 2nd–98th percentile. Radar is the answer when optical is clouded out.

@@ -205,6 +205,7 @@ def api_job(job_id: str):
 
 DEMO.mkdir(exist_ok=True)
 app.mount("/demo", StaticFiles(directory=DEMO), name="demo")
+app.mount("/docs", StaticFiles(directory=REPO / "docs"), name="docs")
 
 
 def main() -> None:

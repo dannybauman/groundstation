@@ -1,6 +1,10 @@
-# Field test: the ten example prompts, actually run
+# Field test: twenty example prompts, actually run
 
-All ten README-style prompts were run through the real agent path (headless Claude + the groundstation MCP server + the earth-data skill) on 2026-07-09. Every one produced a correct answer and a working map. Below: what each did, and what it shows.
+Twenty prompts across two rounds were run through the real agent path (headless Claude + the groundstation MCP server + the earth-data skill) on 2026-07-09. **20/20 produced correct answers and working maps.** Each round's misses became fixes the same day — the field test is the product loop.
+
+There's a visual walkthrough of all twenty at [`field-test.html`](field-test.html) (serve the console and open `/docs/field-test.html`).
+
+## Round 1: the core workflows
 
 | # | Prompt (short) | What happened | What it demonstrates |
 |---|---|---|---|
@@ -15,7 +19,30 @@ All ten README-style prompts were run through the real agent path (headless Clau
 | 9 | Brief me on Efate, Vanuatu | Clean alert read (one distant Green-level quake, correctly dismissed), dry-season weather, stitched two adjacent tiles to span the island | multi-tile AOIs, alert triage |
 | 10 | Ashburn data center corridor | Newest fully-covering NAIP (2021) + current Sentinel-2, NDVI mean 0.38 with std 0.30 read as "the signature of tree cover mixed with rooftops and pavement," caveated NAIP's age | resolution tradeoffs, distribution-not-just-mean reading |
 
-## Improvements this run produced
+## Round 2: different question types, partner-shaped
+
+Deliberately different shapes — other spectral indices, global triage, claim verification, terrain, dataset discovery, catalog trust — each mapped to a real partner context (water security, humanitarian response, marine, urban, EUDR compliance, catalog operators).
+
+| # | Prompt (short) | What happened | What it demonstrates |
+|---|---|---|---|
+| 11 | Snow left in the North Cascades vs early May (NDSI) | Snow-covered fraction via the standard 0.4 threshold: 27.6% → 5.9% ("a 4.7× drop"), and explained May's lower valid-pixel share as terrain shadow from low sun angle | derived metrics, not just means |
+| 12 | Most severe disaster alerts worldwide right now | Found GDACS's only Red alert (Super Typhoon Bavi), mapped today's Sentinel-2 through the typhoon itself, demoted a chronic drought below fast-moving events | global triage without an AOI |
+| 13 | Wadden Sea flats — what can one scene say about tide state? | Textbook honesty: flats were exposed at 11:06 UTC, but one scene has "no time derivative and no absolute datum" — named Rijkswaterstaat gauges as the missing reference | knowing the limits of the data |
+| 14 | Jakarta's coastline, 2019 vs now, with Landsat | Hit AccessDenied on earth-search's requester-pays Landsat bucket, recovered by switching to Planetary Computer's copy, then spotted the Tanjung Priok port expansion in the swipe | graceful failure + real change found |
+| 15 | Verify a client's "significant greening" claim near Ouarzazate | +0.008 NDVI spread uniformly across the whole distribution including bare rock, 98th percentile flat: "more consistent with interannual variability… the data don't support 'greened significantly'" | evidence-based claim verification |
+| 16 | Icelandic volcanic activity + ash toward Reykjavik? | No eruption — verified the feed wasn't down (it had flagged Etna), imaged the Sundhnúkagígar fissures anyway, declined to fabricate an ash analysis, and reported that wind *direction* wasn't in the weather tool | refusing to manufacture an answer |
+| 17 | Elevation context for a Cologne flood story | Copernicus DEM (4 tiles) + Rhine imagery; separated the bbox artifact (240m foothills at the corner) from the real answer (city core 37–65m) | terrain + spatial-artifact awareness |
+| 18 | Nighttime lights or settlement data for Nairobi urbanization? | Surveyed VEDA's event nightlights, GRDI, HREA, io-lulc across catalogs, argued lights "saturate over a dense core" and swiped io-lulc built-up 2017 vs 2023 instead | dataset discovery with an opinion |
+| 19 | Burn severity for the Navarre Coulee fire (NBR) | Pre/post dNBR with the area-wide dilution explained, smoke-vs-cloud caveat, and "the burn may still be spreading past what this scene captures" | post-fire assessment, honestly caveated |
+| 20 | Same Munich scene in two catalogs — do they agree? | Exact agreement (0.606% cloud both), explained the differing ID conventions trace to the same ESA product | cross-catalog metadata trust |
+
+## Improvements round 2 produced
+
+1. **Landsat routing codified**: earth-search's Landsat is requester-pays and won't tile — the skill and catalog notes now route Landsat to planetary-computer (example 14's agent had to discover this; the next one won't).
+2. **Wind direction added to `weather_summary`**: example 16's ash question exposed that the tool returned speed only — dominant daily direction now included, which smoke/ash/plume questions need.
+3. **NBR and NDSI recipes** joined NDVI/NDWI in the skill's index list, with the snow threshold (example 11 and 19's agents derived these themselves).
+
+## Improvements round 1 produced
 
 Field-testing is the product loop — these went straight back into the code:
 

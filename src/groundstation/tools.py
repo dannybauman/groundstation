@@ -25,7 +25,7 @@ CATALOGS: dict[str, dict[str, str]] = {
     "earth-search": {
         "stac": "https://earth-search.aws.element84.com/v1",
         "raster": "titiler-xyz",
-        "notes": "Element 84 Earth Search: Sentinel-2 L2A/L1C, Sentinel-1, Landsat, NAIP, Copernicus DEM.",
+        "notes": "Element 84 Earth Search: Sentinel-2 L2A/L1C, Sentinel-1, NAIP, Copernicus DEM. Landsat here is requester-pays and won't tile — use planetary-computer for Landsat.",
     },
     "veda": {
         "stac": "https://openveda.cloud/api/stac",
@@ -815,15 +815,18 @@ def active_events(bbox: list[float] | None = None, days: int = 30) -> dict[str, 
 def weather_summary(lat: float, lon: float, past_days: int = 7) -> dict[str, Any]:
     """Recent and forecast weather for a point (Open-Meteo, no key needed).
 
-    Returns daily max/min temperature, precipitation, and max wind for
-    past_days back and 7 days ahead — enough to flag anomalies in a briefing.
+    Returns daily max/min temperature, precipitation, max wind speed, and
+    dominant wind direction (degrees, meteorological: 0=N, 90=E — the
+    direction wind comes FROM) for past_days back and 7 days ahead. Wind
+    direction matters for smoke, ash, and plume dispersal questions.
     """
     data = _get_json(
         "https://api.open-meteo.com/v1/forecast",
         params={
             "latitude": lat,
             "longitude": lon,
-            "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max",
+            "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,"
+                     "wind_speed_10m_max,wind_direction_10m_dominant",
             "past_days": past_days,
             "forecast_days": 7,
             "timezone": "auto",

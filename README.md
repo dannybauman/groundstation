@@ -99,7 +99,7 @@ Three layers of checks, because a generative product without evals is a demo, no
 
 ## More
 
-- `docs/examples.md` — the field test: all ten example prompts actually run through the agent, graded, with the improvements the run produced
+- `docs/examples.md` — the field test: twenty example prompts actually run through the agent, graded, with the improvements each round produced; visual walkthrough at `/docs/field-test.html` when the console is running
 - `docs/architecture.md` — how it all fits together, design decisions, and what's deliberately not built
 - Deep exploration hands off to [stac-map](https://github.com/developmentseed/stac-map) (Pete Gadomski), which renders COGs client-side via [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster) (Kyle Barron); tiling and pixel math ride [TiTiler](https://github.com/developmentseed/titiler)
 - A Development Seed labs prototype, July 2026
