@@ -54,10 +54,13 @@ First `search_datasets` call in a session takes ~20-30s while collection lists c
 The `briefing/` layer inverts the interaction: instead of you asking Earth the right question, Earth tells you what you need to know.
 
 ```bash
-uv run briefing/brief.py --place "Chelan County, Washington" --days 10
+uv run briefing/brief.py --place "Chelan County, Washington" --days 10   # one AOI
+uv run briefing/brief.py --fleet briefing/fleet.json                     # morning sweep
 ```
 
-Gathers active events, weather, and fresh imagery for the AOI, has Claude synthesize a decision-ready brief (TL;DR + alert level, what changed, weather signal, fresh scenes, next steps), and writes a shareable HTML page with a live interactive map. Direct follow-through on team-week#155 ("Thinking Outside the Chat Box").
+Gathers active events, weather, and fresh imagery for the AOI, computes an NDVI change signal against a same-tile baseline from ~a month back, has Claude synthesize a decision-ready brief (TL;DR + CALM/WATCH/ACT alert level, what changed, weather signal, fresh scenes, next steps), and writes a shareable HTML page with a live interactive map. Direct follow-through on team-week#155 ("Thinking Outside the Chat Box").
+
+Fleet mode runs a list of AOIs and writes a morning-sweep index page, sorted ACT → WATCH → CALM, one card per place. That's the ambient story: every area you care about, triaged before you sit down.
 
 ### MCP server vs brief script — which one when
 

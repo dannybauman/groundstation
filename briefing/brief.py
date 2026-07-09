@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -43,6 +44,8 @@ Which new satellite scenes arrived, their dates and cloud cover, and what to loo
 
 Rules: be specific, cite dates, no filler, no speculation beyond the data. If data sections have
 errors or are empty, work with what's there and note the gap in one clause, not a paragraph.
+If an "ndvi_change" block is present, weave the vegetation delta (with both dates) into TL;DR and
+What changed — a real change signal outranks scene bookkeeping.
 
 DATA:
 """
@@ -133,7 +136,40 @@ def synthesize(data: dict) -> str:
     return "\n".join(lines)
 
 
-def build_brief(place: str, days: int, out_dir: Path) -> Path:
+def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
+    """NDVI delta between the newest scene and a same-tile baseline ~1 month back."""
+    tile = best["id"].split("_")[1] if "_" in best["id"] else None
+    if not tile:
+        return None
+    end = today - dt.timedelta(days=days + 1)
+    start = today - dt.timedelta(days=days + 45)
+    baseline = tools.search_imagery(
+        "earth-search",
+        [best["collection"]],
+        bbox=best["bbox"],
+        datetime_range=f"{start.isoformat()}T00:00:00Z/{end.isoformat()}T23:59:59Z",
+        max_cloud_cover=30,
+        limit=20,
+    )
+    candidates = [i for i in baseline.get("items", []) if f"_{tile}_" in i["id"]]
+    if not candidates:
+        return None
+    ref = min(candidates, key=lambda i: i.get("cloud_cover") or 100)
+    expr = "(nir-red)/(nir+red)"
+    now_s = tools.compute_statistics("earth-search", best["collection"], best["id"], expression=expr)
+    ref_s = tools.compute_statistics("earth-search", ref["collection"], ref["id"], expression=expr)
+    now_mean = next(iter(now_s.values()))["mean"]
+    ref_mean = next(iter(ref_s.values()))["mean"]
+    return {
+        "metric": "NDVI (vegetation) over MGRS tile " + tile,
+        "current": {"scene": best["id"], "date": best["datetime"][:10], "mean": round(now_mean, 3)},
+        "baseline": {"scene": ref["id"], "date": ref["datetime"][:10], "mean": round(ref_mean, 3)},
+        "delta": round(now_mean - ref_mean, 3),
+        "delta_pct": round((now_mean - ref_mean) / abs(ref_mean) * 100, 1) if ref_mean else None,
+    }
+
+
+def build_brief(place: str, days: int, out_dir: Path) -> dict:
     today = dt.date.today()
     print(f"[1/5] geocoding {place!r}...")
     g = tools.geocode(place)
@@ -163,6 +199,14 @@ def build_brief(place: str, days: int, out_dir: Path) -> Path:
         key=lambda i: (i.get("cloud_cover") or 100),
         default=None,
     )
+
+    change = None
+    if best:
+        print("[3.5/5] computing NDVI change vs baseline...")
+        try:
+            change = ndvi_change(best, today, days)
+        except Exception as e:
+            print(f"change detection skipped: {e}", file=sys.stderr)
 
     print("[4/5] rendering map + preview...")
     fc = {"type": "FeatureCollection", "features": []}
@@ -227,6 +271,8 @@ def build_brief(place: str, days: int, out_dir: Path) -> Path:
         "weather": weather,
         "imagery": {"count": imagery.get("count"), "items": imagery.get("items", [])[:8]},
     }
+    if change:
+        data["ndvi_change"] = change
     md = synthesize(data)
 
     html = (
@@ -241,13 +287,86 @@ def build_brief(place: str, days: int, out_dir: Path) -> Path:
     brief_path.write_text(html, encoding="utf-8")
     (out_dir / f"brief-{slug}-{today.isoformat()}.md").write_text(md, encoding="utf-8")
     print(f"brief: {brief_path}\nmap:   {map_path}")
-    return brief_path
+    alert_m = re.search(r"\b(CALM|WATCH|ACT)\b", md)
+    tldr_m = re.search(r"## TL;DR\s*\n(.+?)(?=\n## |\Z)", md, re.S)
+    return {
+        "place": place,
+        "alert": alert_m.group(1) if alert_m else "CALM",
+        "tldr": (tldr_m.group(1).strip() if tldr_m else "")[:400],
+        "brief": brief_path.name,
+        "map": map_path.name,
+    }
+
+
+ALERT_COLORS = {"ACT": "#c0392b", "WATCH": "#e67e22", "CALM": "#2e7d32"}
+
+INDEX = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Earth briefs: __DATE__</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { margin: 0; font: 16px/1.55 system-ui, sans-serif; color: #1c2430; background: #f4f5f2; }
+  header { background: #10222e; color: #fff; padding: 28px 24px; }
+  header h1 { margin: 0 0 4px; font-size: 24px; }
+  header p { margin: 0; opacity: .75; font-size: 14px; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px; }
+  .card { background: #fff; border-radius: 12px; padding: 18px 22px; margin: 14px 0;
+          box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .badge { display: inline-block; color: #fff; font-size: 12px; font-weight: 600;
+           padding: 3px 10px; border-radius: 999px; margin-left: 8px; vertical-align: 2px; }
+  .card h2 { margin: 0 0 6px; font-size: 18px; }
+  .card p { margin: 6px 0 10px; color: #333; }
+  a.button { display: inline-block; background: #10222e; color: #fff; text-decoration: none;
+             padding: 8px 14px; border-radius: 8px; font-size: 13px; margin-right: 8px; }
+  footer { text-align: center; color: #777; font-size: 12px; padding: 16px; }
+</style></head><body>
+<header><h1>&#127758; Morning sweep</h1><p>__DATE__ &middot; __N__ areas of interest &middot; generated unprompted by groundstation</p></header>
+<main>__CARDS__</main>
+<footer>groundstation &middot; Development Seed labs prototype</footer>
+</body></html>
+"""
+
+
+def build_fleet(config_path: Path, out_dir: Path) -> Path:
+    aois = json.loads(config_path.read_text(encoding="utf-8"))
+    results = []
+    for aoi in aois:
+        print(f"\n=== {aoi['place']} ===")
+        try:
+            results.append(build_brief(aoi["place"], aoi.get("days", 7), out_dir))
+        except SystemExit as e:
+            print(f"skipped {aoi['place']}: {e}", file=sys.stderr)
+    order = {"ACT": 0, "WATCH": 1, "CALM": 2}
+    results.sort(key=lambda r: order.get(r["alert"], 3))
+    cards = "".join(
+        f'<div class="card"><h2>{r["place"]}'
+        f'<span class="badge" style="background:{ALERT_COLORS.get(r["alert"], "#777")}">{r["alert"]}</span></h2>'
+        f'<p>{r["tldr"].replace("**", "")}</p>'
+        f'<a class="button" href="{r["brief"]}">Full brief</a>'
+        f'<a class="button" href="{r["map"]}">Map</a></div>'
+        for r in results
+    )
+    today = dt.date.today()
+    html = (
+        INDEX.replace("__DATE__", today.strftime("%A, %B %d, %Y"))
+        .replace("__N__", str(len(results)))
+        .replace("__CARDS__", cards)
+    )
+    index_path = out_dir / f"morning-sweep-{today.isoformat()}.html"
+    index_path.write_text(html, encoding="utf-8")
+    print(f"\nindex: {index_path}")
+    return index_path
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--place", required=True)
+    ap.add_argument("--place", help="single AOI")
+    ap.add_argument("--fleet", help="path to JSON list of AOIs: [{place, days?}, ...]")
     ap.add_argument("--days", type=int, default=7, help="imagery lookback window")
     ap.add_argument("--out", default="demo", help="output directory")
     args = ap.parse_args()
-    build_brief(args.place, args.days, Path(args.out))
+    if not args.place and not args.fleet:
+        ap.error("provide --place or --fleet")
+    if args.fleet:
+        build_fleet(Path(args.fleet), Path(args.out))
+    else:
+        build_brief(args.place, args.days, Path(args.out))
