@@ -57,7 +57,16 @@ The `briefing/` layer inverts the interaction: instead of you asking Earth the r
 uv run briefing/brief.py --place "Chelan County, Washington" --days 10
 ```
 
-Gathers active events, weather, and fresh imagery for the AOI, has Claude synthesize a decision-ready brief (TL;DR + alert level, what changed, weather signal, fresh scenes, next steps), and writes a shareable HTML page with a live interactive map. Cron it for real dailies. Direct follow-through on team-week#155 ("Thinking Outside the Chat Box").
+Gathers active events, weather, and fresh imagery for the AOI, has Claude synthesize a decision-ready brief (TL;DR + alert level, what changed, weather signal, fresh scenes, next steps), and writes a shareable HTML page with a live interactive map. Direct follow-through on team-week#155 ("Thinking Outside the Chat Box").
+
+### MCP server vs brief script — which one when
+
+Two doors into the same tool functions:
+
+- **MCP server** (`claude mcp add ...`): the conversational door. You ask, an agent answers with tools — including brief-style questions ("brief me on Efate"). Interactive, exploratory, great for watching the agent think. You never run anything by hand.
+- **`brief.py`**: the unprompted door. Nobody asks — the script runs on a schedule (cron, CI, a Slack webhook) and Earth reports in with a polished standalone HTML page. This is the point of #155: the value is that it arrives without a conversation.
+
+Rule of thumb: demos and day-to-day use go through the MCP server. `brief.py` exists so briefings can happen while no one is watching.
 
 ## Evals
 
