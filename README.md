@@ -34,6 +34,21 @@ claude mcp add groundstation -- uv --directory /path/to/groundstation run ground
 
 The paired skill in `skills/earth-data/` carries the judgment layer (which catalog for what, asset conventions, rescale defaults, comparison workflows). Drop it into `~/.claude/skills/` or a project `.claude/skills/`.
 
+## Things to ask it
+
+- "Find the clearest Sentinel-2 scene of Lake Chelan from the past two weeks, tell me what's burning nearby, and give me a map I can share."
+- "Compare NDVI east of the Cascades near Wenatchee between now and the same window last July. Same collection, low cloud. Map both dates so I can toggle."
+- "Optical is useless over the Barotse Floodplain in the wet season. Find recent Sentinel-1 radar scenes there instead and map one — check the collection's assets for the right rescale."
+- "How much surface water is on the Barotse Floodplain right now vs early March? Use NDWI on Sentinel-2, give me the numbers and a two-layer map."
+- "What does NASA VEDA have on the Caldor fire? Put the burn severity layer on a map over a current Sentinel-2 scene of the Eldorado National Forest."
+- "Show the newest NAIP aerial imagery of Des Plaines, Illinois with ESA WorldCover land cover from Planetary Computer as a toggleable layer on top."
+- "Any active flood alerts along the Rio Grande between El Paso and Laredo? Show me alerts, week-ahead rain, and the latest usable imagery on one map."
+- "For the Yirgacheffe coffee region in Ethiopia, compare vegetation between January and this month with NDVI stats, and tell me which scenes you'd trust given cloud cover."
+- "Brief me on Efate, Vanuatu: any open storm or disaster alerts, the week ahead in weather, and the most recent cloud-free Sentinel-2, all on a map."
+- "Show the Ashburn, Virginia data center corridor: newest NAIP at full resolution plus a Sentinel-2 from this month as toggle layers, and give me the NDVI stats for the corridor."
+
+First `search_datasets` call in a session takes ~20-30s while collection lists cache; everything after is instant.
+
 ## Earth briefs you
 
 The `briefing/` layer inverts the interaction: instead of you asking Earth the right question, Earth tells you what you need to know.
