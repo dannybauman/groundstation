@@ -315,7 +315,7 @@ footer#credit { position: absolute; left: 12px; bottom: 4px; z-index: 5; font: 4
 
 <script>
 const $ = id => document.getElementById(id);
-const state = { g: null, scenes: [], activeScene: null, layers: {} };
+const state = { g: null, scenes: [], activeScene: null, ndviCache: {} };
 
 const map = new maplibregl.Map({
   container: "map",
@@ -390,7 +390,7 @@ function hoverClear() {
 function clearLayers() {
   if (map.getLayer("scene")) { map.removeLayer("scene"); map.removeSource("scene"); }
   if (map.getLayer("events-pts")) { map.removeLayer("events-pts"); map.removeSource("events"); }
-  state.layers = {}; state.activeScene = null;
+  state.activeScene = null;
   $("chips").innerHTML = "";
 }
 
@@ -550,10 +550,10 @@ function showScene(i) { showItem(state.scenes[i], i); }
 function showItem(it, idx = null) {
   document.querySelectorAll(".scene").forEach(el => el.classList.remove("active"));
   if (idx !== null) $("sc"+idx)?.classList.add("active");
-  if (state.layers.scene) { map.removeLayer("scene"); map.removeSource("scene"); }
+  if (map.getLayer("scene")) { map.removeLayer("scene"); map.removeSource("scene"); }
   map.addSource("scene", { type: "raster", tiles: [it.tiles], tileSize: 256, bounds: it.bbox });
   map.addLayer({ id: "scene", type: "raster", source: "scene" }, map.getLayer("events-pts") ? "events-pts" : undefined);
-  state.layers.scene = true; state.activeScene = it;
+  state.activeScene = it;
   renderChips([["scene", `Sentinel-2 ${(it.datetime||"").slice(0,10)}`]]);
   ndviCard(it);
   $("stacmap-ext").href = "https://developmentseed.org/stac-map/?href=" + encodeURIComponent(it.self_url);
@@ -562,7 +562,7 @@ function showItem(it, idx = null) {
 async function ndviCard(it) {
   card("c-ndvi", "Vegetation · NDVI", loading(`computing on ${it.id.slice(0,20)}…`));
   try {
-    const s = await api(`/api/ndvi?collection=${it.collection}&item=${it.id}`);
+    const s = state.ndviCache[it.id] ?? (state.ndviCache[it.id] = await api(`/api/ndvi?collection=${it.collection}&item=${it.id}`));
     const b = Object.values(s)[0];
     gathered("ndvi", { scene_date: (it.datetime||"").slice(0,10), mean: +b.mean.toFixed(3), min: +b.min.toFixed(3), max: +b.max.toFixed(3) });
     card("c-ndvi", "Vegetation · NDVI", `<div class="stat-row" title="NDVI runs −1 to 1: above 0.6 dense vegetation, 0.2–0.5 moderate, below 0.1 bare ground, built-up, or water">
@@ -630,15 +630,15 @@ async function flyEvent(i) {
   }
 }
 
+const clearest = arr => arr.reduce((a, b) => (a.cloud_cover ?? 100) <= (b.cloud_cover ?? 100) ? a : b);
+
 async function sceneForPoint(lon, lat) {
   const covering = state.scenes.filter(it => { const [w,s,e,n] = it.bbox; return lon>=w && lon<=e && lat>=s && lat<=n; });
-  if (covering.length) return covering.reduce((a,b) => (a.cloud_cover??100) <= (b.cloud_cover??100) ? a : b);
+  if (covering.length) return clearest(covering);
   const d = 0.05;
   try {
-    const r = await api(`/api/scenes?w=${lon-d}&s=${lat-d}&e=${lon+d}&n=${lat+d}&days=14&max_cloud=60`);
-    const items = r.items || [];
-    if (!items.length) return null;
-    return items.reduce((a,b) => (a.cloud_cover??100) <= (b.cloud_cover??100) ? a : b);
+    const items = (await api(`/api/scenes?w=${lon-d}&s=${lat-d}&e=${lon+d}&n=${lat+d}&days=14&max_cloud=60`)).items || [];
+    return items.length ? clearest(items) : null;
   } catch { return null; }
 }
 

@@ -48,15 +48,11 @@ def api_revgeo(lat: float, lon: float):
 
 @app.get("/api/scenes")
 def api_scenes(w: float, s: float, e: float, n: float, days: int = 14, max_cloud: float = 40):
-    import datetime as dt
-
-    today = dt.date.today()
-    since = today - dt.timedelta(days=days)
     r = tools.search_imagery(
         "earth-search",
         ["sentinel-2-l2a"],
         bbox=[w, s, e, n],
-        datetime_range=f"{since.isoformat()}T00:00:00Z/{today.isoformat()}T23:59:59Z",
+        datetime_range=tools.last_days_window(days),
         max_cloud_cover=max_cloud,
         limit=12,
     )
@@ -67,8 +63,7 @@ def api_scenes(w: float, s: float, e: float, n: float, days: int = 14, max_cloud
 
 @app.get("/api/events")
 def api_events(w: float, s: float, e: float, n: float, days: int = 30):
-    pad = 0.4
-    return tools.active_events(bbox=[w - pad, s - pad, e + pad, n + pad], days=days)
+    return tools.active_events(bbox=[w, s, e, n], days=days, pad=0.4)
 
 
 @app.get("/api/weather")
@@ -88,7 +83,6 @@ def api_compare(place: str, w: float, s: float, e: float, n: float):
 
 @app.get("/api/artifacts")
 def api_artifacts():
-    DEMO.mkdir(exist_ok=True)
     files = sorted(DEMO.glob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True)
     return [
         {"name": p.name, "mtime": int(p.stat().st_mtime), "kind": "brief" if p.name.startswith("brief-") and "map" not in p.name else ("sweep" if p.name.startswith("morning") else "map")}
@@ -137,6 +131,10 @@ def _run_job(job_id: str, argv: list[str], input_text: str | None = None) -> Non
 
 
 def _start_job(argv: list[str], input_text: str | None = None) -> str:
+    # keep memory bounded: drop the oldest finished jobs beyond the newest 20
+    done = [k for k, j in JOBS.items() if j["status"] != "running"]
+    for k in done[:-20] if len(done) > 20 else []:
+        JOBS.pop(k, None)
     job_id = uuid.uuid4().hex[:12]
     JOBS[job_id] = {"status": "running", "log": []}
     threading.Thread(target=_run_job, args=(job_id, argv, input_text), daemon=True).start()

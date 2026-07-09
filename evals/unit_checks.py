@@ -98,6 +98,30 @@ def t_render_map_compare_override():
         assert "const COMPARE = true" in html
 
 
+def t_pick_best_scene_prefers_coverage():
+    items = [
+        {"id": "full", "bbox": [0, 0, 1, 1], "cloud_cover": 5.0},
+        {"id": "sliver", "bbox": [0, 0, 0.02, 0.02], "cloud_cover": 0.0},
+    ]
+    assert tools.pick_best_scene(items, [0, 0, 1, 1])["id"] == "full"
+    assert tools.pick_best_scene([], [0, 0, 1, 1]) is None
+
+
+def t_expression_defaults_rescale():
+    t = tools.tile_url_template("earth-search", "sentinel-2-l2a", "X", expression="(nir-red)/(nir+red)")
+    assert "rescale=-1%2C1" in t
+
+
+def t_slugify():
+    assert tools.slugify("Chelan County, Washington") == "chelan-county--washington"
+    assert tools.slugify("A" * 100, max_len=10) == "aaaaaaaaaa"
+
+
+def t_last_days_window():
+    w = tools.last_days_window(14)
+    assert w.count("/") == 1 and w.endswith("T23:59:59Z")
+
+
 def t_md_to_html():
     html = brief.md_to_html("## TL;DR\nAll calm.\n- item one\n- item two\nDone.")
     assert "<h2>TL;DR</h2>" in html and html.count("<li>") == 2 and "<ul>" in html and "</ul>" in html

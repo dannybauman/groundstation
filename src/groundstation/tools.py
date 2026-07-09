@@ -43,6 +43,50 @@ CATALOGS: dict[str, dict[str, str]] = {
 
 _client = httpx.Client(timeout=30, headers=UA, follow_redirects=True)
 _collections_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_gazet_skip_until = 0.0
+
+
+def slugify(text: str, max_len: int = 60) -> str:
+    return "".join(ch if ch.isalnum() else "-" for ch in text.lower())[:max_len].strip("-")
+
+
+def _resolve_bbox(place: str | None, bbox: list[float] | None) -> list[float] | dict[str, Any]:
+    if bbox is None and place:
+        g = geocode(place)
+        if "error" in g:
+            return g
+        bbox = g["bbox"]
+    if bbox is None:
+        return {"error": "Provide bbox or place"}
+    return bbox
+
+
+def last_days_window(days: int, end_days_ago: int = 0) -> str:
+    """RFC3339 range covering the last `days` days, ending `end_days_ago` days ago."""
+    import datetime as dt
+
+    end = dt.date.today() - dt.timedelta(days=end_days_ago)
+    start = end - dt.timedelta(days=days)
+    return f"{start.isoformat()}T00:00:00Z/{end.isoformat()}T23:59:59Z"
+
+
+def pick_best_scene(items: list[dict[str, Any]], aoi_bbox: list[float]) -> dict[str, Any] | None:
+    """Best scene = covers the AOI, then low cloud — a clear sliver must not win."""
+    if not items:
+        return None
+    return max(items, key=lambda i: _coverage(i, aoi_bbox) - (i.get("cloud_cover") or 100) / 200)
+
+
+def _coverage(item: dict[str, Any], aoi_bbox: list[float]) -> float:
+    w, s, e, n = aoi_bbox
+    iw, is_, ie, in_ = item["bbox"]
+    ov = max(0, min(e, ie) - max(w, iw)) * max(0, min(n, in_) - max(s, is_))
+    return ov / max((e - w) * (n - s), 1e-9)
+
+
+def _mgrs_tile(item_id: str) -> str:
+    parts = item_id.split("_")
+    return parts[1] if len(parts) > 1 else item_id
 
 
 def _get_json(url: str, **kwargs: Any) -> Any:
@@ -63,9 +107,18 @@ def geocode(query: str) -> dict[str, Any]:
     """
     # gazet.ds.io currently fronts the Streamlit demo, not the FastAPI /search;
     # this branch activates as soon as a JSON endpoint is exposed (or set GAZET_URL).
+    # Once it answers non-JSON we stop asking for a while — geocode is a hot path.
+    global _gazet_skip_until
     gazet = os.environ.get("GAZET_URL", "https://gazet.ds.io/search")
     try:
-        data = _get_json(gazet, params={"q": query})
+        if time.time() < _gazet_skip_until:
+            raise ValueError("gazet marked down")
+        r = _client.get(gazet, params={"q": query})
+        r.raise_for_status()
+        if "json" not in r.headers.get("content-type", ""):
+            _gazet_skip_until = time.time() + 900
+            raise ValueError("gazet returned non-JSON")
+        data = r.json()
         feats = data.get("features") or []
         if feats:
             f = feats[0]
@@ -153,7 +206,8 @@ def _collections(catalog: str) -> list[dict[str, Any]]:
         return cached[1]
     base = CATALOGS[catalog]["stac"]
     out: list[dict[str, Any]] = []
-    url: str | None = f"{base}/collections"
+    # limit=500 collapses VEDA's default 10-per-page pagination (25 GETs) to one
+    url: str | None = f"{base}/collections?limit=500"
     while url and len(out) < 1000:
         data = _get_json(url)
         out.extend(data.get("collections", []))
@@ -187,27 +241,26 @@ def search_datasets(keywords: str, catalog: str | None = None) -> list[dict[str,
                     " ".join(c.get("keywords") or []),
                 ]
             ).lower()
-            score = sum(t in hay for t in terms)
-            if score == len(terms):
+            if all(t in hay for t in terms):
                 hits.append(
                     {
                         "catalog": cat,
                         "id": c.get("id"),
                         "title": c.get("title"),
                         "summary": (c.get("description") or "")[:240],
-                        "_score": score,
                     }
                 )
-    hits.sort(key=lambda h: -h.get("_score", 0))
-    for h in hits:
-        h.pop("_score", None)
     return hits[:20]
 
 
 def describe_collection(catalog: str, collection_id: str) -> dict[str, Any]:
     """Get a collection's description, extent, and asset/band layout."""
-    base = CATALOGS[catalog]["stac"]
-    c = _get_json(f"{base}/collections/{collection_id}")
+    cached = _collections_cache.get(catalog)
+    c = None
+    if cached and time.time() - cached[0] < 3600:
+        c = next((col for col in cached[1] if col.get("id") == collection_id), None)
+    if c is None:
+        c = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}")
     item_assets = c.get("item_assets") or {}
     return {
         "catalog": catalog,
@@ -258,13 +311,9 @@ def search_imagery(
     Returns compact items sorted newest first; feed self_url/ids into
     preview_item, compute_statistics, or render_map.
     """
-    if bbox is None and place:
-        g = geocode(place)
-        if "error" in g:
-            return g
-        bbox = g["bbox"]
-    if bbox is None:
-        return {"error": "Provide bbox or place"}
+    bbox = _resolve_bbox(place, bbox)
+    if isinstance(bbox, dict):
+        return bbox
     body: dict[str, Any] = {
         "collections": collections,
         "bbox": bbox,
@@ -328,7 +377,8 @@ def preview_item(
     data API. Optional rescale like "0,3000" for non-visual assets.
     """
     assets = assets or _default_assets(collection_id)
-    if catalog == "planetary-computer":
+    backend = CATALOGS[catalog]["raster"]
+    if backend == "pc":
         item = _get_json(
             f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
         )
@@ -336,12 +386,12 @@ def preview_item(
         if rp:
             return {"preview_url": rp, "backend": "pc-data-api"}
         return {"error": "No rendered_preview asset on this Planetary Computer item"}
-    if catalog == "veda":
+    if backend == "veda":
         params = [("assets", a) for a in assets or ["cog_default"]]
         if rescale:
             params.append(("rescale", rescale))
         params.append(("max_size", str(max_size)))
-        q = "&".join(f"{k}={v}" for k, v in params)
+        q = str(httpx.QueryParams(params))
         return {
             "preview_url": f"https://openveda.cloud/api/raster/collections/{collection_id}/items/{item_id}/preview.png?{q}",
             "backend": "veda-raster-api",
@@ -370,22 +420,20 @@ def compute_statistics(
     NDVI on Sentinel-2 (Earth Search asset names). Optionally clip to an AOI
     GeoJSON Feature. Backed by TiTiler /stac/statistics.
     """
-    if catalog == "planetary-computer":
+    backend = CATALOGS[catalog]["raster"]
+    if backend == "pc":
         return {"error": "statistics not wired for planetary-computer yet; use earth-search or veda"}
-    self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
-    params: list[tuple[str, str]] = [("url", self_url), ("max_size", "512")]
+    params: list[tuple[str, str]] = [("max_size", "512")]
     if expression:
         expression, assets = _expression_to_bands(expression, assets)
         params.append(("expression", expression))
     for a in assets or _default_assets(collection_id) or ["visual"]:
         params.append(("assets", a))
-    base = (
-        f"https://openveda.cloud/api/raster/collections/{collection_id}/items/{item_id}/statistics"
-        if catalog == "veda"
-        else f"{TITILER}/stac/statistics"
-    )
-    if catalog == "veda":
-        params = [p for p in params if p[0] != "url"]
+    if backend == "veda":
+        base = f"https://openveda.cloud/api/raster/collections/{collection_id}/items/{item_id}/statistics"
+    else:
+        base = f"{TITILER}/stac/statistics"
+        params.append(("url", f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"))
     if aoi_geojson:
         r = _client.post(base, params=params, json=aoi_geojson, timeout=60)
     else:
@@ -417,12 +465,16 @@ def tile_url_template(
     """XYZ tile URL template ({z}/{x}/{y}) for a STAC item, for web maps.
 
     For index layers (NDVI etc.) pass expression over asset names, e.g.
-    "(nir-red)/(nir+red)" with rescale="-1,1" and colormap_name="rdylgn" —
-    supported on earth-search; ignored for veda/planetary-computer.
+    "(nir-red)/(nir+red)" with colormap_name="rdylgn" — supported on
+    earth-search; ignored for veda/planetary-computer. Index expressions
+    default to rescale="-1,1" (without a rescale they render blank).
     """
     # with an expression, assets must be the expression's bands, never defaults
     assets = assets or ([] if expression else _default_assets(collection_id))
-    if catalog == "planetary-computer":
+    if expression and not rescale:
+        rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
+    backend = CATALOGS[catalog]["raster"]
+    if backend == "pc":
         params = [("collection", collection_id), ("item", item_id)] + [
             ("assets", a) for a in assets
         ]
@@ -433,7 +485,7 @@ def tile_url_template(
             "https://planetarycomputer.microsoft.com/api/data/v1/item/tiles/"
             "WebMercatorQuad/{z}/{x}/{y}@1x.png?" + q
         )
-    if catalog == "veda":
+    if backend == "veda":
         params = [("assets", a) for a in assets or ["cog_default"]]
         if rescale:
             params.append(("rescale", rescale))
@@ -598,7 +650,9 @@ def render_map(
     layers is a list of:
       {"type": "item", "name": ..., "catalog": ..., "collection_id": ...,
        "item_id": ..., "assets": [...], "rescale": "0,3000", "colormap_name": ...,
-       "expression": "(nir-red)/(nir+red)"}  # expression for index layers
+       "expression": "(nir-red)/(nir+red)",  # expression for index layers
+       "bbox": [w, s, e, n]}  # pass the item's bbox when you have it (from
+                              # search results) — it skips a STAC re-fetch
       {"type": "raster", "name": ..., "tiles": "https://..{z}/{x}/{y}.."}
       {"type": "geojson", "name": ..., "data": <FeatureCollection>, "color": "#hex"}
     Item layers resolve to the right tiling backend automatically. The HTML
@@ -661,7 +715,7 @@ def render_map(
         .replace("__COMPARE__", json.dumps(compare))
     )
     if out_path is None:
-        safe = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in title.lower())[:60]
+        safe = slugify(title)
         out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = str(out_dir / f"map-{safe}.html")
@@ -687,23 +741,11 @@ def compare_dates(
     lowest cloud), computes the expression's stats for both dates, and writes a
     side-by-side swipe map. Returns scenes, means, delta, and map_path.
     """
-    import datetime as dt
-
-    if bbox is None and place:
-        g = geocode(place)
-        if "error" in g:
-            return g
-        bbox = g["bbox"]
-    if bbox is None:
-        return {"error": "Provide bbox or place"}
-    today = dt.date.today()
-    if not window_after:
-        window_after = f"{(today - dt.timedelta(days=14)).isoformat()}T00:00:00Z/{today.isoformat()}T23:59:59Z"
-    if not window_before:
-        window_before = (
-            f"{(today - dt.timedelta(days=55)).isoformat()}T00:00:00Z/"
-            f"{(today - dt.timedelta(days=25)).isoformat()}T23:59:59Z"
-        )
+    bbox = _resolve_bbox(place, bbox)
+    if isinstance(bbox, dict):
+        return bbox
+    window_after = window_after or last_days_window(14)
+    window_before = window_before or last_days_window(30, end_days_ago=25)
 
     def _search(window: str) -> list[dict[str, Any]]:
         r = search_imagery(
@@ -716,23 +758,20 @@ def compare_dates(
     if not after_items or not before_items:
         return {"error": f"Not enough scenes: {len(after_items)} after, {len(before_items)} before. Widen windows or cloud limit."}
 
-    def _tile(it: dict[str, Any]) -> str:
-        parts = it["id"].split("_")
-        return parts[1] if len(parts) > 1 else it["id"]
-
-    def _coverage(it: dict[str, Any]) -> float:
-        w, s, e, n = bbox
-        iw, is_, ie, in_ = it["bbox"]
-        ov = max(0, min(e, ie) - max(w, iw)) * max(0, min(n, in_) - max(s, is_))
-        return ov / max((e - w) * (n - s), 1e-9)
-
-    shared = {_tile(i) for i in after_items} & {_tile(i) for i in before_items}
+    shared = {_mgrs_tile(i["id"]) for i in after_items} & {_mgrs_tile(i["id"]) for i in before_items}
     if not shared:
         return {"error": "No shared Sentinel-2 tile between the two windows — try wider windows."}
-    best_tile = max(shared, key=lambda t: max(_coverage(i) for i in after_items if _tile(i) == t))
-    pick = lambda items: min(  # noqa: E731
-        (i for i in items if _tile(i) == best_tile), key=lambda i: i.get("cloud_cover") or 100
+    best_tile = max(
+        shared,
+        key=lambda t: max(_coverage(i, bbox) for i in after_items if _mgrs_tile(i["id"]) == t),
     )
+
+    def pick(items: list[dict[str, Any]]) -> dict[str, Any]:
+        return min(
+            (i for i in items if _mgrs_tile(i["id"]) == best_tile),
+            key=lambda i: i.get("cloud_cover") or 100,
+        )
+
     a, b = pick(after_items), pick(before_items)
 
     def _mean(it: dict[str, Any]) -> float | None:
@@ -743,11 +782,13 @@ def compare_dates(
             return None
 
     mean_after, mean_before = _mean(a), _mean(b)
-    layer = lambda it, name: {  # noqa: E731
-        "type": "item", "name": name, "catalog": "earth-search",
-        "collection_id": it["collection"], "item_id": it["id"],
-        "expression": expression, "rescale": "-1,1", "colormap_name": "rdylgn",
-    }
+
+    def layer(it: dict[str, Any], name: str) -> dict[str, Any]:
+        return {
+            "type": "item", "name": name, "catalog": "earth-search",
+            "collection_id": it["collection"], "item_id": it["id"], "bbox": it["bbox"],
+            "expression": expression, "rescale": "-1,1", "colormap_name": "rdylgn",
+        }
     m = render_map(
         title=f"{label or place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}",
         subtitle=f"{expression} · drag the divider · tile {best_tile}",
@@ -769,13 +810,16 @@ def compare_dates(
 # ---------------------------------------------------------------- monitoring
 
 
-def active_events(bbox: list[float] | None = None, days: int = 30) -> dict[str, Any]:
+def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 0.0) -> dict[str, Any]:
     """Current natural events and disaster alerts, optionally filtered to a bbox.
 
     Combines NASA EONET (wildfires, storms, volcanoes, floods...) and GDACS
-    global disaster alerts. bbox is [w, s, e, n]. Returns compact event lists
+    global disaster alerts. bbox is [w, s, e, n]; pad widens it by that many
+    degrees on every side (nearby events matter). Returns compact event lists
     with coordinates suitable for mapping.
     """
+    if bbox and pad:
+        bbox = [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad]
     out: dict[str, Any] = {"eonet": [], "gdacs": []}
     try:
         params: dict[str, Any] = {"days": days, "status": "open"}

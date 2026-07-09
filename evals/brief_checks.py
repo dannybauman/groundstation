@@ -45,8 +45,10 @@ def check_brief(md_path: Path, data_path: Path) -> list[str]:
 
     # grounding: NDVI numbers cited must match the data (if a change block exists)
     ch = data.get("ndvi_change")
-    if ch and str(ch["current"]["mean"])[:4].rstrip("0.") and f"{ch['current']['mean']:.2f}"[:4] not in md and str(ch["current"]["mean"]) not in md:
-        problems.append(f"ndvi_change present ({ch['current']['mean']}) but not cited")
+    if ch:
+        m = ch["current"]["mean"]
+        if abs(m) >= 0.005 and f"{m:.2f}" not in md and str(m) not in md:
+            problems.append(f"ndvi_change present ({m}) but not cited")
 
     return problems
 
@@ -54,7 +56,6 @@ def check_brief(md_path: Path, data_path: Path) -> list[str]:
 def main(demo_dir: Path) -> int:
     pairs = []
     for md_path in sorted(demo_dir.glob("brief-*.md")):
-        data_path = md_path.with_suffix("").with_suffix("")  # strip .md
         data_path = md_path.parent / (md_path.stem + ".data.json")
         if data_path.exists():
             pairs.append((md_path, data_path))

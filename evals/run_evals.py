@@ -122,7 +122,8 @@ def t_pc():
 
 
 if __name__ == "__main__":
-    for fn in [t_geocode, t_datasets, t_search, t_preview, t_stats, t_map, t_events, t_weather, t_veda, t_pc]:
+    checks = [t_geocode, t_datasets, t_search, t_preview, t_stats, t_map, t_events, t_weather, t_veda, t_pc]
+    for fn in checks:
         fn()
-    print(f"\n{10 - len(FAILURES)}/10 passed")
+    print(f"\n{len(checks) - len(FAILURES)}/{len(checks)} passed")
     sys.exit(1 if FAILURES else 0)

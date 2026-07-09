@@ -129,9 +129,8 @@ def synthesize(data: dict) -> str:
     # Deterministic fallback so the pipeline never produces nothing
     ev = data["events"]
     lines = ["## TL;DR", f"Automated data summary for {data['place']} (no LLM synthesis available)."]
-    lines += ["## What changed"] + [
-        f"- {e['category']}: {e['title']} ({e.get('date','')})" for e in ev.get("eonet", [])[:8]
-    ] or ["- No open events."]
+    ev_lines = [f"- {e['category']}: {e['title']} ({e.get('date','')})" for e in ev.get("eonet", [])[:8]]
+    lines += ["## What changed"] + (ev_lines or ["- No open events."])
     lines += ["## Fresh eyes on the ground"] + [
         f"- {i['collection']} {i['datetime'][:10]} cloud {i.get('cloud_cover')}%"
         for i in data["imagery"].get("items", [])[:5]
@@ -141,20 +140,18 @@ def synthesize(data: dict) -> str:
 
 def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
     """NDVI delta between the newest scene and a same-tile baseline ~1 month back."""
-    tile = best["id"].split("_")[1] if "_" in best["id"] else None
-    if not tile:
+    tile = tools._mgrs_tile(best["id"])
+    if tile == best["id"]:
         return None
-    end = today - dt.timedelta(days=days + 1)
-    start = today - dt.timedelta(days=days + 45)
     baseline = tools.search_imagery(
         "earth-search",
         [best["collection"]],
         bbox=best["bbox"],
-        datetime_range=f"{start.isoformat()}T00:00:00Z/{end.isoformat()}T23:59:59Z",
+        datetime_range=tools.last_days_window(44, end_days_ago=days + 1),
         max_cloud_cover=30,
         limit=20,
     )
-    candidates = [i for i in baseline.get("items", []) if f"_{tile}_" in i["id"]]
+    candidates = [i for i in baseline.get("items", []) if tools._mgrs_tile(i["id"]) == tile]
     if not candidates:
         return None
     ref = min(candidates, key=lambda i: i.get("cloud_cover") or 100)
@@ -180,28 +177,23 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         raise SystemExit(g["error"])
     bbox = g["bbox"]
     pad = 0.4  # look slightly beyond the AOI for nearby events
-    ev_bbox = [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad]
+    ev_bbox = [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad]  # map extent
 
     print("[2/5] gathering events + weather...")
-    events = tools.active_events(bbox=ev_bbox, days=30)
+    events = tools.active_events(bbox=bbox, days=30, pad=pad)
     weather = tools.weather_summary(g["lat"], g["lon"], past_days=7)
 
     print("[3/5] searching fresh imagery...")
-    since = (today - dt.timedelta(days=days)).isoformat()
     imagery = tools.search_imagery(
         "earth-search",
         ["sentinel-2-l2a"],
         bbox=bbox,
-        datetime_range=f"{since}T00:00:00Z/{today.isoformat()}T23:59:59Z",
+        datetime_range=tools.last_days_window(days),
         max_cloud_cover=40,
         limit=8,
     )
 
-    best = min(
-        imagery.get("items", []),
-        key=lambda i: (i.get("cloud_cover") or 100),
-        default=None,
-    )
+    best = tools.pick_best_scene(imagery.get("items", []), bbox)
 
     change = None
     if best:
@@ -242,6 +234,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
                 "catalog": "earth-search",
                 "collection_id": best["collection"],
                 "item_id": best["id"],
+                "bbox": best["bbox"],
                 "assets": ["visual"],
             }
         )
@@ -254,13 +247,13 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         layers.append({"type": "geojson", "name": f"Active events ({len(fc['features'])})", "data": fc, "color": "#d63b3b"})
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = "".join(ch if ch.isalnum() else "-" for ch in place.lower())[:40].strip("-")
+    slug = tools.slugify(place, max_len=40)
     map_path = out_dir / f"brief-map-{slug}-{today.isoformat()}.html"
     tools.render_map(
         title=f"Earth brief: {place}",
         subtitle=f"{today.isoformat()} · latest imagery + active events",
         bbox=ev_bbox,
-        layers=layers or [{"type": "geojson", "name": "AOI", "data": fc, "color": "#d63b3b"}],
+        layers=layers,
         out_path=str(map_path),
     )
 
