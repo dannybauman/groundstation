@@ -10,6 +10,10 @@ dependencies = [
 
 [project.scripts]
 groundstation = "groundstation.server:main"
+groundstation-web = "groundstation.web:main"
+
+[dependency-groups]
+web = ["fastapi>=0.115", "uvicorn>=0.30"]
 
 [build-system]
 requires = ["hatchling"]
