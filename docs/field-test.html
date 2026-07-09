@@ -50,6 +50,12 @@ h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
 
 .repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
 .repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
+
+.fig { position: relative; display: block; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; }
+.fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
+  background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
+.fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
 footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 0 40px; }
 </style>
 </head>
@@ -78,51 +84,61 @@ footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var
 <div class="card"><div class="top"><div class="num">1</div><div class="tag">live events</div><div class="who">disaster response</div></div>
 <div><div class="label">Input</div><div class="prompt">Find the clearest Sentinel-2 scene of Lake Chelan from the past two weeks, tell me what's burning nearby, and give me a map I can share.</div></div>
 <div class="answer"><div class="label">Output</div>Found both active wildfires (<b>Navarre Coulee</b>, <b>Chelan Hills</b>), picked the <b>0.7% cloud July 5 scene</b> over a newer 20%-cloud one, and mapped the fires as markers on the imagery.</div>
+<a class="fig" href="/demo/map-lake-chelan---sentinel-2--2026-07-05--with-nearby-wildfires.html" target="_blank" title="open the live interactive map"><img src="img/ex1.jpg" alt="map produced by example 1" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">scene judgment + live event feeds in one answer</div></div>
 
 <div class="card"><div class="top"><div class="num">2</div><div class="tag">year over year</div><div class="who">forest health</div></div>
 <div><div class="label">Input</div><div class="prompt">Compare NDVI east of the Cascades near Wenatchee between now and the same window last July. Same collection, low cloud. Map both dates so I can toggle.</div></div>
 <div class="answer"><div class="label">Output</div>Same tile, both years near cloud-free: <b>0.626 vs 0.622 — "noise-level, not a real vegetation change."</b> No drought signal, no false alarm.</div>
+<a class="fig" href="/demo/map-wenatchee--wa---2026-07-05-vs-2025-06-30.html" target="_blank" title="open the live interactive map"><img src="img/ex2.jpg" alt="map produced by example 2" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">an honest null result is a result</div></div>
 
 <div class="card"><div class="top"><div class="num">3</div><div class="tag">radar</div><div class="who">wet-season monitoring</div></div>
 <div><div class="label">Input</div><div class="prompt">Optical is useless over the Barotse Floodplain in the wet season. Find recent Sentinel-1 radar scenes there instead and map one — check the collection's assets for the right rescale.</div></div>
 <div class="answer"><div class="label">Output</div>Chose Sentinel-1 VV, <b>ran statistics first and derived the stretch (30–380) from actual pixel percentiles</b> instead of guessing a dB rescale, and flagged that the floodplain sits on a swath seam.</div>
+<a class="fig" href="/demo/map-sentinel-1-sar---barotse-floodplain.html" target="_blank" title="open the live interactive map"><img src="img/ex3.jpg" alt="map produced by example 3" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="learning"><b>Learning →</b> the S1 digital-numbers recipe is now codified in the skill, so the next agent doesn't have to derive it.</div></div>
 
 <div class="card"><div class="top"><div class="num">4</div><div class="tag">water index</div><div class="who">hydrology</div></div>
 <div><div class="label">Input</div><div class="prompt">How much surface water is on the Barotse Floodplain right now vs early March? Use NDWI on Sentinel-2, give me the numbers and a two-layer map.</div></div>
 <div class="answer"><div class="label">Output</div>NDWI <b>−0.29 → −0.48, a 64% relative decline</b>, correctly read as the expected seasonal Zambezi drawdown — "not an anomaly" — with a swipe map.</div>
+<a class="fig" href="/demo/map-barotse-floodplain---2026-07-08-vs-2026-03-13.html" target="_blank" title="open the live interactive map"><img src="img/ex4.jpg" alt="map produced by example 4" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">index math + hydrological domain reading</div></div>
 
 <div class="card"><div class="top"><div class="num">5</div><div class="tag">nasa products</div><div class="who">post-fire recovery</div></div>
 <div><div class="label">Input</div><div class="prompt">What does NASA VEDA have on the Caldor fire? Put the burn severity layer on a map over a current Sentinel-2 scene of the Eldorado National Forest.</div></div>
 <div class="answer"><div class="label">Output</div>Found both VEDA Caldor products, read the categorical stats (<b>majority class 3, moderate severity</b>), and layered the 2021 severity raster over a current 0.1%-cloud scene — 2021 damage against present-day forest.</div>
+<a class="fig" href="/demo/map-caldor-fire-burn-severity---eldorado-national-forest.html" target="_blank" title="open the live interactive map"><img src="img/ex5.jpg" alt="map produced by example 5" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="learning"><b>Learning →</b> this map exposed that "two rasters → swipe" was wrong for overlays. Maps now swipe only for same-collection pairs; thematic overlays stack with opacity.</div></div>
 
 <div class="card"><div class="top"><div class="num">6</div><div class="tag">hi-res mosaic</div><div class="who">municipal GIS</div></div>
 <div><div class="label">Input</div><div class="prompt">Show the newest NAIP aerial imagery of Des Plaines, Illinois with ESA WorldCover land cover from Planetary Computer as a toggleable layer on top.</div></div>
 <div class="answer"><div class="label">Output</div>Mosaicked <b>7 NAIP tiles</b> (all from the same 2023-07-10 capture) plus <b>2 WorldCover tiles split at the 42°N seam</b>, cross-catalog, as toggleable layers.</div>
-<div class="shows">multi-tile mosaics across two catalogs</div></div>
+<a class="fig" href="/demo/map-des-plaines--il---naip-aerial-imagery-with-esa-worldcover-la.html" target="_blank" title="open the live interactive map"><img src="img/ex6.jpg" alt="map produced by example 6" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="learning"><b>Learning →</b> the NAIP layers rendered blank — earth-search NAIP is requester-pays, like Landsat. NAIP now routes to Planetary Computer.</div></div>
 
 <div class="card"><div class="top"><div class="num">7</div><div class="tag">flood watch</div><div class="who">emergency management</div></div>
 <div><div class="label">Input</div><div class="prompt">Any active flood alerts along the Rio Grande between El Paso and Laredo? Show me alerts, week-ahead rain, and the latest usable imagery on one map.</div></div>
 <div class="answer"><div class="label">Output</div>No active alerts — so it found the forward signal instead: <b>Del Rio and Eagle Pass tracking toward a 40–60mm rain event July 14–15</b>, "the stretch most likely to generate a flood watch if it verifies."</div>
+<a class="fig" href="/demo/map-rio-grande-flood-watch--el-paso-to-laredo.html" target="_blank" title="open the live interactive map"><img src="img/ex7.jpg" alt="map produced by example 7" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">synthesis across feeds, looking forward not just backward</div></div>
 
 <div class="card"><div class="top"><div class="num">8</div><div class="tag">data quality</div><div class="who">EUDR / supply chain</div></div>
 <div><div class="label">Input</div><div class="prompt">For the Yirgacheffe coffee region in Ethiopia, compare vegetation between January and this month with NDVI stats, and tell me which scenes you'd trust given cloud cover.</div></div>
 <div class="answer"><div class="label">Output</div>Recovered from a stadium-point geocode by widening to the growing zone, then refused to trust its own number: July's best scene is 53% cloud (Kiremt rains), so <b>"trust the direction, not the magnitude — or switch to Sentinel-1."</b></div>
+<a class="fig" href="/demo/map-aoi---2026-07-06-vs-2026-01-07.html" target="_blank" title="open the live interactive map"><img src="img/ex8.jpg" alt="map produced by example 8" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="learning"><b>Learning →</b> region-scale geocode sanity checks are now in the skill.</div></div>
 
 <div class="card"><div class="top"><div class="num">9</div><div class="tag">situational brief</div><div class="who">pacific islands</div></div>
 <div><div class="label">Input</div><div class="prompt">Brief me on Efate, Vanuatu: any open storm or disaster alerts, the week ahead in weather, and the most recent cloud-free Sentinel-2, all on a map.</div></div>
 <div class="answer"><div class="label">Output</div>One distant Green-level quake correctly dismissed, dry-season weather read, and <b>two adjacent tiles stitched to span the island</b> (June 1 beat a cloudier July 8 scene).</div>
+<a class="fig" href="/demo/map-efate--vanuatu---latest-cloud-free-imagery.html" target="_blank" title="open the live interactive map"><img src="img/ex9.jpg" alt="map produced by example 9" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">alert triage + multi-tile AOIs</div></div>
 
 <div class="card"><div class="top"><div class="num">10</div><div class="tag">urban analysis</div><div class="who">infrastructure</div></div>
 <div><div class="label">Input</div><div class="prompt">Show the Ashburn, Virginia data center corridor: newest NAIP at full resolution plus a Sentinel-2 from this month as toggle layers, and give me the NDVI stats for the corridor.</div></div>
 <div class="answer"><div class="label">Output</div>Newest <em>fully covering</em> NAIP (2021 — and it said so: "won't reflect the last ~5 years of construction") + current Sentinel-2; read NDVI's spread (<b>mean 0.38, std 0.30</b>) as "the signature of tree cover mixed with rooftops and pavement."</div>
+<a class="fig" href="/demo/map-ashburn--va-data-center-corridor.html" target="_blank" title="open the live interactive map"><img src="img/ex10.jpg" alt="map produced by example 10" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">distributions over averages; resolution tradeoffs named</div></div>
 
 </div>
@@ -133,51 +149,61 @@ footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var
 <div class="card"><div class="top"><div class="num">11</div><div class="tag">snow index</div><div class="who">water security</div></div>
 <div><div class="label">Input</div><div class="prompt">How much snow is left in the North Cascades compared to early May? Use NDSI (green-swir16)/(green+swir16) on Sentinel-2, give me the numbers and a swipe map.</div></div>
 <div class="answer"><div class="label">Output</div>Snow-covered <em>fraction</em> via the standard 0.4 threshold: <b>27.6% → 5.9% since early May, "a 4.7× drop"</b> — and explained May's lower valid-pixel share as terrain shadow from the low sun angle.</div>
+<a class="fig" href="/demo/map-north-cascades-snow-cover--early-may-vs-now--ndsi-.html" target="_blank" title="open the live interactive map"><img src="img/ex11.jpg" alt="map produced by example 11" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="learning"><b>Learning →</b> NDSI (with its threshold) and NBR joined the skill's index recipes.</div></div>
 
 <div class="card"><div class="top"><div class="num">12</div><div class="tag">global triage</div><div class="who">humanitarian response</div></div>
 <div><div class="label">Input</div><div class="prompt">What are the most severe disaster alerts anywhere in the world right now? Give me the top three by severity and map the worst one with recent imagery.</div></div>
 <div class="answer"><div class="label">Output</div>GDACS's only <b>Red alert: Super Typhoon Bavi</b>, mapped with a same-day Sentinel-2 pass <em>through the typhoon itself</em>; China floods and Iberian fires ranked next, a chronic drought sensibly demoted.</div>
+<a class="fig" href="/demo/map-super-typhoon-bavi--tropical-cyclone-bavi-26----gdacs-red-al.html" target="_blank" title="open the live interactive map"><img src="img/ex12.jpg" alt="map produced by example 12" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">worldwide triage with no AOI given</div></div>
 
 <div class="card"><div class="top"><div class="num">13</div><div class="tag">epistemics</div><div class="who">marine / coastal</div></div>
 <div><div class="label">Input</div><div class="prompt">Show me the Wadden Sea tidal flats: latest cloud-free Sentinel-2, compute NDWI, and tell me honestly what you can and cannot say about tide state from one scene.</div></div>
 <div class="answer"><div class="label">Output</div>What one scene proves: flats exposed at 11:06 UTC. What it can't: position in the tidal cycle — <b>"NDWI has no time derivative and no absolute datum"</b> — naming Rijkswaterstaat gauges as the missing reference.</div>
+<a class="fig" href="/demo/map-wadden-sea-tidal-flats---ndwi--2026-07-01.html" target="_blank" title="open the live interactive map"><img src="img/ex13.jpg" alt="map produced by example 13" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">the limits of the data, stated before anyone asks</div></div>
 
 <div class="card"><div class="top"><div class="num">14</div><div class="tag">decadal change</div><div class="who">urban / ports</div></div>
 <div><div class="label">Input</div><div class="prompt">Compare Jakarta's northern coastline between 2019 and now using Landsat — is there visible land change or new construction along the bay?</div></div>
 <div class="answer"><div class="label">Output</div>Hit <b>AccessDenied on earth-search's requester-pays Landsat bucket</b>, recovered by switching to Planetary Computer's copy, then spotted the <b>Tanjung Priok port expansion</b> projecting into the bay in the 2019-vs-2026 swipe.</div>
+<a class="fig" href="/demo/map-jakarta-northern-coastline--2019-vs-2026--landsat-.html" target="_blank" title="open the live interactive map"><img src="img/ex14.jpg" alt="map produced by example 14" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="learning"><b>Learning →</b> Landsat routing is now codified: earth-search Landsat won't tile, planetary-computer is the path.</div></div>
 
 <div class="card"><div class="top"><div class="num">15</div><div class="tag">verification</div><div class="who">EUDR / due diligence</div></div>
 <div><div class="label">Input</div><div class="prompt">A client claims the area around Ouarzazate, Morocco has greened significantly since 2022 due to agroforestry. Verify: compare vegetation then vs now and tell me if the greening is real.</div></div>
 <div class="answer"><div class="label">Output</div>+0.008 NDVI spread <em>uniformly across the whole distribution including bare rock</em>, 98th percentile flat: <b>"more consistent with interannual variability… the data don't support 'greened significantly'"</b> — with an offer to re-run on the exact plot.</div>
+<a class="fig" href="/demo/map-ouarzazate--morocco---ndvi-2022-vs-2026.html" target="_blank" title="open the live interactive map"><img src="img/ex15.jpg" alt="map produced by example 15" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">claim verification a due-diligence team could cite</div></div>
 
 <div class="card"><div class="top"><div class="num">16</div><div class="tag">null result</div><div class="who">aviation / ash</div></div>
 <div><div class="label">Input</div><div class="prompt">Is there any current volcanic activity in Iceland? If so, show the site on recent imagery and check whether the week's winds would push ash toward Reykjavik.</div></div>
 <div class="answer"><div class="label">Output</div>No eruption — and it <b>verified the feed wasn't down</b> (it had flagged Etna's July 6 eruption), imaged the Sundhnúkagígar fissures anyway, and <b>declined to fabricate an ash analysis</b>, reporting that the weather tool lacked wind direction.</div>
+<a class="fig" href="/demo/map-reykjanes-peninsula---recent-imagery--no-active-eruption-det.html" target="_blank" title="open the live interactive map"><img src="img/ex16.jpg" alt="map produced by example 16" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="learning"><b>Learning →</b> dominant wind direction added to <code>weather_summary</code> the same day — plume questions need it.</div></div>
 
 <div class="card"><div class="top"><div class="num">17</div><div class="tag">terrain</div><div class="who">flood journalism</div></div>
 <div><div class="label">Input</div><div class="prompt">I need elevation context for a flood story in Cologne: map the Copernicus DEM with a terrain colormap plus the latest imagery of the Rhine, and tell me the elevation range of the city.</div></div>
 <div class="answer"><div class="label">Output</div>Four DEM tiles + fresh Rhine imagery, and it separated the bbox artifact (240m foothills caught at the corner) from the answer that matters: <b>the city core sits at 37–65m, "the relevant band for flood exposure."</b></div>
+<a class="fig" href="/demo/map-cologne-elevation---rhine-imagery.html" target="_blank" title="open the live interactive map"><img src="img/ex17.jpg" alt="map produced by example 17" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">terrain data + spatial-artifact awareness</div></div>
 
 <div class="card"><div class="top"><div class="num">18</div><div class="tag">discovery</div><div class="who">development / urban growth</div></div>
 <div><div class="label">Input</div><div class="prompt">What datasets can you reach about nighttime lights or human settlement, and which would you use to show urbanization around Nairobi? Show one on a map.</div></div>
 <div class="answer"><div class="label">Output</div>Surveyed VEDA's event nightlights, GRDI, HREA, and io-lulc across catalogs — then argued lights <b>"saturate over a dense core"</b> and swiped io-lulc's built-up class 2017 vs 2023 instead: sprawl toward Kajiado and Kiambu, visible.</div>
+<a class="fig" href="/demo/map-nairobi-urbanization--2017-vs-2023.html" target="_blank" title="open the live interactive map"><img src="img/ex18.jpg" alt="map produced by example 18" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">dataset discovery with an opinion, not a list</div></div>
 
 <div class="card"><div class="top"><div class="num">19</div><div class="tag">burn severity</div><div class="who">wildfire response</div></div>
 <div><div class="label">Input</div><div class="prompt">Assess burn severity around the Navarre Coulee fire near Chelan using NBR (nir-swir22)/(nir+swir22): compare the latest scene against pre-fire, give me the delta, and map both.</div></div>
 <div class="answer"><div class="label">Output</div>Pre/post dNBR (<b>mean −0.033, median −0.045</b> in two weeks) with the dilution explained (steppe, lake pixels), a smoke-vs-cloud caveat, and <b>"the burn may still be spreading past what this scene captures."</b></div>
+<a class="fig" href="/demo/map-navarre-coulee-fire---nbr-before-after.html" target="_blank" title="open the live interactive map"><img src="img/ex19.jpg" alt="map produced by example 19" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">the assessment a response team actually needs, caveats included</div></div>
 
 <div class="card"><div class="top"><div class="num">20</div><div class="tag">catalog trust</div><div class="who">data providers</div></div>
 <div><div class="label">Input</div><div class="prompt">Find the same recent Sentinel-2 scene over Munich in both earth-search and planetary-computer, compare their reported cloud cover, preview both, and tell me if the catalogs agree.</div></div>
 <div class="answer"><div class="label">Output</div><b>Exact agreement: 0.606% cloud in both catalogs</b> — same ESA product under different ID conventions, both previews clear. The catalogs check out.</div>
+<a class="fig" href="/demo/map-munich-sentinel-2---earth-search-vs-planetary-computer--2026.html" target="_blank" title="open the live interactive map"><img src="img/ex20.jpg" alt="map produced by example 20" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">cross-catalog consistency, verified not assumed</div></div>
 
 </div>

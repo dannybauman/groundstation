@@ -27,7 +27,7 @@ CATALOGS: dict[str, dict[str, str]] = {
     "earth-search": {
         "stac": "https://earth-search.aws.element84.com/v1",
         "raster": "titiler-xyz",
-        "notes": "Element 84 Earth Search: Sentinel-2 L2A/L1C, Sentinel-1, NAIP, Copernicus DEM. Landsat here is requester-pays and won't tile — use planetary-computer for Landsat.",
+        "notes": "Element 84 Earth Search: Sentinel-2 L2A/L1C, Sentinel-1, Copernicus DEM. Landsat and NAIP here are requester-pays and won't tile — use planetary-computer for those.",
     },
     "veda": {
         "stac": "https://openveda.cloud/api/stac",
@@ -586,6 +586,7 @@ if (COMPARE && rasters.length === 2) {
   const mapR = new maplibregl.Map({ container: "map", ...MAP_OPTS });
   const mapL = new maplibregl.Map({ container: "mapL", style: BASE_STYLE(),
     bounds: MAP_OPTS.bounds, fitBoundsOptions: MAP_OPTS.fitBoundsOptions });
+  window.gsMaps = [mapL, mapR];  // exposed for scripted screenshots and checks
   mapR.addControl(new maplibregl.NavigationControl());
   mapR.on("load", () => { addLayerTo(mapR, rasters[0], rasters[0].i); geojsons.forEach(g => addLayerTo(mapR, g, g.i)); });
   mapL.on("load", () => { addLayerTo(mapL, rasters[1], rasters[1].i); geojsons.forEach(g => addLayerTo(mapL, g, g.i)); });
@@ -615,6 +616,7 @@ if (COMPARE && rasters.length === 2) {
   document.getElementById("toggles").innerHTML = '<span style="color:#555">drag the divider to compare</span>';
 } else {
   const map = new maplibregl.Map({ container: "map", ...MAP_OPTS });
+  window.gsMaps = [map];  // exposed for scripted screenshots and checks
   map.addControl(new maplibregl.NavigationControl());
   map.on("load", () => {
     const toggles = document.getElementById("toggles");

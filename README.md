@@ -96,11 +96,13 @@ All tiling, previews, and pixel math ride **titiler.xyz** by default — a free,
 **When to use your own tiler** — fleet briefings on a schedule, field-test-style batch runs, live demos to an audience, anything sustained:
 
 ```bash
-docker run -p 8000:8000 ghcr.io/developmentseed/titiler:latest      # TiTiler is DevSeed OSS — one container
-export GROUNDSTATION_TITILER=http://localhost:8000                  # everything routes there
+docker compose up -d titiler                          # TiTiler is DevSeed OSS — one container (see compose.yml)
+export GROUNDSTATION_TITILER=http://localhost:8000    # everything routes there
 ```
 
 Any TiTiler deployment with the `/stac` router works (a hosted one, eoAPI's raster service, your own cloud instance). titiler.xyz is for kicking the tires; your own endpoint is for real work.
+
+One caveat we learned in the field: some Earth Search collections (**NAIP, Landsat**) sit in requester-pays buckets. titiler.xyz carries AWS credentials for those; a local TiTiler returns 500s on them unless you provide your own AWS credentials (see `compose.yml`) — or just use Planetary Computer's copies of those datasets.
 
 ## Reliability
 

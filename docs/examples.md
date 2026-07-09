@@ -41,6 +41,9 @@ Deliberately different shapes — other spectral indices, global triage, claim v
 1. **Landsat routing codified**: earth-search's Landsat is requester-pays and won't tile — the skill and catalog notes now route Landsat to planetary-computer (example 14's agent had to discover this; the next one won't).
 2. **Wind direction added to `weather_summary`**: example 16's ash question exposed that the tool returned speed only — dominant daily direction now included, which smoke/ash/plume questions need.
 3. **NBR and NDSI recipes** joined NDVI/NDWI in the skill's index list, with the snow threshold (example 11 and 19's agents derived these themselves).
+4. **NAIP is requester-pays too** (examples 6 and 10 rendered blank NAIP layers): NAIP now routes to Planetary Computer alongside Landsat, in both the skill and the catalog notes.
+5. **Self-hosting is now one command** (`docker compose up -d titiler` + `GROUNDSTATION_TITILER`) after the field test itself rate-limited titiler.xyz — the shared-tiler stewardship story is in the README.
+6. **Map artifacts expose `window.gsMaps`** so scripted checks and screenshots can wait on real tile state instead of guessing.
 
 ## Improvements round 1 produced
 

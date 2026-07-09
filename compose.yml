@@ -1,0 +1,19 @@
+# Local TiTiler for sustained use — be a good neighbor to titiler.xyz.
+#   docker compose up -d titiler
+#   export GROUNDSTATION_TITILER=http://localhost:8000
+#
+# Caveat: some Earth Search collections (NAIP, Landsat) live in requester-pays
+# buckets. titiler.xyz carries AWS credentials for those; a local TiTiler serves
+# them only if you provide your own (uncomment the AWS_* lines below — requests
+# are then billed to your AWS account).
+services:
+  titiler:
+    image: ghcr.io/developmentseed/titiler:latest
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: 8000
+      WORKERS_PER_CORE: 1
+      # AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      # AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      # AWS_REQUEST_PAYER: requester

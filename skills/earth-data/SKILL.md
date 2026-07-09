@@ -16,7 +16,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 ## Which catalog for what
 
-- **earth-search** — fresh raw imagery. Sentinel-2 (`sentinel-2-l2a`), Sentinel-1 (`sentinel-1-grd`), NAIP, Copernicus DEM. First stop for "recent imagery of X". **Landsat exception**: earth-search's `landsat-c2-l2` assets live in a requester-pays bucket the tiler cannot read (AccessDenied on every band) — for Landsat, search and preview on planetary-computer instead.
+- **earth-search** — fresh raw imagery. Sentinel-2 (`sentinel-2-l2a`), Sentinel-1 (`sentinel-1-grd`), NAIP, Copernicus DEM. First stop for "recent imagery of X". **Requester-pays exception**: earth-search's Landsat (`landsat-c2-l2`) and NAIP (`naip`) assets live in requester-pays buckets the tiler cannot read — for Landsat and NAIP, search and render on planetary-computer instead.
 - **veda** — NASA-curated analysis products: fire severity, air quality, climate indicators, disaster layers. First stop for "what does NASA have on X event".
 - **planetary-computer** — deep archive breadth: MODIS, land cover (`io-lulc-annual-v02`, `esa-worldcover`), biomass, DEMs. First stop for historical or thematic layers. Previews use the item's `rendered_preview`; statistics aren't wired yet.
 
@@ -41,5 +41,6 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 - Don't paste raw JSON at the user. Summarize: scene date, cloud cover, what the numbers mean, what changed.
 - Interpret statistics against the question: NDVI 0.38 mean is "moderately vegetated"; a drop from 0.5 to 0.2 between dates is the story, not the digits.
 - If a search returns nothing, widen one constraint at a time (cloud cover, then time window, then bbox) and say what you relaxed.
-- Tiling and statistics ride a shared community endpoint (titiler.xyz) unless GROUNDSTATION_TITILER is set. Be frugal: don't loop preview or statistics calls, keep max_size small. If you get HTTP 429, stop retrying, tell the user the shared tiler is rate-limited, and point them to the README's "Be a good neighbor" section (one-container self-hosting).
+- Tiling and statistics ride a shared community endpoint (titiler.xyz) unless GROUNDSTATION_TITILER is set. Be frugal: don't loop preview or statistics calls, keep max_size small. If you get HTTP 429, stop retrying, tell the user the shared tiler is rate-limited, and point them to the README's "Be a good neighbor" section (one-container self-hosting via compose.yml).
+- On a self-hosted tiler, NAIP and Landsat from earth-search return 500s (requester-pays buckets need AWS credentials — titiler.xyz has them, local doesn't by default). Prefer Planetary Computer's copies of those datasets when the user runs their own tiler.
 - State the scene date next to every claim — Earth changes, and a July answer built on March imagery misleads.
