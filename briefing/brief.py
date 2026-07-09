@@ -46,6 +46,9 @@ Rules: be specific, cite dates, no filler, no speculation beyond the data. If da
 errors or are empty, work with what's there and note the gap in one clause, not a paragraph.
 If an "ndvi_change" block is present, weave the vegetation delta (with both dates) into TL;DR and
 What changed — a real change signal outranks scene bookkeeping.
+If a "previous_run" block is present, "What changed" means changed SINCE THAT RUN: name events that
+appeared, escalated, or cleared since it, and say plainly when today is calmer than the last run
+(e.g. "yesterday's WATCH stands down"). Deltas against the last run outrank everything else.
 
 DATA:
 """
@@ -273,6 +276,12 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     }
     if change:
         data["ndvi_change"] = change
+    state_path = Path(__file__).parent / "state" / f"{slug}.json"
+    if state_path.exists():
+        try:
+            data["previous_run"] = json.loads(state_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
     md = synthesize(data)
 
     html = (
@@ -289,13 +298,27 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     print(f"brief: {brief_path}\nmap:   {map_path}")
     alert_m = re.search(r"\b(CALM|WATCH|ACT)\b", md)
     tldr_m = re.search(r"## TL;DR\s*\n(.+?)(?=\n## |\Z)", md, re.S)
-    return {
+    result = {
         "place": place,
         "alert": alert_m.group(1) if alert_m else "CALM",
         "tldr": (tldr_m.group(1).strip() if tldr_m else "")[:400],
         "brief": brief_path.name,
         "map": map_path.name,
     }
+    # memory for the next run: tomorrow's "what changed" diffs against this
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps({
+        "date": today.isoformat(),
+        "alert": result["alert"],
+        "event_titles": [e.get("title") for e in events.get("eonet", []) + events.get("gdacs", [])][:20],
+        "ndvi_mean": change["current"]["mean"] if change else None,
+        "scene_count": imagery.get("count"),
+        "tldr": result["tldr"][:200],
+    }, indent=1), encoding="utf-8")
+    # also save the gathered data snapshot for the briefing evals
+    (out_dir / f"brief-{slug}-{today.isoformat()}.data.json").write_text(
+        json.dumps(data, default=str, indent=1), encoding="utf-8")
+    return result
 
 
 ALERT_COLORS = {"ACT": "#c0392b", "WATCH": "#e67e22", "CALM": "#2e7d32"}
@@ -326,7 +349,32 @@ INDEX = """<!doctype html>
 """
 
 
-def build_fleet(config_path: Path, out_dir: Path) -> Path:
+ALERT_EMOJI = {"ACT": "🔴", "WATCH": "🟠", "CALM": "🟢"}
+
+
+def slack_payload(results: list[dict], today: dt.date) -> dict:
+    lines = [f"🌍 *Morning sweep — {today.strftime('%A, %B %d')}* ({len(results)} areas)"]
+    for r in results:
+        first_sentence = (r["tldr"].split(". ")[0].rstrip(".") + ".").replace("**", "*")
+        lines.append(f"{ALERT_EMOJI.get(r['alert'], '⚪')} *{r['alert']}* — {r['place']}: {first_sentence}")
+    lines.append(f"_full briefs + maps: morning-sweep-{today.isoformat()}.html_")
+    return {"text": "\n".join(lines)}
+
+
+def deliver_slack(payload: dict, webhook: str | None, dry_run: bool) -> None:
+    if dry_run:
+        print("\n--- slack payload (dry run) ---")
+        print(json.dumps(payload, indent=1, ensure_ascii=False))
+        return
+    if not webhook:
+        return
+    import httpx
+
+    r = httpx.post(webhook, json=payload, timeout=30)
+    print(f"slack delivery: {r.status_code}")
+
+
+def build_fleet(config_path: Path, out_dir: Path, slack_webhook: str | None = None, slack_dry_run: bool = False) -> Path:
     aois = json.loads(config_path.read_text(encoding="utf-8"))
     results = []
     for aoi in aois:
@@ -354,19 +402,25 @@ def build_fleet(config_path: Path, out_dir: Path) -> Path:
     index_path = out_dir / f"morning-sweep-{today.isoformat()}.html"
     index_path.write_text(html, encoding="utf-8")
     print(f"\nindex: {index_path}")
+    deliver_slack(slack_payload(results, today), slack_webhook, slack_dry_run)
     return index_path
 
 
 if __name__ == "__main__":
+    import os
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--place", help="single AOI")
     ap.add_argument("--fleet", help="path to JSON list of AOIs: [{place, days?}, ...]")
     ap.add_argument("--days", type=int, default=7, help="imagery lookback window")
     ap.add_argument("--out", default="demo", help="output directory")
+    ap.add_argument("--slack-webhook", default=os.environ.get("SLACK_WEBHOOK_URL"),
+                    help="post the sweep summary to this Slack incoming webhook (fleet mode)")
+    ap.add_argument("--slack-dry-run", action="store_true", help="print the Slack payload instead of posting")
     args = ap.parse_args()
     if not args.place and not args.fleet:
         ap.error("provide --place or --fleet")
     if args.fleet:
-        build_fleet(Path(args.fleet), Path(args.out))
+        build_fleet(Path(args.fleet), Path(args.out), args.slack_webhook, args.slack_dry_run)
     else:
         build_brief(args.place, args.days, Path(args.out))
