@@ -89,6 +89,19 @@ The paired skill in `skills/earth-data/` carries the judgment layer: which catal
 
 The briefing engine inverts the interaction — instead of you asking the right question, Earth reports in: fresh scenes, events, weather, an NDVI change signal against last month, a CALM/WATCH/ACT alert level, and suggested next steps, as a shareable HTML page. It keeps per-AOI memory so "what changed" means changed *since the last run*, fleet mode writes a triaged morning-sweep index, and `--slack-webhook` delivers the summary where people already look. Cron it and it runs while nobody's watching.
 
+## Be a good neighbor: titiler.xyz
+
+All tiling, previews, and pixel math ride **titiler.xyz** by default — a free, shared community endpoint that Development Seed runs as a demo. It rate-limits (HTTP 429) under heavy use, and a day of agent runs or a room full of people scanning places can hit that. Built-in mitigations: map artifacts carry scene footprint `bounds` so browsers never request out-of-footprint tiles, and statistics use small `max_size` reads.
+
+**When to use your own tiler** — fleet briefings on a schedule, field-test-style batch runs, live demos to an audience, anything sustained:
+
+```bash
+docker run -p 8000:8000 ghcr.io/developmentseed/titiler:latest      # TiTiler is DevSeed OSS — one container
+export GROUNDSTATION_TITILER=http://localhost:8000                  # everything routes there
+```
+
+Any TiTiler deployment with the `/stac` router works (a hosted one, eoAPI's raster service, your own cloud instance). titiler.xyz is for kicking the tires; your own endpoint is for real work.
+
 ## Reliability
 
 Three layers of checks, because a generative product without evals is a demo, not a tool:

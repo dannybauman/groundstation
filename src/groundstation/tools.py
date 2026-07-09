@@ -19,7 +19,9 @@ from typing import Any
 import httpx
 
 UA = {"User-Agent": "groundstation/0.1 (Development Seed labs prototype)"}
-TITILER = "https://titiler.xyz"
+# titiler.xyz is a shared community endpoint with rate limits (429s under heavy
+# use) — point GROUNDSTATION_TITILER at your own TiTiler deployment for real work
+TITILER = os.environ.get("GROUNDSTATION_TITILER", "https://titiler.xyz")
 
 CATALOGS: dict[str, dict[str, str]] = {
     "earth-search": {
@@ -498,7 +500,8 @@ const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], B
 function addLayerTo(m, l, i) {
   const id = "layer" + i;
   if (l.type === "raster") {
-    m.addSource(id, { type: "raster", tiles: [l.tiles], tileSize: 256 });
+    m.addSource(id, { type: "raster", tiles: [l.tiles], tileSize: 256,
+      ...(l.bounds ? { bounds: l.bounds } : {}) });
     m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": l.opacity ?? 1 } });
   } else if (l.type === "geojson") {
     m.addSource(id, { type: "geojson", data: l.data });
@@ -611,6 +614,17 @@ def render_map(
     for l in layers:
         if l.get("type") == "item":
             raster_collections.append(l.get("collection_id"))
+            item_bounds = l.get("bbox")
+            if item_bounds is None:
+                # scene footprint bounds stop the map requesting (and the tiler
+                # serving 404s for) every out-of-footprint tile in the viewport
+                try:
+                    item = _get_json(
+                        f"{CATALOGS[l['catalog']]['stac']}/collections/{l['collection_id']}/items/{l['item_id']}"
+                    )
+                    item_bounds = item.get("bbox")
+                except Exception:
+                    item_bounds = None
             resolved.append(
                 {
                     "type": "raster",
@@ -625,6 +639,7 @@ def render_map(
                         l.get("expression"),
                     ),
                     "opacity": l.get("opacity", 1),
+                    **({"bounds": item_bounds} if item_bounds else {}),
                 }
             )
         else:

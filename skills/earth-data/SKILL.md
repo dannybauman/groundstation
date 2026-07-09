@@ -41,4 +41,5 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 - Don't paste raw JSON at the user. Summarize: scene date, cloud cover, what the numbers mean, what changed.
 - Interpret statistics against the question: NDVI 0.38 mean is "moderately vegetated"; a drop from 0.5 to 0.2 between dates is the story, not the digits.
 - If a search returns nothing, widen one constraint at a time (cloud cover, then time window, then bbox) and say what you relaxed.
+- Tiling and statistics ride a shared community endpoint (titiler.xyz) unless GROUNDSTATION_TITILER is set. Be frugal: don't loop preview or statistics calls, keep max_size small. If you get HTTP 429, stop retrying, tell the user the shared tiler is rate-limited, and point them to the README's "Be a good neighbor" section (one-container self-hosting).
 - State the scene date next to every claim — Earth changes, and a July answer built on March imagery misleads.

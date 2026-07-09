@@ -62,9 +62,9 @@ def t_render_map_compare_mode():
         out = str(Path(d) / "m.html")
         layers = [
             {"type": "item", "name": "A", "catalog": "earth-search", "collection_id": "sentinel-2-l2a",
-             "item_id": "X", "expression": "(nir-red)/(nir+red)"},
+             "item_id": "X", "expression": "(nir-red)/(nir+red)", "bbox": [0, 0, 1, 1]},
             {"type": "item", "name": "B", "catalog": "earth-search", "collection_id": "sentinel-2-l2a",
-             "item_id": "Y", "expression": "(nir-red)/(nir+red)"},
+             "item_id": "Y", "expression": "(nir-red)/(nir+red)", "bbox": [0, 0, 1, 1]},
         ]
         tools.render_map("t", [0, 0, 1, 1], layers, out_path=out)
         html = Path(out).read_text(encoding="utf-8")
@@ -76,9 +76,9 @@ def t_render_map_overlay_mode():
     with tempfile.TemporaryDirectory() as d:
         out = str(Path(d) / "m.html")
         layers = [
-            {"type": "item", "name": "S2", "catalog": "earth-search", "collection_id": "sentinel-2-l2a", "item_id": "X"},
+            {"type": "item", "name": "S2", "catalog": "earth-search", "collection_id": "sentinel-2-l2a", "item_id": "X", "bbox": [0, 0, 1, 1]},
             {"type": "item", "name": "severity", "catalog": "veda", "collection_id": "caldor-fire-burn-severity",
-             "item_id": "bs_to_save", "assets": ["cog_default"], "opacity": 0.75},
+             "item_id": "bs_to_save", "assets": ["cog_default"], "opacity": 0.75, "bbox": [0, 0, 1, 1]},
         ]
         tools.render_map("t", [0, 0, 1, 1], layers, out_path=out)
         html = Path(out).read_text(encoding="utf-8")

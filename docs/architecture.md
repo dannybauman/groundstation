@@ -28,6 +28,8 @@ Everything important lives in `src/groundstation/tools.py` as plain functions wi
 
 **No GDAL, no heavy geo dependencies.** The only runtime deps are `mcp` and `httpx`. All pixel work happens server-side in TiTiler; all rendering happens in the browser via live tile URLs. This is why the whole thing installs in seconds and demos on any machine.
 
+**titiler.xyz is a shared community endpoint — treat it accordingly.** It rate-limits (429s) under heavy use, which a day of agent runs and eval suites can trigger. Two mitigations are built in: map artifacts carry each scene's footprint `bounds` so the browser never requests (and the tiler never serves 404s for) out-of-footprint tiles, and `GROUNDSTATION_TITILER` points everything at your own TiTiler deployment — it's Development Seed's own open source, and running one is a single container. For demos to an audience, deploy your own.
+
 **Per-catalog raster routing.** Earth Search items tile through titiler.xyz, NASA VEDA through its own raster API, Planetary Computer through its signing data API (their assets need SAS tokens; their API handles it). This federated-**and**-preview-capable combination is the thing neither `nasa/earthdata-mcp` nor community `stac-mcp` servers have.
 
 **Expressions use asset names, not band indices.** You write `(nir-red)/(nir+red)`; a shared helper translates to TiTiler's merged-band form (`(b1-b2)/(b1+b2)` + `assets=nir&assets=red`) for both statistics and tiles. Agents improvising raw band URLs was the root cause of a real "blank layer" bug — the recipe now lives in one function and the skill.
