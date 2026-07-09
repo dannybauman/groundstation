@@ -1,0 +1,20 @@
+name: live-evals
+
+# Hits real public endpoints (Earth Search, VEDA, Planetary Computer, titiler.xyz,
+# EONET, GDACS, Open-Meteo). Run on demand or weekly — failures here mean the demo
+# is broken right now, not that the code regressed.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 13 * * 1" # Mondays 13:00 UTC
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: live integration evals
+        run: uv run evals/run_evals.py

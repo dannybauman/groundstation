@@ -1,0 +1,18 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --group web
+      - name: import smoke
+        run: uv run python -c "from groundstation import tools, server, web; print('imports ok')"
+      - name: offline unit checks
+        run: uv run evals/unit_checks.py
