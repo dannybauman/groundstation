@@ -529,7 +529,7 @@ def render_map(
         out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = str(out_dir / f"map-{safe}.html")
-    Path(out_path).write_text(html)
+    Path(out_path).write_text(html, encoding="utf-8")
     return {"map_path": out_path, "layers": [l["name"] for l in resolved]}
 
 

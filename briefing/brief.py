@@ -111,6 +111,7 @@ def synthesize(data: dict) -> str:
             capture_output=True,
             text=True,
             timeout=240,
+            shell=(sys.platform == "win32"),
         )
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.strip()
@@ -237,8 +238,8 @@ def build_brief(place: str, days: int, out_dir: Path) -> Path:
         .replace("__MAP__", map_path.name)
     )
     brief_path = out_dir / f"brief-{slug}-{today.isoformat()}.html"
-    brief_path.write_text(html)
-    (out_dir / f"brief-{slug}-{today.isoformat()}.md").write_text(md)
+    brief_path.write_text(html, encoding="utf-8")
+    (out_dir / f"brief-{slug}-{today.isoformat()}.md").write_text(md, encoding="utf-8")
     print(f"brief: {brief_path}\nmap:   {map_path}")
     return brief_path
 

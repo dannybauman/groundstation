@@ -8,6 +8,7 @@ integration breaks.
 from __future__ import annotations
 
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -85,9 +86,9 @@ def t_map():
         "eval map", it["bbox"],
         [{"type": "item", "name": "s2", "catalog": "earth-search",
           "collection_id": it["collection"], "item_id": it["id"], "assets": ["visual"]}],
-        out_path="/tmp/groundstation-eval-map.html",
+        out_path=str(Path(tempfile.gettempdir()) / "groundstation-eval-map.html"),
     )
-    html = Path(m["map_path"]).read_text()
+    html = Path(m["map_path"]).read_text(encoding="utf-8")
     assert "titiler.xyz/stac/tiles" in html and "maplibre" in html
 
 
