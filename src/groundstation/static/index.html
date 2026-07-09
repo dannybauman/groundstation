@@ -92,7 +92,8 @@ html, body { margin: 0; height: 100%; font-family: Roboto, sans-serif; color: va
 .stat-label { font-size: 10px; color: var(--mid); margin-top: 2px; }
 
 .wx { display: flex; gap: 3px; margin-top: 6px; }
-.wx .day { flex: 1; text-align: center; font: 400 9.5px 'Roboto Mono', monospace; color: var(--mid); }
+.wx .day { flex: 1 1 0; min-width: 0; overflow: hidden; text-align: center; font: 400 9.5px 'Roboto Mono', monospace; color: var(--mid); cursor: default; }
+.event .t { min-width: 0; overflow-wrap: anywhere; }
 .wx .bar-t { background: var(--accent); opacity: .75; width: 100%; }
 .wx .bar-p { background: #1d4e8f; width: 100%; }
 .wx .cell { height: 44px; display: flex; flex-direction: column; justify-content: flex-end; margin-bottom: 3px; }
@@ -120,6 +121,14 @@ html, body { margin: 0; height: 100%; font-family: Roboto, sans-serif; color: va
 .chip .sw { width: 9px; height: 9px; background: var(--accent); }
 .chip.off { opacity: .5; border-color: var(--rule); }
 #coord { position: absolute; right: 12px; bottom: 26px; z-index: 5; font: 400 10px 'Roboto Mono', monospace; color: var(--mid); background: var(--paper); padding: 3px 8px; border: 1px solid var(--rule); }
+#scanview {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6;
+  font: 600 12px 'Roboto Condensed', sans-serif; letter-spacing: .09em; text-transform: uppercase;
+  background: var(--ink); color: var(--paper); border: 1.5px solid var(--ink); padding: 8px 14px;
+  cursor: pointer; display: none; box-shadow: 0 2px 8px rgba(68,63,63,.25); animation: rise .25s ease both;
+}
+#scanview:hover { background: var(--accent); border-color: var(--accent); }
+#scanview.show { display: block; }
 
 /* ------------------------------------------------ panels */
 .panel {
@@ -206,9 +215,11 @@ footer#credit { position: absolute; left: 12px; bottom: 4px; z-index: 5; font: 4
        seconds. The same tools behind this console plug into Claude and other AI assistants.</p>
 
     <h3>How to use it</h3>
-    <p>Type a place in the top bar and hit Scan. Click a scene to stream it onto the map, click an event
-       to fly to it. "Generate Earth brief" writes a short situation report for the area, and "Ask the
-       agent" lets you ask a free question, an AI answers using these same tools and hands back a map.</p>
+    <p>Type a place in the top bar and hit Scan, or pan the map anywhere and hit "scan this view."
+       Click a scene to stream it onto the map, click an event to fly to it and load the imagery
+       covering that exact spot. "Generate Earth brief" writes a short situation report for the area,
+       and "Ask the agent" lets you ask a free question, an AI answers using these same tools and
+       hands back a map.</p>
 
     <h3>This page is the smallest part</h3>
     <p>The console is one of three doors into the same engine built for this prototype:
@@ -255,6 +266,7 @@ footer#credit { position: absolute; left: 12px; bottom: 4px; z-index: 5; font: 4
   </aside>
   <div id="mapwrap">
     <div id="map"></div>
+    <button id="scanview" onclick="scanView()">⌖ scan this view</button>
     <div id="chips"></div>
     <div id="coord"></div>
     <footer id="credit">groundstation console · STAC + TiTiler + stac-map + MapLibre</footer>
@@ -298,6 +310,65 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl());
 map.on("mousemove", e => $("coord").textContent = e.lngLat.lat.toFixed(3) + ", " + e.lngLat.lng.toFixed(3));
+map.on("click", "events-pts", e => {
+  const title = e.features[0].properties.title;
+  new maplibregl.Popup().setLngLat(e.lngLat)
+    .setHTML(`<b>${title}</b><br>${e.features[0].properties.d}`).addTo(map);
+  const idx = (state.events || []).findIndex(ev => ev.title === title);
+  if (idx >= 0) flyEvent(idx);
+});
+map.on("mouseenter", "events-pts", () => map.getCanvas().style.cursor = "pointer");
+map.on("mouseleave", "events-pts", () => map.getCanvas().style.cursor = "");
+
+let programmaticMove = false;
+function hideScanView() { $("scanview").classList.remove("show"); }
+map.on("moveend", () => {
+  if (programmaticMove) { programmaticMove = false; return; }
+  if (map.getZoom() < 4) { hideScanView(); return; }
+  // show when the user has drifted from the scanned AOI (or hasn't scanned yet)
+  if (!state.g) { $("scanview").classList.add("show"); return; }
+  const b = map.getBounds(), [w, s, e, n] = state.g.bbox;
+  const cx = (b.getWest() + b.getEast()) / 2, cy = (b.getSouth() + b.getNorth()) / 2;
+  const inside = cx >= w && cx <= e && cy >= s && cy <= n;
+  const spanRatio = (b.getEast() - b.getWest()) / Math.max(e - w, 1e-6);
+  $("scanview").classList.toggle("show", !inside || spanRatio < 0.45 || spanRatio > 2.5);
+});
+
+const EMPTY_FC = { type: "FeatureCollection", features: [] };
+map.on("load", () => {
+  map.addSource("hover-fp", { type: "geojson", data: EMPTY_FC });
+  map.addLayer({ id: "hover-fp-fill", type: "fill", source: "hover-fp",
+    paint: { "fill-color": "#CF3F02", "fill-opacity": .07 } });
+  map.addLayer({ id: "hover-fp-line", type: "line", source: "hover-fp",
+    paint: { "line-color": "#CF3F02", "line-width": 2.5, "line-dasharray": [2, 1.5] } });
+  map.addSource("hover-pt", { type: "geojson", data: EMPTY_FC });
+  map.addLayer({ id: "hover-pt-ring", type: "circle", source: "hover-pt",
+    paint: { "circle-radius": 15, "circle-color": "#CF3F02", "circle-opacity": .18,
+             "circle-stroke-width": 2.5, "circle-stroke-color": "#CF3F02" } });
+});
+
+function bboxPoly(b) {
+  const [w, s, e, n] = b;
+  return { type: "Feature", geometry: { type: "Polygon", coordinates: [[[w,s],[e,s],[e,n],[w,n],[w,s]]] } };
+}
+function hoverScene(i) {
+  const src = map.getSource("hover-fp");
+  if (!src || !state.scenes[i]) return;
+  src.setData({ type: "FeatureCollection", features: [bboxPoly(state.scenes[i].bbox)] });
+  ["hover-fp-fill", "hover-fp-line"].forEach(l => map.getLayer(l) && map.moveLayer(l));
+}
+function hoverEvent(i) {
+  const src = map.getSource("hover-pt");
+  const ev = state.events?.[i];
+  if (!src || !ev || ev.coordinates?.[0] == null) return;
+  src.setData({ type: "FeatureCollection", features: [{ type: "Feature",
+    geometry: { type: "Point", coordinates: ev.coordinates }, properties: {} }] });
+  map.getLayer("hover-pt-ring") && map.moveLayer("hover-pt-ring");
+}
+function hoverClear() {
+  map.getSource("hover-fp")?.setData(EMPTY_FC);
+  map.getSource("hover-pt")?.setData(EMPTY_FC);
+}
 
 function clearLayers() {
   if (map.getLayer("scene")) { map.removeLayer("scene"); map.removeSource("scene"); }
@@ -312,32 +383,65 @@ const api = async (path) => {
   return r.json();
 };
 
-function card(id, label, inner) {
+function card(id, label, inner, afterId) {
   let el = $(id);
   if (!el) {
     el = document.createElement("div");
     el.className = "card"; el.id = id;
-    $("rail").appendChild(el);
+    if (afterId && $(afterId)) $(afterId).after(el); else $("rail").appendChild(el);
   }
   el.innerHTML = `<div class="card-label">${label}</div>` + inner;
   return el;
 }
 
+function prepScan(q) {
+  closePanels();
+  $("welcome")?.remove();
+  ["c-place","c-insight","c-scenes","c-events","c-event-focus","c-weather","c-ndvi","c-brief"].forEach(i => $(i)?.remove());
+  clearLayers();
+  state.query = q;
+  card("c-place", "Place", `<p class="hint">locating…</p>`);
+}
+
 async function go() {
   const q = $("q").value.trim();
   if (!q) return;
-  closePanels();
-  $("welcome")?.remove();
-  ["c-place","c-scenes","c-events","c-weather","c-ndvi","c-brief"].forEach(i => $(i)?.remove());
-  clearLayers();
-  card("c-place", "Place", `<p class="hint">locating…</p>`);
+  prepScan(q);
+  const deadEnd = msg => card("c-place", "Place", `<p class="err">${msg}</p>
+    <div class="actions" style="margin-top:8px"><button class="abtn primary"
+      onclick="askWith('Help me look at ' + state.query + ': work out the location, find recent imagery and any active events there, and render a map.')">Ask the agent instead</button></div>`);
   let g;
-  try { g = await api(`/api/geocode?q=${encodeURIComponent(q)}`); } catch (e) { return card("c-place", "Place", `<p class="err">${e.message}</p>`); }
-  if (g.error) return card("c-place", "Place", `<p class="err">${g.error}</p>`);
-  state.g = g;
+  try { g = await api(`/api/geocode?q=${encodeURIComponent(q)}`); } catch (e) { return deadEnd(e.message); }
+  if (g.error) return deadEnd(g.error);
+  startScan(g, q);
+}
+
+async function scanView() {
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+  if (bbox[2] - bbox[0] > 5 || bbox[3] - bbox[1] > 5) {
+    prepScan($("q").value.trim() || "this view");
+    return card("c-place", "Place", `<p>This view is too wide for a useful scan — zoom in closer and try again.</p>`);
+  }
+  const q = $("q").value.trim();
+  prepScan(q || "this view");
+  const c = map.getCenter();
+  let name = "Current view";
+  try { name = (await api(`/api/revgeo?lat=${c.lat.toFixed(4)}&lon=${c.lng.toFixed(4)}`)).name; } catch {}
+  startScan({ name, lat: c.lat, lon: c.lng, bbox, source: "viewport" }, q || name);
+}
+
+function startScan(g, q) {
+  state.g = g; state.query = q;
+  hideScanView();
   card("c-place", "Place", `<h2>${g.name.split(",").slice(0,2).join(",")}</h2>
     <p class="hint">${g.bbox.map(v=>v.toFixed(2)).join(" · ")} — via ${g.source}</p>`);
-  map.fitBounds([[g.bbox[0], g.bbox[1]], [g.bbox[2], g.bbox[3]]], { padding: 60, duration: 1600 });
+  if (g.source !== "viewport") {
+    programmaticMove = true;
+    map.fitBounds([[g.bbox[0], g.bbox[1]], [g.bbox[2], g.bbox[3]]], { padding: 60, duration: 1600 });
+  }
+  state.gathered = {}; state.insightFired = false;
+  card("c-insight", "What this means", `<p class="hint">reading the situation once the data lands…</p>`);
   card("c-scenes", "Fresh imagery · Sentinel-2", `<p class="hint">searching last 14 days…</p>`);
   card("c-events", "Active events · EONET + GDACS", `<p class="hint">checking…</p>`);
   card("c-weather", "Weather · past week + forecast", `<p class="hint">fetching…</p>`);
@@ -355,15 +459,19 @@ async function loadScenes(g, days, cloud) {
   const [w,s,e,n] = g.bbox;
   let r;
   try { r = await api(`/api/scenes?w=${w}&s=${s}&e=${e}&n=${n}&days=${days}&max_cloud=${cloud}`); }
-  catch (err) { return card("c-scenes", "Fresh imagery · Sentinel-2", `<p class="err">${err.message}</p>`); }
+  catch (err) { gathered("scenes", { error: String(err.message).slice(0,120), count: 0 });
+    return card("c-scenes", "Fresh imagery · Sentinel-2", `<p class="err">${err.message}</p>`); }
   state.scenes = r.items || [];
+  gathered("scenes", { count: r.count, days, max_cloud: cloud,
+    recent: state.scenes.slice(0,5).map(it => ({ date: (it.datetime||"").slice(0,10), cloud_pct: it.cloud_cover })) });
   if (!state.scenes.length) {
     return card("c-scenes", "Fresh imagery · Sentinel-2",
       `<p>Nothing under ${cloud}% cloud in ${days} days.</p>
        <div class="actions"><button class="abtn" onclick="loadScenes(state.g, 30, 80)">Widen to 30 days / 80%</button></div>`);
   }
   const rows = state.scenes.slice(0,7).map((it,i) => `
-    <div class="scene" id="sc${i}" onclick="showScene(${i})">
+    <div class="scene" id="sc${i}" onclick="showScene(${i})" title="${it.id} — hover shows this scene's footprint"
+         onmouseenter="hoverScene(${i})" onmouseleave="hoverClear()">
       <span class="date">${(it.datetime||"").slice(0,10)}</span>
       <a href="https://developmentseed.org/stac-map/?href=${encodeURIComponent(it.self_url)}" target="_blank"
          onclick="event.stopPropagation()" title="open in stac-map">stac-map ↗</a>
@@ -385,10 +493,11 @@ async function loadScenes(g, days, cloud) {
   showScene(best);
 }
 
-function showScene(i) {
-  const it = state.scenes[i];
+function showScene(i) { showItem(state.scenes[i], i); }
+
+function showItem(it, idx = null) {
   document.querySelectorAll(".scene").forEach(el => el.classList.remove("active"));
-  $("sc"+i)?.classList.add("active");
+  if (idx !== null) $("sc"+idx)?.classList.add("active");
   if (state.layers.scene) { map.removeLayer("scene"); map.removeSource("scene"); }
   map.addSource("scene", { type: "raster", tiles: [it.tiles], tileSize: 256, bounds: it.bbox });
   map.addLayer({ id: "scene", type: "raster", source: "scene" }, map.getLayer("events-pts") ? "events-pts" : undefined);
@@ -403,27 +512,36 @@ async function ndviCard(it) {
   try {
     const s = await api(`/api/ndvi?collection=${it.collection}&item=${it.id}`);
     const b = Object.values(s)[0];
-    card("c-ndvi", "Vegetation · NDVI", `<div class="stat-row">
+    gathered("ndvi", { scene_date: (it.datetime||"").slice(0,10), mean: +b.mean.toFixed(3), min: +b.min.toFixed(3), max: +b.max.toFixed(3) });
+    card("c-ndvi", "Vegetation · NDVI", `<div class="stat-row" title="NDVI runs −1 to 1: above 0.6 dense vegetation, 0.2–0.5 moderate, below 0.1 bare ground, built-up, or water">
       <div class="stat"><div class="stat-value">${b.mean.toFixed(2)}</div><div class="stat-label">mean</div></div>
       <div class="stat"><div class="stat-value">${b.min.toFixed(2)}</div><div class="stat-label">min</div></div>
       <div class="stat"><div class="stat-value">${b.max.toFixed(2)}</div><div class="stat-label">max</div></div></div>
-      <p class="hint" style="margin-top:8px">(nir−red)/(nir+red) on ${(it.datetime||"").slice(0,10)} via TiTiler — no download, no notebook.</p>`);
-  } catch (e) { card("c-ndvi", "Vegetation · NDVI", `<p class="err">stats unavailable: ${String(e.message).slice(0,120)}</p>`); }
+      <p class="hint" style="margin-top:8px">(nir−red)/(nir+red) on ${(it.datetime||"").slice(0,10)} via TiTiler — no download, no notebook.</p>
+      <div class="actions" style="margin-top:8px"><button class="abtn" onclick="askWith('Compare NDVI at ' + state.query + ' between ${(it.datetime||"").slice(0,10)} and roughly one month earlier, same area, and render a map with both dates so I can toggle.')">Compare vs last month</button></div>`);
+  } catch (e) {
+    gathered("ndvi", { error: String(e.message).slice(0,120) });
+    card("c-ndvi", "Vegetation · NDVI", `<p class="err">stats unavailable: ${String(e.message).slice(0,120)}</p>`);
+  }
 }
 
 async function loadEvents(g) {
   const [w,s,e,n] = g.bbox;
   let r;
   try { r = await api(`/api/events?w=${w}&s=${s}&e=${e}&n=${n}`); }
-  catch (err) { return card("c-events", "Active events", `<p class="err">${err.message}</p>`); }
+  catch (err) { gathered("events", { error: String(err.message).slice(0,120) });
+    return card("c-events", "Active events", `<p class="err">${err.message}</p>`); }
   const evs = [
     ...(r.eonet||[]).map(x => ({...x, src:"eonet", level: "WATCH"})),
     ...(r.gdacs||[]).map(x => ({...x, src:"gdacs", category: x.type, level: {Red:"ACT",Orange:"WATCH"}[x.alert_level] || "CALM"}))
   ];
+  gathered("events", evs.slice(0,10).map(ev => ({ title: ev.title, category: ev.category || ev.src, since: (ev.date || ev.from || "").slice(0,10) })));
   if (!evs.length) return card("c-events", "Active events · EONET + GDACS", `<p>Quiet. No open events in or near this AOI.</p>`);
   const colors = { ACT: "var(--act)", WATCH: "var(--watch)", CALM: "var(--calm)" };
   card("c-events", `Active events · ${evs.length}`, evs.slice(0,8).map((ev,i) => `
-    <div class="event" onclick="flyEvent(${i})"><span class="badge" style="background:${colors[ev.level]}">${ev.category||ev.src}</span>
+    <div class="event" onclick="flyEvent(${i})" title="click to fly there and load the covering scene"
+         onmouseenter="hoverEvent(${i})" onmouseleave="hoverClear()">
+      <span class="badge" style="background:${colors[ev.level]}">${ev.category||ev.src}</span>
       <span class="t">${ev.title}</span></div>`).join(""));
   state.events = evs;
   const fc = { type: "FeatureCollection", features: evs.filter(e2 => e2.coordinates?.[0] != null).map(e2 => ({
@@ -434,36 +552,103 @@ async function loadEvents(g) {
   map.addLayer({ id: "events-pts", type: "circle", source: "events",
     paint: { "circle-radius": 7, "circle-color": "#d63b3b", "circle-opacity": .85,
              "circle-stroke-width": 1.5, "circle-stroke-color": "#fff" } });
-  map.on("click", "events-pts", e => new maplibregl.Popup().setLngLat(e.lngLat)
-    .setHTML(`<b>${e.features[0].properties.title}</b><br>${e.features[0].properties.d}`).addTo(map));
 }
 
-function flyEvent(i) {
+async function flyEvent(i) {
   const ev = state.events[i];
-  if (ev.coordinates?.[0] != null) map.flyTo({ center: ev.coordinates, zoom: 10, duration: 1400 });
+  if (ev.coordinates?.[0] == null) return;
+  const [lon, lat] = ev.coordinates;
+  programmaticMove = true;
+  map.flyTo({ center: [lon, lat], zoom: 11, duration: 1400 });
+  const head = `<h2>${(ev.title||"").replace(/</g,"&lt;")}</h2>
+    <p class="hint">${ev.category || ev.src} · since ${(ev.date || ev.from || "").slice(0,10)}</p>`;
+  card("c-event-focus", "Selected event", head + `<p class="hint">finding the latest clear scene over this exact spot…</p>`, "c-events");
+  const it = await sceneForPoint(lon, lat);
+  const actions = `<div class="actions" style="margin-top:8px">
+    <button class="abtn primary" onclick="eventAsk(${i})">Ask the agent about this</button>
+    ${ev.link ? `<a class="abtn" style="text-decoration:none" href="${ev.link}" target="_blank">source ↗</a>` : ""}</div>`;
+  if (it) {
+    showItem(it);
+    card("c-event-focus", "Selected event", head +
+      `<p>Showing the clearest recent scene covering this exact spot: ${(it.datetime||"").slice(0,10)}, ${(it.cloud_cover??0).toFixed(1)}% cloud. Look for smoke, burn scar, or flooding at the marker.</p>` + actions);
+  } else {
+    card("c-event-focus", "Selected event", head +
+      `<p>No recent clear scene covers this exact spot yet — the agent can search wider windows and other satellites.</p>` + actions);
+  }
+}
+
+async function sceneForPoint(lon, lat) {
+  const covering = state.scenes.filter(it => { const [w,s,e,n] = it.bbox; return lon>=w && lon<=e && lat>=s && lat<=n; });
+  if (covering.length) return covering.reduce((a,b) => (a.cloud_cover??100) <= (b.cloud_cover??100) ? a : b);
+  const d = 0.05;
+  try {
+    const r = await api(`/api/scenes?w=${lon-d}&s=${lat-d}&e=${lon+d}&n=${lat+d}&days=14&max_cloud=60`);
+    const items = r.items || [];
+    if (!items.length) return null;
+    return items.reduce((a,b) => (a.cloud_cover??100) <= (b.cloud_cover??100) ? a : b);
+  } catch { return null; }
+}
+
+function askWith(text) { openPanel("ask"); $("ask-q").value = text; }
+function eventAsk(i) {
+  const ev = state.events[i];
+  askWith(`What can you tell me about "${ev.title}"? Find the most recent imagery over ${ev.coordinates[1].toFixed(3)}, ${ev.coordinates[0].toFixed(3)}, assess what is visible, check the weather outlook there, and render a map.`);
 }
 
 async function loadWeather(g) {
   let r;
   try { r = await api(`/api/weather?lat=${g.lat}&lon=${g.lon}`); }
-  catch (err) { return card("c-weather", "Weather", `<p class="err">${err.message}</p>`); }
-  const d = r.daily, tmax = d.temperature_2m_max, pr = d.precipitation_sum;
+  catch (err) { gathered("weather", { error: String(err.message).slice(0,120) });
+    return card("c-weather", "Weather", `<p class="err">${err.message}</p>`); }
+  const d = r.daily, tmax = d.temperature_2m_max, tmin = d.temperature_2m_min, pr = d.precipitation_sum;
+  gathered("weather", { peak_tmax_c: Math.max(...tmax), rain_last7_mm: +pr.slice(0,7).reduce((a,b)=>a+b,0).toFixed(1),
+    rain_next7_mm: +pr.slice(7).reduce((a,b)=>a+b,0).toFixed(1), max_wind_kmh: Math.max(...d.wind_speed_10m_max) });
   const tScale = Math.max(...tmax, 1);
   const cells = d.time.map((t,i) => `
-    <div class="day"><div class="cell">
+    <div class="day" title="${t} · ${tmin[i].toFixed(0)}–${tmax[i].toFixed(0)}°C · ${pr[i].toFixed(1)}mm rain · wind ${d.wind_speed_10m_max[i].toFixed(0)}km/h">
+      <div class="cell">
       <div class="bar-p" style="height:${Math.min(pr[i]*3, 20)}px"></div>
       <div class="bar-t" style="height:${Math.max(tmax[i]/tScale*30, 2)}px"></div>
-    </div>${t.slice(5).replace("-","/")}</div>`).join("");
+    </div>${t.slice(8)}</div>`).join("");
   const rain7 = pr.slice(0,7).reduce((a,b)=>a+b,0);
   card("c-weather", "Weather · past week + forecast",
     `<div class="wx">${cells}</div>
      <p class="hint" style="margin-top:6px">▉ temp max (peak ${Math.max(...tmax).toFixed(0)}°C) · <span style="color:#1d4e8f">▉</span> precip (${rain7.toFixed(0)}mm last 7d) — Open-Meteo</p>`);
 }
 
+/* ---------------- insight (the meaning layer) ---------------- */
+function gathered(key, value) {
+  state.gathered[key] = value;
+  const g = state.gathered;
+  const scenesSettled = "scenes" in g && (g.scenes.count === 0 || "ndvi" in g);
+  if (state.insightFired || !scenesSettled || !("events" in g) || !("weather" in g)) return;
+  state.insightFired = true;
+  runInsight();
+}
+
+async function runInsight() {
+  try {
+    const r = await fetch("/api/insight", { method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ query: state.query, data: { place: state.g.name, ...state.gathered } }) }).then(x=>x.json());
+    poll(r.job, () => {}, j => {
+      if (j.status === "done" && j.log.length) {
+        card("c-insight", "What this means", `<p>${j.log.join(" ").replace(/</g,"&lt;")}</p>
+          <p class="hint">interpreted from this scan's data by Claude — check dates and numbers against the cards below.</p>`);
+      } else card("c-insight", "What this means",
+        `<p class="hint">interpretation unavailable (is the claude CLI installed?) — the cards below are the raw read.</p>`);
+    });
+  } catch (e) {
+    card("c-insight", "What this means", `<p class="hint">interpretation unavailable — ${String(e.message).slice(0,80)}</p>`);
+  }
+}
+
 /* ---------------- long jobs ---------------- */
 async function poll(jobId, onLine, onDone) {
+  if (!jobId) return onDone({ status: "error", log: ["job did not start"] });
   const t = setInterval(async () => {
-    const j = await api(`/api/jobs/${jobId}`);
+    let j;
+    try { j = await api(`/api/jobs/${jobId}`); }
+    catch (e) { clearInterval(t); return onDone({ status: "error", log: [String(e.message).slice(0,200)] }); }
     onLine(j.log);
     if (j.status !== "running") { clearInterval(t); onDone(j); }
   }, 2500);
@@ -475,7 +660,7 @@ async function brief() {
   out.innerHTML = `<div class="log">starting…</div>`;
   document.querySelectorAll("#c-brief .abtn")[0].disabled = true;
   const r = await fetch("/api/brief", { method: "POST", headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({ place: $("q").value.trim(), days: 10 }) }).then(x=>x.json());
+    body: JSON.stringify({ place: state.g.name.split(",").slice(0,2).join(","), days: 10 }) }).then(x=>x.json());
   poll(r.job, log => out.firstChild.textContent = log.join("\n"), async j => {
     document.querySelectorAll("#c-brief .abtn")[0].disabled = false;
     if (j.status === "done") {
@@ -513,8 +698,11 @@ function openPanel(name) { closePanels(); $("panel-"+name).classList.add("open")
 function closePanels() { document.querySelectorAll(".panel").forEach(p => p.classList.remove("open")); }
 function openStacmap() {
   if (!state.activeScene) return;
-  $("stacmap-frame").src = "https://developmentseed.org/stac-map/?href=" + encodeURIComponent(state.activeScene.self_url);
+  const url = "https://developmentseed.org/stac-map/?href=" + encodeURIComponent(state.activeScene.self_url);
+  // load the iframe only after the panel is visible: a map initialized inside
+  // display:none measures a zero-size container and its initial zoom-to-item lands wrong
   openPanel("stacmap");
+  requestAnimationFrame(() => { if ($("stacmap-frame").src !== url) $("stacmap-frame").src = url; });
 }
 async function openArtifacts() {
   openPanel("artifacts");

@@ -89,10 +89,28 @@ def geocode(query: str) -> dict[str, Any]:
     except Exception:
         pass
 
-    results = _get_json(
-        "https://nominatim.openstreetmap.org/search",
-        params={"q": query, "format": "jsonv2", "limit": 1},
-    )
+    def _nominatim(q: str) -> list:
+        return _get_json(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": q, "format": "jsonv2", "limit": 1},
+        )
+
+    # descriptive phrases ("the Ashburn data center corridor") fail as-is;
+    # retry with capitalized tokens, then with descriptor words stripped
+    stop = {"the", "a", "an", "data", "center", "centre", "corridor", "area",
+            "region", "zone", "near", "around", "downtown", "greater"}
+    attempts = [query]
+    caps = re.findall(r"[A-Z][\w'-]*", query)
+    if caps and " ".join(caps) != query:
+        attempts.append(" ".join(caps))
+    kept = [w for w in query.split() if w.lower() not in stop]
+    if kept and " ".join(kept) != query:
+        attempts.append(" ".join(kept))
+    results = []
+    for q in dict.fromkeys(attempts):
+        results = _nominatim(q)
+        if results:
+            break
     if not results:
         return {"error": f"No geocoding result for {query!r}"}
     r0 = results[0]
@@ -104,6 +122,19 @@ def geocode(query: str) -> dict[str, Any]:
         "bbox": [w, s, e, n],
         "source": "nominatim",
     }
+
+
+def reverse_geocode(lat: float, lon: float) -> dict[str, Any]:
+    """Name the area around a point (for labeling a map-viewport scan)."""
+    try:
+        r = _get_json(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"lat": lat, "lon": lon, "zoom": 10, "format": "jsonv2"},
+        )
+        name = ", ".join((r.get("display_name") or "").split(", ")[:3]) or "Current view"
+        return {"name": name}
+    except Exception:
+        return {"name": "Current view"}
 
 
 # ---------------------------------------------------------------- catalogs

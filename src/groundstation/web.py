@@ -41,6 +41,11 @@ def api_geocode(q: str):
     return tools.geocode(q)
 
 
+@app.get("/api/revgeo")
+def api_revgeo(lat: float, lon: float):
+    return tools.reverse_geocode(lat, lon)
+
+
 @app.get("/api/scenes")
 def api_scenes(w: float, s: float, e: float, n: float, days: int = 14, max_cloud: float = 40):
     import datetime as dt
@@ -95,6 +100,11 @@ class AskReq(BaseModel):
     question: str
 
 
+class InsightReq(BaseModel):
+    query: str
+    data: dict
+
+
 def _run_job(job_id: str, argv: list[str], input_text: str | None = None) -> None:
     job = JOBS[job_id]
     try:
@@ -112,7 +122,8 @@ def _run_job(job_id: str, argv: list[str], input_text: str | None = None) -> Non
             proc.stdin.write(input_text)
             proc.stdin.close()
         for line in proc.stdout:
-            job["log"].append(line.rstrip()[:400])
+            # insight/ask output is one long paragraph line — don't truncate it
+            job["log"].append(line.rstrip()[:4000])
         proc.wait(timeout=600)
         job["status"] = "done" if proc.returncode == 0 else "error"
     except Exception as e:  # job must always resolve, UI polls it
@@ -151,6 +162,28 @@ def api_ask(req: AskReq):
         "If the answer is spatial, finish with render_map and state the map file path on its own "
         "final line as MAP: <path>. Be concise.\n\nQuestion: " + req.question
     )
+    return {"job": _start_job(argv, input_text=prompt)}
+
+
+INSIGHT_PROMPT = """You are the interpretation layer of an Earth data console. The user scanned a
+place; their exact query was: {query!r}. Below is everything the console gathered (fresh scenes,
+active events, weather, NDVI vegetation stats).
+
+Write 3-5 plain sentences, one paragraph, no headers or bullets: what the user is looking at, what
+is notable in this data, and what it does or does not say about what their query implies they care
+about. Cite dates and numbers only from the data. Be honest about limits — if their implied
+question needs comparison over time, higher-resolution imagery, or analysis this scan didn't do,
+say so in one clause and point at the right next step ("Ask the agent" for comparisons and custom
+analysis, "Generate Earth brief" for a monitoring report). End with one concrete thing to try next.
+
+DATA:
+"""
+
+
+@app.post("/api/insight")
+def api_insight(req: InsightReq):
+    prompt = INSIGHT_PROMPT.format(query=req.query) + json.dumps(req.data, default=str)
+    argv = ["claude", "-p", "--model", "sonnet"]
     return {"job": _start_job(argv, input_text=prompt)}
 
 
