@@ -1,0 +1,9 @@
+{
+  "name": "groundstation",
+  "version": "0.2.0",
+  "description": "Earth data, agent-ready — a Development Seed labs prototype. MCP tools over the cloud-native geospatial stack plus the earth-data skill.",
+  "author": {
+    "name": "Development Seed",
+    "url": "https://github.com/dannybauman/groundstation"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "groundstation",
+  "description": "Earth observation tools for AI agents, from Development Seed labs",
+  "owner": {
+    "name": "dannybauman",
+    "url": "https://github.com/dannybauman"
+  },
+  "plugins": [
+    {
+      "name": "groundstation",
+      "source": "./",
+      "description": "Earth data, agent-ready: STAC search across Earth Search/VEDA/Planetary Computer, TiTiler previews and band math, date comparisons, shareable maps, events and weather — as MCP tools plus an earth-data skill. Requires uv (https://docs.astral.sh/uv/)."
+    }
+  ]
+}
