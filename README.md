@@ -58,7 +58,7 @@ uv run briefing/brief.py --place "Chelan County, Washington" --days 10   # one A
 uv run briefing/brief.py --fleet briefing/fleet.json                     # morning sweep
 ```
 
-Gathers active events, weather, and fresh imagery for the AOI, computes an NDVI change signal against a same-tile baseline from ~a month back, has Claude synthesize a decision-ready brief (TL;DR + CALM/WATCH/ACT alert level, what changed, weather signal, fresh scenes, next steps), and writes a shareable HTML page with a live interactive map. Direct follow-through on team-week#155 ("Thinking Outside the Chat Box").
+Gathers active events, weather, and fresh imagery for the AOI, computes an NDVI change signal against a same-tile baseline from ~a month back, has Claude synthesize a decision-ready brief (TL;DR + CALM/WATCH/ACT alert level, what changed, weather signal, fresh scenes, next steps), and writes a shareable HTML page with a live interactive map. Follow-through on an internal "thinking outside the chat box" session: instead of being forced to ask the right question, Earth tells you what you need to know.
 
 Fleet mode runs a list of AOIs and writes a morning-sweep index page, sorted ACT → WATCH → CALM, one card per place. That's the ambient story: every area you care about, triaged before you sit down.
 
