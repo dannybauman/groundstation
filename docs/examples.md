@@ -1,6 +1,6 @@
-# Field test: twenty example prompts, actually run
+# Field test: thirty example prompts, actually run
 
-Twenty prompts across two rounds were run through the real agent path (headless Claude + the groundstation MCP server + the earth-data skill) on 2026-07-09. **20/20 produced correct answers and working maps.** Each round's misses became fixes the same day — the field test is the product loop.
+Thirty prompts across three rounds were run through the real agent path (headless Claude + the groundstation MCP server + the earth-data skill) on 2026-07-09. **30/30 produced correct answers and working maps.** Each round's misses became fixes the same day — the field test is the product loop.
 
 There's a visual walkthrough of all twenty at [`field-test.html`](field-test.html) (serve the console and open `/docs/field-test.html`).
 
@@ -35,6 +35,30 @@ Deliberately different shapes — other spectral indices, global triage, claim v
 | 18 | Nighttime lights or settlement data for Nairobi urbanization? | Surveyed VEDA's event nightlights, GRDI, HREA, io-lulc across catalogs, argued lights "saturate over a dense core" and swiped io-lulc built-up 2017 vs 2023 instead | dataset discovery with an opinion |
 | 19 | Burn severity for the Navarre Coulee fire (NBR) | Pre/post dNBR with the area-wide dilution explained, smoke-vs-cloud caveat, and "the burn may still be spreading past what this scene captures" | post-fire assessment, honestly caveated |
 | 20 | Same Munich scene in two catalogs — do they agree? | Exact agreement (0.606% cloud both), explained the differing ID conventions trace to the same ESA product | cross-catalog metadata trust |
+
+## Round 3: this month, and the map we hadn't touched
+
+New continents (South America, the Arctic, South Asia, the Sahel, the Caribbean), new sources (GOES geostationary, MODIS LST, JRC Global Surface Water, HREA), and July-2026 dynamics (Amazon clearing season, Greenland peak melt, Bangladesh monsoon, austral-winter snowpack, Baltic bloom season, early hurricane season). These runs also exercised the self-hosted tiler option end to end.
+
+| # | Prompt (short) | What happened | What it demonstrates |
+|---|---|---|---|
+| 21 | Amazon dry-season clearing check (Novo Progresso) | Refused to map NDVI (wet/dry seasonality would fake the signal), did the honest true-color read: fresh rectangular patches on the southeast forest margin, distinct from old fishbone clearing | method judgment beats index reflexes |
+| 22 | Greenland peak melt (Ilulissat) | Mean NDWI dropped while melt ponds grew — snow receding to bare ice, read correctly; coast melts all week, interior dips to −0.3°C July 12 | nuanced cryosphere signal |
+| 23 | Sylhet monsoon flooding, Sentinel-1 | Dark low-backscatter zone ballooning across the haor basins vs April; GDACS-lags caveat; found the local-tiler AWS_NO_SIGN_REQUEST gap | radar change detection + a config bug found by an agent |
+| 24 | What does GOES see right now? | 2 AM over the Gulf, so it rendered infrared Band 13; "GOES is the *when* instrument; Sentinel is the *where, precisely* instrument" | time-of-day awareness, geostationary literacy |
+| 25 | Phoenix urban heat island (MODIS LST) | Day/night LST swipe with a re-derived color range (global default saturates the Southwest in July); monsoon-push read from the round-2 wind-direction data | derived render params + prior fixes compounding |
+| 26 | Lake Chad seasonal vs permanent water (JRC GSW) | The seasonal fringe is river flood from the Chari/Logone, where recession agriculture happens — ~30M people depend on that ratio | a data layer turned into a livelihoods story |
+| 27 | Santiago snowpack, austral winter | Cajón del Maipo snow fraction 15.8% → 45.8% in a month, both scenes ~0% cloud, reservoirs named | southern-hemisphere seasonality, quantified |
+| 28 | Baltic cyanobacteria season (Gulf of Finland) | Ran an NDCI chlorophyll proxy beside true color: patchy bloom near Tallinn, not basin-wide; "a chlorophyll product would say 15 mg/m³ and rising" | looking green vs being a bloom |
+| 29 | Electrification around Kisumu (HREA) | Lightscore overlay on fresh imagery with two honest caveats: 2019 vintage, and (then-)missing PC statistics | development data with its limits stated |
+| 30 | Dominica pre-storm baseline | Archived baseline scene ids + a full post-landfall playbook: SAR first, NDVI vs baseline, NDWI floods, NBR for canopy water | preparedness as procedure |
+
+## Improvements round 3 produced
+
+1. **`AWS_NO_SIGN_REQUEST` in compose.yml** — found by example 23's agent when Sentinel-1 statistics 500'd on the local tiler (public buckets need unsigned requests when no credentials are present).
+2. **Planetary Computer statistics wired** — three agents hit the gap in one round; `compute_statistics` now works on PC, including named-asset expressions (`(B08-B04)/(B08+B04)` verified live).
+3. **PC tiling moved to the registered-mosaic path** — item-tiles render empty for reprojection-heavy sources (MODIS sinusoidal, GOES geostationary); the mosaic tiler is PC's canonical renderer and handles every collection (registrations persist, so artifacts stay shareable).
+4. **`colormap_name` passthrough on PC tiles** — LST and similar thematic layers need it.
 
 ## Improvements round 2 produced
 

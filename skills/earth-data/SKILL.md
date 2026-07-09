@@ -18,7 +18,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 - **earth-search** — fresh raw imagery. Sentinel-2 (`sentinel-2-l2a`), Sentinel-1 (`sentinel-1-grd`), NAIP, Copernicus DEM. First stop for "recent imagery of X". **Requester-pays exception**: earth-search's Landsat (`landsat-c2-l2`) and NAIP (`naip`) assets live in requester-pays buckets the tiler cannot read — for Landsat and NAIP, search and render on planetary-computer instead.
 - **veda** — NASA-curated analysis products: fire severity, air quality, climate indicators, disaster layers. First stop for "what does NASA have on X event".
-- **planetary-computer** — deep archive breadth: MODIS, land cover (`io-lulc-annual-v02`, `esa-worldcover`), biomass, DEMs. First stop for historical or thematic layers. Previews use the item's `rendered_preview`; statistics aren't wired yet.
+- **planetary-computer** — deep archive breadth: MODIS, land cover (`io-lulc-annual-v02`, `esa-worldcover`), biomass, DEMs. First stop for historical or thematic layers. Previews use the item's `rendered_preview`. Statistics work — note PC Sentinel-2 asset names are band ids (`B04`, `B08`), not color names.
 
 ## Conventions that save round trips
 

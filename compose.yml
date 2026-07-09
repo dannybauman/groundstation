@@ -14,6 +14,9 @@ services:
     environment:
       PORT: 8000
       WORKERS_PER_CORE: 1
+      # public buckets need unsigned requests when no AWS credentials are present
+      # (found by a field-test agent: Sentinel-1 statistics 500'd without this)
+      AWS_NO_SIGN_REQUEST: "YES"
       # AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       # AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       # AWS_REQUEST_PAYER: requester

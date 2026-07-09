@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>groundstation field test — 20 examples, actually run</title>
+<title>groundstation field test — 30 examples, actually run</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -63,15 +63,15 @@ footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var
 
 <header><div class="wrap">
   <h1><span class="dot"></span>THE FIELD TEST</h1>
-  <div class="sub">groundstation · 20 prompts · 2 rounds · July 9, 2026 · Development Seed labs</div>
+  <div class="sub">groundstation · 30 prompts · 3 rounds · July 9, 2026 · Development Seed labs</div>
   <p class="lede">Every example below was run for real: a headless Claude session with the groundstation MCP tools
   and the earth-data skill, answering the prompt with live data. Outputs are excerpts from the actual runs.
   Every miss became a fix the same day — the field test is the product loop.</p>
 </div></header>
 
 <div class="stats wrap" style="padding: 0 24px">
-  <div class="stat"><b>20/20</b><span>correct answers with working maps</span></div>
-  <div class="stat"><b>8</b><span>improvements shipped from what the runs exposed</span></div>
+  <div class="stat"><b>30/30</b><span>correct answers with working maps</span></div>
+  <div class="stat"><b>14</b><span>improvements shipped from what the runs exposed</span></div>
   <div class="stat"><b>0</b><span>API keys or accounts needed for any of it</span></div>
   <div class="stat"><b>3</b><span>eval layers guarding it (unit · live · grounding)</span></div>
 </div>
@@ -205,6 +205,72 @@ footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var
 <div class="answer"><div class="label">Output</div><b>Exact agreement: 0.606% cloud in both catalogs</b> — same ESA product under different ID conventions, both previews clear. The catalogs check out.</div>
 <a class="fig" href="/demo/map-munich-sentinel-2---earth-search-vs-planetary-computer--2026.html" target="_blank" title="open the live interactive map"><img src="img/ex20.jpg" alt="map produced by example 20" loading="lazy"><span class="open">live map ↗</span></a>
 <div class="shows">cross-catalog consistency, verified not assumed</div></div>
+
+</div>
+
+
+<h2 class="round">Round 3 — this month, and the map we hadn't touched</h2>
+<div class="grid">
+
+<div class="card"><div class="top"><div class="num">21</div><div class="tag">deforestation</div><div class="who">GNW / nature</div></div>
+<div><div class="label">Input</div><div class="prompt">It's the start of the Amazon dry season — check the area around Novo Progresso in Pará, Brazil for fresh forest clearing: compare vegetation now vs March, look for new bare patches, be honest about what optical can miss, and map what you find.</div></div>
+<div class="answer"><div class="label">Output</div><b>Refused to map NDVI</b> — a March-vs-July comparison would fake a "regrowth" signal from wet/dry seasonality — and did the honest true-color read: old fishbone clearing distinguished from <b>fresh rectangular patches cutting the southeast forest margin</b>, with a cloud caveat.</div>
+<a class="fig" href="/demo/map-novo-progresso--pará---dry-season-start-forest-clearing-chec.html" target="_blank" title="open the live interactive map"><img src="img/ex21.jpg" alt="map produced by example 21" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="shows">method judgment beats index reflexes</div></div>
+
+<div class="card"><div class="top"><div class="num">22</div><div class="tag">cryosphere</div><div class="who">climate / Arctic</div></div>
+<div><div class="label">Input</div><div class="prompt">It's peak Greenland melt season. Look at the Ilulissat/Jakobshavn area: latest usable imagery, a read on melt ponds or bare ice versus early June, and whether the week ahead stays above freezing.</div></div>
+<div class="answer"><div class="label">Output</div>Caught the subtle signal: <b>mean NDWI dropped while melt ponds grew</b> — snow receding to expose darker bare ice. Coast stays above freezing all week; the ice sheet interior dips to −0.3°C around July 12 for a brief refreeze.</div>
+<a class="fig" href="/demo/map-jakobshavn-isbræ---ilulissat---melt-progression.html" target="_blank" title="open the live interactive map"><img src="img/ex22.jpg" alt="map produced by example 22" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="shows">reading a nuanced signal correctly, not just reporting it</div></div>
+
+<div class="card"><div class="top"><div class="num">23</div><div class="tag">flood radar</div><div class="who">humanitarian / monsoon</div></div>
+<div><div class="label">Input</div><div class="prompt">Peak monsoon: assess flooding around Sylhet, Bangladesh using Sentinel-1 radar since optical will be clouded out — compare backscatter now vs pre-monsoon April and check disaster alerts.</div></div>
+<div class="answer"><div class="label">Output</div>The classic SAR flood signature: a dark low-backscatter zone <b>ballooning across the haor basins</b> west of Sylhet vs April. Noted GDACS/EONET lag ("no alert doesn't mean no flooding") — and <b>found our compose.yml gap</b> (S1 statistics 500'd without AWS_NO_SIGN_REQUEST).</div>
+<a class="fig" href="/demo/map-sylhet--bangladesh---sentinel-1-sar-flood-comparison.html" target="_blank" title="open the live interactive map"><img src="img/ex23.jpg" alt="map produced by example 23" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="learning"><b>Learning →</b> the agent found the local-tiler config gap; AWS_NO_SIGN_REQUEST is now in compose.yml.</div></div>
+
+<div class="card"><div class="top"><div class="num">24</div><div class="tag">geostationary</div><div class="who">storms / nowcasting</div></div>
+<div><div class="label">Input</div><div class="prompt">What does GOES see over the Gulf of Mexico right now? Find the most recent GOES imagery on Planetary Computer, show it, and explain what geostationary coverage gives us that Sentinel cannot.</div></div>
+<div class="answer"><div class="label">Output</div>It was 2 AM over the Gulf — so it rendered <b>infrared Band 13</b> because true color is dark at night, then nailed the tradeoff: "GOES is the <em>when</em> instrument; Sentinel is the <em>where, precisely</em> instrument."</div>
+<a class="fig" href="/demo/map-goes-19-over-the-gulf-of-mexico---2026-07-09-07-06-utc.html" target="_blank" title="open the live interactive map"><img src="img/ex24.jpg" alt="map produced by example 24" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="learning"><b>Learning →</b> GOES and MODIS tiles rendered empty via PC's item endpoint; PC tiling now uses the registered-mosaic path (their canonical renderer) for every collection.</div></div>
+
+<div class="card"><div class="top"><div class="num">25</div><div class="tag">urban heat</div><div class="who">cities / heat risk</div></div>
+<div><div class="label">Input</div><div class="prompt">Phoenix in July: use MODIS land surface temperature from Planetary Computer to show the urban heat island — the metro versus the surrounding desert — plus this week's forecast highs.</div></div>
+<div class="answer"><div class="label">Output</div>Day/night LST swipe with a <b>re-derived color range</b> (the global default saturates the whole Southwest red in July), an honest processing-lag note (newest composite ends June 18), and an early-monsoon read from the <b>wind direction</b> field added in round 2.</div>
+<a class="fig" href="/demo/map-phoenix-urban-heat-island---modis-land-surface-temperature.html" target="_blank" title="open the live interactive map"><img src="img/ex25.jpg" alt="map produced by example 25" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="shows">round-2 fixes already paying off downstream</div></div>
+
+<div class="card"><div class="top"><div class="num">26</div><div class="tag">surface water</div><div class="who">water security / Sahel</div></div>
+<div><div class="label">Input</div><div class="prompt">Using the JRC Global Surface Water data on Planetary Computer, show me where water is seasonal versus permanent around Lake Chad, and what that pattern means for the region.</div></div>
+<div class="answer"><div class="label">Output</div>Permanent pool vs seasonal fringe mapped, then the regional read: the pulse is <b>river flood arriving from the Chari and Logone</b>, the fringe is where recession agriculture and grazing happen, and ~30M people depend on that ratio.</div>
+<a class="fig" href="/demo/map-lake-chad---seasonal-vs--permanent-water--jrc-global-surface.html" target="_blank" title="open the live interactive map"><img src="img/ex26.jpg" alt="map produced by example 26" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="shows">a data layer turned into a livelihoods story</div></div>
+
+<div class="card"><div class="top"><div class="num">27</div><div class="tag">snowpack</div><div class="who">water supply / Andes</div></div>
+<div><div class="label">Input</div><div class="prompt">It's austral winter — how is the snowpack above Santiago, Chile building compared to early June? Snow-covered fraction for both dates and a swipe map. This is the city's drinking-water storage.</div></div>
+<div class="answer"><div class="label">Output</div>Named the actual basin and reservoirs (Cajón del Maipo, El Yeso, Laguna Negra): snow-covered fraction <b>15.8% → 45.8% in a month</b>, both scenes ~0% cloud — normal winter accumulation, quantified.</div>
+<a class="fig" href="/demo/map-snowpack-above-santiago---upper-maipo-basin--cajón-del-maipo.html" target="_blank" title="open the live interactive map"><img src="img/ex27.jpg" alt="map produced by example 27" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="shows">the southern hemisphere's July, handled correctly</div></div>
+
+<div class="card"><div class="top"><div class="num">28</div><div class="tag">water quality</div><div class="who">marine / EMODnet-shaped</div></div>
+<div><div class="label">Input</div><div class="prompt">July is cyanobacteria bloom season in the Baltic. Check the Gulf of Finland for visible algal blooms in the latest cloud-free Sentinel-2, describe the extent honestly, and say what a chlorophyll product would add over true color.</div></div>
+<div class="answer"><div class="label">Output</div>Ran an <b>NDCI chlorophyll proxy</b> alongside true color: patchy early-season bloom near Tallinn, not basin-wide, St. Petersburg inconclusive under cloud. Then the honest gap: "I can say 'this patch looks pigmented'; a chlorophyll product would say '15 mg/m³ and rising.'"</div>
+<a class="fig" href="/demo/map-gulf-of-finland---cyanobacteria-bloom-check--late-june-2026.html" target="_blank" title="open the live interactive map"><img src="img/ex28.jpg" alt="map produced by example 28" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="shows">knows the difference between looking green and being a bloom</div></div>
+
+<div class="card"><div class="top"><div class="num">29</div><div class="tag">development</div><div class="who">energy access / ADB-shaped</div></div>
+<div><div class="label">Input</div><div class="prompt">Using the HREA electricity access data on Planetary Computer, how does settlement electrification look around Kisumu, Kenya? Map it with recent imagery for context.</div></div>
+<div class="answer"><div class="label">Output</div>HREA lightscore overlaid at 75% opacity on fresh imagery — urban core green, fringe fading red — with the two honest caveats: the data is 2019 (Kenya's last-mile program may undersell current coverage), and PC statistics weren't wired, so "the map is the read here, not a number."</div>
+<a class="fig" href="/demo/map-settlement-electrification-around-kisumu--kenya.html" target="_blank" title="open the live interactive map"><img src="img/ex29.jpg" alt="map produced by example 29" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="learning"><b>Learning →</b> three round-3 agents hit the missing PC statistics; compute_statistics now works on planetary-computer (named-asset expressions included).</div></div>
+
+<div class="card"><div class="top"><div class="num">30</div><div class="tag">preparedness</div><div class="who">Caribbean / disaster response</div></div>
+<div><div class="label">Input</div><div class="prompt">Hurricane season just started: build a pre-storm baseline for Dominica — the latest cloud-free true color, confirm no active storms, and tell me exactly what you'd compare after a landfall (bands, indices, and why).</div></div>
+<div class="answer"><div class="label">Output</div>A complete post-landfall playbook: <b>SAR first</b> (cloud-independent), then compare_dates NDVI against the archived June 19 baseline scenes (ids stated), NDWI for flood extent, true color last — with NBR repurposed for canopy-water stress, referencing Maria 2017 as the severity yardstick.</div>
+<a class="fig" href="/demo/map-dominica---pre-storm-baseline--2026-06-19.html" target="_blank" title="open the live interactive map"><img src="img/ex30.jpg" alt="map produced by example 30" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="shows">the before is banked; the after is a procedure, not a scramble</div></div>
 
 </div>
 

@@ -89,6 +89,23 @@ def _mgrs_tile(item_id: str) -> str:
     return parts[1] if len(parts) > 1 else item_id
 
 
+_pc_mosaic_cache: dict[str, str] = {}
+
+
+def _pc_mosaic_id(collection_id: str, item_id: str) -> str:
+    # PC's registered-mosaic tiler is its canonical rendering path; registered
+    # searches persist server-side, so map artifacts built on them stay shareable
+    key = f"{collection_id}:{item_id}"
+    if key not in _pc_mosaic_cache:
+        r = _client.post(
+            "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/register",
+            json={"collections": [collection_id], "ids": [item_id]},
+        )
+        r.raise_for_status()
+        _pc_mosaic_cache[key] = r.json()["id"]
+    return _pc_mosaic_cache[key]
+
+
 def _get_json(url: str, **kwargs: Any) -> Any:
     r = _client.get(url, **kwargs)
     r.raise_for_status()
@@ -337,18 +354,22 @@ def search_imagery(
 # ---------------------------------------------------------------- rasters
 
 
-def _expression_to_bands(expression: str, assets: list[str] | None) -> tuple[str, list[str]]:
-    # titiler.xyz /stac merges the assets list into bands b1..bN, so a friendly
-    # expression like (nir-red)/(nir+red) must become (b1-b2)/(b1+b2) with
-    # assets=[nir, red] in matching order.
+def _expression_idents(expression: str) -> list[str]:
     funcs = {"where", "abs", "sqrt", "min", "max", "log", "exp", "sin", "cos", "b"}
     idents = [
         t
         for t in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]*", expression)
         if t not in funcs and not re.fullmatch(r"b\d+", t)
     ]
+    return list(dict.fromkeys(idents))  # order of first appearance
+
+
+def _expression_to_bands(expression: str, assets: list[str] | None) -> tuple[str, list[str]]:
+    # titiler.xyz /stac merges the assets list into bands b1..bN, so a friendly
+    # expression like (nir-red)/(nir+red) must become (b1-b2)/(b1+b2) with
+    # assets=[nir, red] in matching order.
     if not assets:
-        assets = list(dict.fromkeys(idents))  # order of first appearance
+        assets = _expression_idents(expression)
     for i, a in enumerate(assets, start=1):
         expression = re.sub(rf"\b{re.escape(a)}\b", f"b{i}", expression)
     return expression, assets
@@ -417,19 +438,25 @@ def compute_statistics(
     """Compute pixel statistics (min/max/mean/std/histogram) for a STAC item.
 
     expression is band math over asset names, e.g. "(nir-red)/(nir+red)" for
-    NDVI on Sentinel-2 (Earth Search asset names). Optionally clip to an AOI
-    GeoJSON Feature. Backed by TiTiler /stac/statistics.
+    NDVI on Sentinel-2 (Earth Search asset names; Planetary Computer uses band
+    ids like B04/B08 — check describe_collection). Optionally clip to an AOI
+    GeoJSON Feature. Backed by the catalog's tiler statistics endpoint.
     """
     backend = CATALOGS[catalog]["raster"]
-    if backend == "pc":
-        return {"error": "statistics not wired for planetary-computer yet; use earth-search or veda"}
     params: list[tuple[str, str]] = [("max_size", "512")]
     if expression:
-        expression, assets = _expression_to_bands(expression, assets)
-        params.append(("expression", expression))
+        if backend == "pc":  # PC accepts named-asset expressions directly
+            params += [("expression", expression), ("asset_as_band", "true")]
+            assets = assets or _expression_idents(expression)
+        else:
+            expression, assets = _expression_to_bands(expression, assets)
+            params.append(("expression", expression))
     for a in assets or _default_assets(collection_id) or ["visual"]:
         params.append(("assets", a))
-    if backend == "veda":
+    if backend == "pc":
+        base = "https://planetarycomputer.microsoft.com/api/data/v1/item/statistics"
+        params += [("collection", collection_id), ("item", item_id)]
+    elif backend == "veda":
         base = f"https://openveda.cloud/api/raster/collections/{collection_id}/items/{item_id}/statistics"
     else:
         base = f"{TITILER}/stac/statistics"
@@ -475,15 +502,19 @@ def tile_url_template(
         rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
     backend = CATALOGS[catalog]["raster"]
     if backend == "pc":
-        params = [("collection", collection_id), ("item", item_id)] + [
-            ("assets", a) for a in assets
-        ]
+        # item-tiles render empty for reprojection-heavy sources (MODIS
+        # sinusoidal, GOES geostationary); the registered mosaic handles all
+        # collections. Costs one registration POST per unique item (cached).
+        mid = _pc_mosaic_id(collection_id, item_id)
+        params = [("collection", collection_id)] + [("assets", a) for a in assets]
         if rescale:
             params.append(("rescale", rescale))
+        if colormap_name:
+            params.append(("colormap_name", colormap_name))
         q = str(httpx.QueryParams(params))
         return (
-            "https://planetarycomputer.microsoft.com/api/data/v1/item/tiles/"
-            "WebMercatorQuad/{z}/{x}/{y}@1x.png?" + q
+            f"https://planetarycomputer.microsoft.com/api/data/v1/mosaic/{mid}"
+            "/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?" + q
         )
     if backend == "veda":
         params = [("assets", a) for a in assets or ["cog_default"]]
