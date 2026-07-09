@@ -568,7 +568,8 @@ async function ndviCard(it) {
       <div class="stat"><div class="stat-value">${b.min.toFixed(2)}</div><div class="stat-label">min</div></div>
       <div class="stat"><div class="stat-value">${b.max.toFixed(2)}</div><div class="stat-label">max</div></div></div>
       <p class="hint" style="margin-top:8px">(nir−red)/(nir+red) on ${(it.datetime||"").slice(0,10)} via TiTiler — no download, no notebook.</p>
-      <div class="actions" style="margin-top:8px"><button class="abtn" onclick="askWith('Compare NDVI at ' + state.query + ' between ${(it.datetime||"").slice(0,10)} and roughly one month earlier, same area, and render a map with both dates so I can toggle.')">Compare vs last month</button></div>`);
+      <div class="actions" style="margin-top:8px"><button class="abtn" id="cmp-btn" onclick="runCompare()">Compare vs last month</button></div>
+      <div id="cmp-out"></div>`);
   } catch (e) {
     gathered("ndvi", { error: String(e.message).slice(0,120) });
     card("c-ndvi", "Vegetation · NDVI", `<p class="err">stats unavailable: ${String(e.message).slice(0,120)}</p>`);
@@ -690,6 +691,28 @@ async function runInsight() {
   } catch (e) {
     card("c-insight", "What this means", `<p class="hint">interpretation unavailable — ${String(e.message).slice(0,80)}</p>`);
   }
+}
+
+async function runCompare() {
+  if (!state.g) return;
+  const [w, s, e, n] = state.g.bbox;
+  $("cmp-btn").disabled = true;
+  $("cmp-out").innerHTML = loading("matching scenes from the same tile, computing both dates (~1 min)…");
+  try {
+    const r = await api(`/api/compare?place=${encodeURIComponent(state.query)}&w=${w}&s=${s}&e=${e}&n=${n}`);
+    if (r.error) { $("cmp-out").innerHTML = `<p class="err">${r.error}</p>`; }
+    else {
+      const dir = r.delta > 0 ? "greener" : "browner";
+      const name = r.map_path.split("/").pop();
+      $("cmp-out").innerHTML = `<div class="stat-row" style="margin-top:8px">
+        <div class="stat"><div class="stat-value">${r.before.mean}</div><div class="stat-label">${r.before.date}</div></div>
+        <div class="stat"><div class="stat-value">${r.after.mean}</div><div class="stat-label">${r.after.date}</div></div>
+        <div class="stat"><div class="stat-value">${r.delta > 0 ? "+" : ""}${r.delta}</div><div class="stat-label">delta (${dir})</div></div></div>
+        <p class="hint" style="margin-top:6px">same tile ${r.tile}, ${r.expression}</p>
+        <p><a class="abtn" style="text-decoration:none;display:inline-block;margin-top:4px" href="/demo/${name}" target="_blank">Open swipe map ↗</a></p>`;
+    }
+  } catch (err) { $("cmp-out").innerHTML = `<p class="err">${String(err.message).slice(0,140)}</p>`; }
+  $("cmp-btn").disabled = false;
 }
 
 /* ---------------- long jobs ---------------- */

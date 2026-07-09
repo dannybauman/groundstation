@@ -32,6 +32,7 @@ for fn in (
     tools.search_imagery,
     tools.preview_item,
     tools.compute_statistics,
+    tools.compare_dates,
     tools.tile_url_template,
     tools.render_map,
     tools.active_events,

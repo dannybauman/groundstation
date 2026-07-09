@@ -81,6 +81,11 @@ def api_ndvi(collection: str, item: str):
     return tools.compute_statistics("earth-search", collection, item, expression="(nir-red)/(nir+red)")
 
 
+@app.get("/api/compare")
+def api_compare(place: str, w: float, s: float, e: float, n: float):
+    return tools.compare_dates(place=place, bbox=[w, s, e, n])
+
+
 @app.get("/api/artifacts")
 def api_artifacts():
     DEMO.mkdir(exist_ok=True)

@@ -635,6 +635,102 @@ def render_map(
     return {"map_path": out_path, "layers": [l["name"] for l in resolved]}
 
 
+def compare_dates(
+    place: str | None = None,
+    bbox: list[float] | None = None,
+    window_before: str = "",
+    window_after: str = "",
+    expression: str = "(nir-red)/(nir+red)",
+    max_cloud_cover: float = 40,
+) -> dict[str, Any]:
+    """Compare two time windows over a place: matched scenes, index delta, swipe map.
+
+    The most common Earth question is "what changed?" — this answers it in one
+    call. Windows are RFC3339 ranges ("2026-06-01T00:00:00Z/2026-06-30T23:59:59Z");
+    window_after defaults to the last 14 days, window_before to roughly one month
+    earlier. Picks Sentinel-2 scenes from the SAME MGRS tile (best AOI coverage,
+    lowest cloud), computes the expression's stats for both dates, and writes a
+    side-by-side swipe map. Returns scenes, means, delta, and map_path.
+    """
+    import datetime as dt
+
+    if bbox is None and place:
+        g = geocode(place)
+        if "error" in g:
+            return g
+        bbox = g["bbox"]
+    if bbox is None:
+        return {"error": "Provide bbox or place"}
+    today = dt.date.today()
+    if not window_after:
+        window_after = f"{(today - dt.timedelta(days=14)).isoformat()}T00:00:00Z/{today.isoformat()}T23:59:59Z"
+    if not window_before:
+        window_before = (
+            f"{(today - dt.timedelta(days=55)).isoformat()}T00:00:00Z/"
+            f"{(today - dt.timedelta(days=25)).isoformat()}T23:59:59Z"
+        )
+
+    def _search(window: str) -> list[dict[str, Any]]:
+        r = search_imagery(
+            "earth-search", ["sentinel-2-l2a"], bbox=bbox,
+            datetime_range=window, max_cloud_cover=max_cloud_cover, limit=25,
+        )
+        return r.get("items", [])
+
+    after_items, before_items = _search(window_after), _search(window_before)
+    if not after_items or not before_items:
+        return {"error": f"Not enough scenes: {len(after_items)} after, {len(before_items)} before. Widen windows or cloud limit."}
+
+    def _tile(it: dict[str, Any]) -> str:
+        parts = it["id"].split("_")
+        return parts[1] if len(parts) > 1 else it["id"]
+
+    def _coverage(it: dict[str, Any]) -> float:
+        w, s, e, n = bbox
+        iw, is_, ie, in_ = it["bbox"]
+        ov = max(0, min(e, ie) - max(w, iw)) * max(0, min(n, in_) - max(s, is_))
+        return ov / max((e - w) * (n - s), 1e-9)
+
+    shared = {_tile(i) for i in after_items} & {_tile(i) for i in before_items}
+    if not shared:
+        return {"error": "No shared Sentinel-2 tile between the two windows — try wider windows."}
+    best_tile = max(shared, key=lambda t: max(_coverage(i) for i in after_items if _tile(i) == t))
+    pick = lambda items: min(  # noqa: E731
+        (i for i in items if _tile(i) == best_tile), key=lambda i: i.get("cloud_cover") or 100
+    )
+    a, b = pick(after_items), pick(before_items)
+
+    def _mean(it: dict[str, Any]) -> float | None:
+        try:
+            s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression)
+            return round(next(iter(s.values()))["mean"], 4)
+        except Exception:
+            return None
+
+    mean_after, mean_before = _mean(a), _mean(b)
+    layer = lambda it, name: {  # noqa: E731
+        "type": "item", "name": name, "catalog": "earth-search",
+        "collection_id": it["collection"], "item_id": it["id"],
+        "expression": expression, "rescale": "-1,1", "colormap_name": "rdylgn",
+    }
+    m = render_map(
+        title=f"{place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}",
+        subtitle=f"{expression} · drag the divider · tile {best_tile}",
+        bbox=bbox,
+        layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
+    )
+    delta = round(mean_after - mean_before, 4) if mean_after is not None and mean_before is not None else None
+    return {
+        "tile": best_tile,
+        "after": {"id": a["id"], "date": a["datetime"][:10], "cloud": a.get("cloud_cover"), "mean": mean_after},
+        "before": {"id": b["id"], "date": b["datetime"][:10], "cloud": b.get("cloud_cover"), "mean": mean_before},
+        "delta": delta,
+        "delta_pct": round(delta / abs(mean_before) * 100, 1) if delta is not None and mean_before else None,
+        "expression": expression,
+        "map_path": m["map_path"],
+    }
+
+
 # ---------------------------------------------------------------- monitoring
 
 
