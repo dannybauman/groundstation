@@ -409,14 +409,26 @@ function mdRender(text) {
     '<a href="$2" target="_blank">$1</a>');
   s = s.replace(/(^|[\s(])(https?:\/\/[^\s)<]+)/g, '$1<a href="$2" target="_blank">$2</a>');
   s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
-  const out = []; let inList = false;
+  const out = []; let inList = false; let tbl = null;
+  const flushTbl = () => {
+    if (!tbl) return;
+    const rows = tbl.filter(r => !/^\|?[\s:|-]+$/.test(r));  // drop |---|---| separators
+    const cells = r => r.replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+    out.push("<table>" + rows.map((r, i) =>
+      "<tr>" + cells(r).map(c => `<${i ? "td" : "th"}>${c}</${i ? "td" : "th"}>`).join("") + "</tr>"
+    ).join("") + "</table>");
+    tbl = null;
+  };
   for (const line of s.split("\n")) {
     const t = line.trim();
+    if (t.startsWith("|")) { if (inList) { out.push("</ul>"); inList = false; } (tbl = tbl || []).push(t); continue; }
+    flushTbl();
     if (/^#{1,4} /.test(t)) { if (inList) { out.push("</ul>"); inList = false; } out.push(`<h2>${t.replace(/^#+ /, "")}</h2>`); }
     else if (/^[-*] /.test(t)) { if (!inList) { out.push("<ul>"); inList = true; } out.push(`<li>${t.slice(2)}</li>`); }
     else if (/^\d+\. /.test(t)) { if (!inList) { out.push("<ul>"); inList = true; } out.push(`<li>${t.replace(/^\d+\. /, "")}</li>`); }
     else if (t) { if (inList) { out.push("</ul>"); inList = false; } out.push(`<p>${t}</p>`); }
   }
+  flushTbl();
   if (inList) out.push("</ul>");
   return out.join("\n");
 }
