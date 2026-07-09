@@ -473,6 +473,14 @@ _MAP_TEMPLATE = """<!doctype html>
   #panel label { display: block; margin: 2px 0; cursor: pointer; }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px system-ui, sans-serif;
     color: #333; background: rgba(255,255,255,.8); padding: 2px 8px; border-radius: 6px; }
+  #mapL { position: absolute; inset: 0; z-index: 1; }
+  #divider { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: #10222e;
+    z-index: 3; cursor: ew-resize; touch-action: none; }
+  #divider .knob { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 34px; height: 34px; border-radius: 50%; background: #10222e; color: #fff;
+    display: flex; align-items: center; justify-content: center; font: 13px system-ui; }
+  .side-label { position: absolute; bottom: 52px; z-index: 2; background: rgba(255,255,255,.94);
+    padding: 4px 11px; border-radius: 6px; font: 12px system-ui, sans-serif; box-shadow: 0 1px 5px rgba(0,0,0,.15); }
 </style></head><body>
 <div id="map"></div>
 <div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div></div>
@@ -480,50 +488,95 @@ _MAP_TEMPLATE = """<!doctype html>
 <script>
 const LAYERS = __LAYERS__;
 const BBOX = __BBOX__;
-const map = new maplibregl.Map({
-  container: "map",
-  style: { version: 8, sources: { basemap: { type: "raster",
-      tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
-      attribution: "&copy; OpenStreetMap &copy; CARTO" } },
-    layers: [{ id: "basemap", type: "raster", source: "basemap" }] },
-  bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]], fitBoundsOptions: { padding: 40 }
-});
-map.addControl(new maplibregl.NavigationControl());
-map.on("load", () => {
-  const toggles = document.getElementById("toggles");
-  LAYERS.forEach((l, i) => {
-    const id = "layer" + i;
-    if (l.type === "raster") {
-      map.addSource(id, { type: "raster", tiles: [l.tiles], tileSize: 256 });
-      map.addLayer({ id, type: "raster", source: id,
-        paint: { "raster-opacity": l.opacity ?? 1 } });
-    } else if (l.type === "geojson") {
-      map.addSource(id, { type: "geojson", data: l.data });
-      map.addLayer({ id: id + "-fill", type: "circle", source: id,
-        paint: { "circle-radius": 7, "circle-color": l.color || "#d63b3b",
-                 "circle-opacity": .85, "circle-stroke-width": 1.5, "circle-stroke-color": "#fff" },
-        filter: ["==", ["geometry-type"], "Point"] });
-      map.addLayer({ id: id + "-line", type: "line", source: id,
-        paint: { "line-color": l.color || "#d63b3b", "line-width": 2 },
-        filter: ["!=", ["geometry-type"], "Point"] });
-      map.on("click", id + "-fill", (e) => {
-        const p = e.features[0].properties;
-        new maplibregl.Popup().setLngLat(e.lngLat)
-          .setHTML("<b>" + (p.title || p.name || "") + "</b><br>" + (p.description || p.date || ""))
-          .addTo(map);
-      });
-    }
-    const row = document.createElement("label");
-    const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.checked = true;
-    cb.onchange = () => {
-      const vis = cb.checked ? "visible" : "none";
-      [id, id + "-fill", id + "-line"].forEach(x => map.getLayer(x) && map.setLayoutProperty(x, "visibility", vis));
-    };
-    row.appendChild(cb); row.appendChild(document.createTextNode(" " + l.name));
-    toggles.appendChild(row);
+const BASE_STYLE = () => ({ version: 8, sources: { basemap: { type: "raster",
+    tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
+    attribution: "&copy; OpenStreetMap &copy; CARTO" } },
+  layers: [{ id: "basemap", type: "raster", source: "basemap" }] });
+const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
+  fitBoundsOptions: { padding: 40 } };
+
+function addLayerTo(m, l, i) {
+  const id = "layer" + i;
+  if (l.type === "raster") {
+    m.addSource(id, { type: "raster", tiles: [l.tiles], tileSize: 256 });
+    m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": l.opacity ?? 1 } });
+  } else if (l.type === "geojson") {
+    m.addSource(id, { type: "geojson", data: l.data });
+    m.addLayer({ id: id + "-fill", type: "circle", source: id,
+      paint: { "circle-radius": 7, "circle-color": l.color || "#d63b3b",
+               "circle-opacity": .85, "circle-stroke-width": 1.5, "circle-stroke-color": "#fff" },
+      filter: ["==", ["geometry-type"], "Point"] });
+    m.addLayer({ id: id + "-line", type: "line", source: id,
+      paint: { "line-color": l.color || "#d63b3b", "line-width": 2 },
+      filter: ["!=", ["geometry-type"], "Point"] });
+    m.on("click", id + "-fill", (e) => {
+      const p = e.features[0].properties;
+      new maplibregl.Popup().setLngLat(e.lngLat)
+        .setHTML("<b>" + (p.title || p.name || "") + "</b><br>" + (p.description || p.date || ""))
+        .addTo(m);
+    });
+  }
+}
+
+const rasters = LAYERS.map((l, i) => ({ ...l, i })).filter(l => l.type === "raster");
+const geojsons = LAYERS.map((l, i) => ({ ...l, i })).filter(l => l.type === "geojson");
+
+if (rasters.length === 2) {
+  // comparison: two synced maps, right one on top clipped left of a draggable divider
+  document.getElementById("map").insertAdjacentHTML("afterend",
+    `<div id="mapL"></div><div id="divider"><div class="knob">◂▸</div></div>
+     <div class="side-label" style="left:12px">◂ ${rasters[1].name}</div>
+     <div class="side-label" style="right:12px">${rasters[0].name} ▸</div>`);
+  const mapR = new maplibregl.Map({ container: "map", ...MAP_OPTS });
+  const mapL = new maplibregl.Map({ container: "mapL", style: BASE_STYLE(),
+    bounds: MAP_OPTS.bounds, fitBoundsOptions: MAP_OPTS.fitBoundsOptions });
+  mapR.addControl(new maplibregl.NavigationControl());
+  mapR.on("load", () => { addLayerTo(mapR, rasters[0], rasters[0].i); geojsons.forEach(g => addLayerTo(mapR, g, g.i)); });
+  mapL.on("load", () => { addLayerTo(mapL, rasters[1], rasters[1].i); geojsons.forEach(g => addLayerTo(mapL, g, g.i)); });
+  let syncing = false;
+  const follow = (src, dst) => src.on("move", () => {
+    if (syncing) return; syncing = true;
+    dst.jumpTo({ center: src.getCenter(), zoom: src.getZoom(), bearing: src.getBearing(), pitch: src.getPitch() });
+    syncing = false;
   });
-});
+  follow(mapL, mapR); follow(mapR, mapL);
+  const divider = document.getElementById("divider"), left = document.getElementById("mapL");
+  const setSplit = x => {
+    const w = document.body.clientWidth;
+    x = Math.max(30, Math.min(w - 30, x));
+    divider.style.left = x + "px";
+    // clip-path also clips pointer events, so each half stays independently draggable
+    left.style.clipPath = `inset(0 ${w - x}px 0 0)`;
+  };
+  setSplit(document.body.clientWidth / 2);
+  divider.addEventListener("pointerdown", e => {
+    e.preventDefault(); divider.setPointerCapture(e.pointerId);
+    const move = ev => setSplit(ev.clientX);
+    divider.addEventListener("pointermove", move);
+    divider.addEventListener("pointerup", () => divider.removeEventListener("pointermove", move), { once: true });
+  });
+  window.addEventListener("resize", () => setSplit(parseFloat(divider.style.left)));
+  document.getElementById("toggles").innerHTML = '<span style="color:#555">drag the divider to compare</span>';
+} else {
+  const map = new maplibregl.Map({ container: "map", ...MAP_OPTS });
+  map.addControl(new maplibregl.NavigationControl());
+  map.on("load", () => {
+    const toggles = document.getElementById("toggles");
+    LAYERS.forEach((l, i) => {
+      addLayerTo(map, l, i);
+      const id = "layer" + i;
+      const row = document.createElement("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox"; cb.checked = true;
+      cb.onchange = () => {
+        const vis = cb.checked ? "visible" : "none";
+        [id, id + "-fill", id + "-line"].forEach(x => map.getLayer(x) && map.setLayoutProperty(x, "visibility", vis));
+      };
+      row.appendChild(cb); row.appendChild(document.createTextNode(" " + l.name));
+      toggles.appendChild(row);
+    });
+  });
+}
 </script></body></html>
 """
 
