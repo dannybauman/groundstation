@@ -144,6 +144,35 @@ html, body { margin: 0; height: 100%; font-family: Roboto, sans-serif; color: va
 .artifact .kind { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--white); background: var(--mid); padding: 2px 6px; }
 .artifact .kind.brief { background: var(--accent); }
 footer#credit { position: absolute; left: 12px; bottom: 4px; z-index: 5; font: 400 9.5px 'Roboto Mono', monospace; color: var(--muted); }
+
+/* ------------------------------------------------ welcome */
+#welcome-overlay {
+  position: fixed; inset: 0; z-index: 60; background: rgba(68,63,63,.45); display: none;
+  align-items: flex-start; justify-content: center; overflow-y: auto; padding: 6vh 20px 40px;
+}
+#welcome-overlay.open { display: flex; }
+#welcome-box {
+  background: var(--paper); border: 2px solid var(--ink); max-width: 720px; width: 100%;
+  padding: 30px 34px 26px; animation: rise .3s ease both; position: relative;
+}
+#welcome-box h1 { font: 700 30px/1.1 'Roboto Condensed', sans-serif; margin: 0 0 2px; }
+#welcome-box h1 .dot { display: inline-block; width: 13px; height: 13px; border-radius: 50%; background: var(--accent); margin-right: 10px; }
+#welcome-box .sub { font: 500 11px 'Roboto Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); margin-bottom: 18px; }
+#welcome-box h3 {
+  font: 500 10.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--mid);
+  display: flex; align-items: center; gap: 8px; margin: 20px 0 6px;
+}
+#welcome-box h3::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+#welcome-box p { font-size: 13.5px; line-height: 1.6; color: var(--ink); margin: 6px 0; }
+#welcome-box .ex { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#welcome-box .ex button {
+  font: 400 12px 'Roboto Mono', monospace; border: 1px solid var(--rule); background: var(--white);
+  color: var(--mid); padding: 7px 11px; cursor: pointer; text-align: left;
+}
+#welcome-box .ex button:hover { border-color: var(--accent); color: var(--accent); }
+#welcome-box .close-x { position: absolute; top: 12px; right: 14px; border: 0; background: none; font-size: 20px; color: var(--mid); cursor: pointer; }
+#welcome-box .start { margin-top: 22px; display: flex; align-items: center; gap: 12px; }
+#welcome-box .credits { font-size: 12.5px; line-height: 1.65; color: var(--mid); }
 </style>
 </head>
 <body>
@@ -156,6 +185,61 @@ footer#credit { position: absolute; left: 12px; bottom: 4px; z-index: 5; font: 4
   </div>
   <button class="barbtn" onclick="openPanel('ask')">Ask the agent</button>
   <button class="barbtn" onclick="openArtifacts()">Briefs &amp; maps</button>
+  <button class="barbtn" onclick="showWelcome()" title="what is this?">?</button>
+</div>
+
+<div id="welcome-overlay">
+  <div id="welcome-box">
+    <button class="close-x" onclick="hideWelcome()">✕</button>
+    <h1><span class="dot"></span>GROUNDSTATION</h1>
+    <div class="sub">Development Seed · Labs prototype</div>
+
+    <h3>What this is</h3>
+    <p>A console for looking at Earth, right now. Type any place and it pulls together the freshest
+       satellite images, wildfires and disaster alerts, and the week's weather, all on one map.
+       No downloads, no GIS software, no account.</p>
+
+    <h3>Why it exists</h3>
+    <p>Everything here runs on the same open building blocks Development Seed builds for space agencies
+       and environmental organizations. The point of the prototype: those building blocks are now easy
+       enough to use that an AI agent, or this simple page, can answer real questions about a place in
+       seconds. The same tools behind this console plug into Claude and other AI assistants.</p>
+
+    <h3>How to use it</h3>
+    <p>Type a place in the top bar and hit Scan. Click a scene to stream it onto the map, click an event
+       to fly to it. "Generate Earth brief" writes a short situation report for the area, and "Ask the
+       agent" lets you ask a free question, an AI answers using these same tools and hands back a map.</p>
+
+    <h3>This page is the smallest part</h3>
+    <p>The console is one of three doors into the same engine built for this prototype:
+       a set of tools any AI assistant can use directly (an MCP server plus a Claude skill, so you can
+       ask Claude itself to search imagery, run vegetation math, and produce maps), and an Earth
+       briefing engine that runs on a schedule with nobody asking, checks every place on its watch
+       list, measures what changed since last month, and writes a triaged morning report. Ten live
+       checks against the real data services keep the whole thing honest. What you're clicking is
+       the thin surface over that.</p>
+
+    <h3>Try one of these</h3>
+    <div class="ex">
+      <button onclick="tryExample('Chelan County, Washington')">what's burning near Chelan County?</button>
+      <button onclick="tryExample('Barotse Floodplain')">flood season on the Barotse Floodplain</button>
+      <button onclick="tryExample('Efate, Vanuatu')">storm watch over Efate, Vanuatu</button>
+      <button onclick="tryExample('Ashburn, Virginia')">the Ashburn data center corridor</button>
+    </div>
+
+    <h3>Built on</h3>
+    <p class="credits">Imagery search via STAC (Earth Search, NASA VEDA, Microsoft Planetary Computer),
+       tiles and pixel math via TiTiler (Vincent Sarago and team), deep exploration via stac-map
+       (Pete Gadomski) rendering scenes in your browser with deck.gl-raster (Kyle Barron). Events from
+       NASA EONET and GDACS, weather from Open-Meteo. Ideas it follows through on: Will Rynearson's
+       "what if Earth could tell us what we needed to know," and the team's push to make Earth data
+       AI-ready.</p>
+
+    <div class="start">
+      <button class="abtn primary" onclick="hideWelcome()">Start scanning</button>
+      <span class="hint">reopen anytime with the ? button</span>
+    </div>
+  </div>
 </div>
 
 <div id="stage">
@@ -287,8 +371,17 @@ async function loadScenes(g, days, cloud) {
     </div>`).join("");
   card("c-scenes", `Fresh imagery · ${r.count} scenes`, rows +
     `<p class="hint" style="margin-top:8px">Click a scene to stream it onto the map (TiTiler). The clearest loaded automatically.</p>`);
+  // prefer scenes that actually cover the AOI, then low cloud — a 0%-cloud
+  // sliver tile that clips the AOI corner must not beat a 5%-cloud full tile
+  const [aw,as_,ae,an] = state.g.bbox;
+  const aoiArea = Math.max((ae-aw)*(an-as_), 1e-9);
+  const score = it => {
+    const [w,s,e,n] = it.bbox;
+    const ov = Math.max(0, Math.min(e,ae)-Math.max(w,aw)) * Math.max(0, Math.min(n,an)-Math.max(s,as_));
+    return (ov/aoiArea) - (it.cloud_cover??100)/200;
+  };
   let best = 0;
-  state.scenes.slice(0,7).forEach((it,i) => { if ((it.cloud_cover??100) < (state.scenes[best].cloud_cover??100)) best = i; });
+  state.scenes.slice(0,7).forEach((it,i) => { if (score(it) > score(state.scenes[best])) best = i; });
   showScene(best);
 }
 
@@ -441,8 +534,13 @@ function toggleLayer(id) {
   map.setLayoutProperty(id, "visibility", vis);
   $("chip-"+id).classList.toggle("off", vis === "none");
 }
+function showWelcome() { $("welcome-overlay").classList.add("open"); }
+function hideWelcome() { $("welcome-overlay").classList.remove("open"); localStorage.setItem("gs-welcomed", "1"); }
+function tryExample(place) { hideWelcome(); $("q").value = place; go(); }
+if (!localStorage.getItem("gs-welcomed")) showWelcome();
+
 $("q").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
-document.addEventListener("keydown", e => { if (e.key === "Escape") closePanels(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closePanels(); hideWelcome(); } });
 </script>
 </body>
 </html>
