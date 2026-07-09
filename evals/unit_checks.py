@@ -68,7 +68,34 @@ def t_render_map_compare_mode():
         ]
         tools.render_map("t", [0, 0, 1, 1], layers, out_path=out)
         html = Path(out).read_text(encoding="utf-8")
-        assert "rasters.length === 2" in html and "divider" in html and "clipPath" not in html.split("<script>")[0]
+        assert "const COMPARE = true" in html and "divider" in html
+
+
+def t_render_map_overlay_mode():
+    # different collections = overlay (severity over imagery), never a swipe
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        layers = [
+            {"type": "item", "name": "S2", "catalog": "earth-search", "collection_id": "sentinel-2-l2a", "item_id": "X"},
+            {"type": "item", "name": "severity", "catalog": "veda", "collection_id": "caldor-fire-burn-severity",
+             "item_id": "bs_to_save", "assets": ["cog_default"], "opacity": 0.75},
+        ]
+        tools.render_map("t", [0, 0, 1, 1], layers, out_path=out)
+        html = Path(out).read_text(encoding="utf-8")
+        assert "const COMPARE = false" in html
+        assert '"opacity": 0.75' in html
+
+
+def t_render_map_compare_override():
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        layers = [
+            {"type": "raster", "name": "A", "tiles": "https://x/{z}/{x}/{y}"},
+            {"type": "raster", "name": "B", "tiles": "https://y/{z}/{x}/{y}"},
+        ]
+        tools.render_map("t", [0, 0, 1, 1], layers, out_path=out, compare=True)
+        html = Path(out).read_text(encoding="utf-8")
+        assert "const COMPARE = true" in html
 
 
 def t_md_to_html():

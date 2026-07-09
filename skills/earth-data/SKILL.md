@@ -26,6 +26,9 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 - Sentinel-2 true color: `assets=["visual"]` — one COG, no rescale needed. Landsat: `["red","green","blue"]` with `rescale="0,0.3"` (surface reflectance floats) — check `describe_collection` if colors look wrong.
 - NDVI on Sentinel-2 (earth-search): `expression="(nir-red)/(nir+red)"`. NDWI: `"(green-nir)/(green+nir)"`. Asset names, not band numbers — translation to TiTiler band indices happens for you.
 - **Index layers on maps**: pass the same `expression` on the `render_map` item layer with `rescale="-1,1"` and `colormap_name="rdylgn"` (never bare `assets=[nir, red]` — that renders raw reflectance, which shows as blank).
+- **Overlay vs compare**: two rasters of the same collection auto-render as a swipe comparison; different collections stack as toggleable overlays (pass `compare` to override). A thematic layer over imagery (burn severity, land cover) should carry `opacity` ~0.75 so the imagery shows through.
+- **Sentinel-1 GRD** (earth-search): `vv`/`vh` assets are unscaled digital numbers, not dB — don't guess a rescale, run `compute_statistics` first and stretch to roughly the 2nd–98th percentile. Radar is the answer when optical is clouded out.
+- **Region-scale place names** (a coffee zone, a floodplain, a corridor): geocoding may return a tiny point-feature bbox. Sanity-check the bbox size against the question's scale and widen it yourself before searching, or geocode a better-known containing name.
 - Comparing two dates: search with two `datetime_range` windows, then `render_map` with both items as layers (newest on top) so the user can toggle. Name layers with their dates.
 - VEDA layers usually want `assets=["cog_default"]` plus a `rescale`/`colormap_name`; check the collection's `renders` metadata via `describe_collection` when unsure.
 

@@ -518,10 +518,11 @@ function addLayerTo(m, l, i) {
   }
 }
 
+const COMPARE = __COMPARE__;
 const rasters = LAYERS.map((l, i) => ({ ...l, i })).filter(l => l.type === "raster");
 const geojsons = LAYERS.map((l, i) => ({ ...l, i })).filter(l => l.type === "geojson");
 
-if (rasters.length === 2) {
+if (COMPARE && rasters.length === 2) {
   // comparison: two synced maps, right one on top clipped left of a draggable divider
   document.getElementById("map").insertAdjacentHTML("afterend",
     `<div id="mapL"></div><div id="divider"><div class="knob">◂▸</div></div>
@@ -587,6 +588,7 @@ def render_map(
     layers: list[dict[str, Any]],
     subtitle: str = "",
     out_path: str | None = None,
+    compare: bool | None = None,
 ) -> dict[str, Any]:
     """Write a self-contained interactive HTML map and return its file path.
 
@@ -598,10 +600,17 @@ def render_map(
       {"type": "geojson", "name": ..., "data": <FeatureCollection>, "color": "#hex"}
     Item layers resolve to the right tiling backend automatically. The HTML
     is shareable: MapLibre + live tile URLs, no server of ours required.
+
+    compare: True renders two raster layers as a draggable swipe (before/after),
+    False stacks them as toggleable overlays. Default None auto-decides: swipe
+    only when both rasters come from the SAME collection (a comparison), overlay
+    when they differ (e.g. burn severity over imagery — pass opacity ~0.75).
     """
     resolved = []
+    raster_collections: list[str | None] = []
     for l in layers:
         if l.get("type") == "item":
+            raster_collections.append(l.get("collection_id"))
             resolved.append(
                 {
                     "type": "raster",
@@ -619,12 +628,22 @@ def render_map(
                 }
             )
         else:
+            if l.get("type") == "raster":
+                raster_collections.append(None)
             resolved.append(l)
+    if compare is None:
+        # swipe only for a true comparison: two rasters of the same collection
+        compare = (
+            len(raster_collections) == 2
+            and raster_collections[0] is not None
+            and raster_collections[0] == raster_collections[1]
+        )
     html = (
         _MAP_TEMPLATE.replace("__TITLE__", title)
         .replace("__SUBTITLE__", subtitle)
         .replace("__LAYERS__", json.dumps(resolved))
         .replace("__BBOX__", json.dumps(bbox))
+        .replace("__COMPARE__", json.dumps(compare))
     )
     if out_path is None:
         safe = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in title.lower())[:60]
@@ -642,6 +661,7 @@ def compare_dates(
     window_after: str = "",
     expression: str = "(nir-red)/(nir+red)",
     max_cloud_cover: float = 40,
+    label: str | None = None,
 ) -> dict[str, Any]:
     """Compare two time windows over a place: matched scenes, index delta, swipe map.
 
@@ -714,7 +734,7 @@ def compare_dates(
         "expression": expression, "rescale": "-1,1", "colormap_name": "rdylgn",
     }
     m = render_map(
-        title=f"{place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}",
+        title=f"{label or place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}",
         subtitle=f"{expression} · drag the divider · tile {best_tile}",
         bbox=bbox,
         layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
