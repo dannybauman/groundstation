@@ -1,0 +1,127 @@
+"""Live integration evals for groundstation. Run: uv run evals/run_evals.py
+
+Hits real endpoints — these evals prove the demo works right now, not that it
+worked when written. Each check is the smallest thing that fails if that
+integration breaks.
+"""
+
+from __future__ import annotations
+
+import sys
+import traceback
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from groundstation import tools  # noqa: E402
+
+FAILURES = []
+
+
+def check(name):
+    def deco(fn):
+        def run():
+            try:
+                fn()
+                print(f"PASS  {name}")
+            except Exception:
+                FAILURES.append(name)
+                print(f"FAIL  {name}")
+                traceback.print_exc(limit=2)
+
+        return run
+
+    return deco
+
+
+@check("geocode resolves a place with a sane bbox")
+def t_geocode():
+    g = tools.geocode("Barotse Floodplain")
+    assert g["source"] in ("gazet", "nominatim")
+    w, s, e, n = g["bbox"]
+    assert w < e and s < n and abs(g["lat"]) <= 90
+
+
+@check("search_datasets finds sentinel across catalogs")
+def t_datasets():
+    hits = tools.search_datasets("sentinel-2")
+    assert any(h.get("catalog") == "earth-search" for h in hits if "id" in h)
+
+
+@check("search_imagery returns recent low-cloud Sentinel-2")
+def t_search():
+    r = tools.search_imagery(
+        "earth-search", ["sentinel-2-l2a"], place="Barotse Floodplain",
+        max_cloud_cover=20, limit=3,
+    )
+    assert r["count"] > 0
+    assert r["items"][0]["self_url"].startswith("https://")
+    t_search.item = r["items"][0]
+
+
+@check("preview_item URL returns a PNG")
+def t_preview():
+    import httpx
+
+    it = t_search.item
+    p = tools.preview_item("earth-search", it["collection"], it["id"], max_size=128)
+    r = httpx.get(p["preview_url"], timeout=90)
+    assert r.status_code == 200 and "image" in r.headers.get("content-type", "")
+
+
+@check("compute_statistics NDVI lands in [-1, 1]")
+def t_stats():
+    it = t_search.item
+    s = tools.compute_statistics(
+        "earth-search", it["collection"], it["id"], expression="(nir-red)/(nir+red)"
+    )
+    b = next(iter(s.values()))
+    assert -1.0 <= b["mean"] <= 1.0 and b["std"] > 0
+
+
+@check("render_map writes HTML with live tile URL")
+def t_map():
+    it = t_search.item
+    m = tools.render_map(
+        "eval map", it["bbox"],
+        [{"type": "item", "name": "s2", "catalog": "earth-search",
+          "collection_id": it["collection"], "item_id": it["id"], "assets": ["visual"]}],
+        out_path="/tmp/groundstation-eval-map.html",
+    )
+    html = Path(m["map_path"]).read_text()
+    assert "titiler.xyz/stac/tiles" in html and "maplibre" in html
+
+
+@check("active_events returns EONET and GDACS data")
+def t_events():
+    ev = tools.active_events(days=30)
+    assert "eonet_error" not in ev and "gdacs_error" not in ev
+    assert len(ev["eonet"]) + len(ev["gdacs"]) > 0
+
+
+@check("weather_summary returns past + forecast days")
+def t_weather():
+    w = tools.weather_summary(47.5, -120.5)
+    assert len(w["daily"]["time"]) == 14
+
+
+@check("veda catalog searchable and previewable")
+def t_veda():
+    r = tools.search_imagery("veda", ["caldor-fire-burn-severity"], bbox=[-121, 38, -119.5, 39.2], limit=1)
+    assert r["count"] >= 1
+    p = tools.preview_item("veda", r["items"][0]["collection"], r["items"][0]["id"], assets=["cog_default"])
+    assert "openveda.cloud/api/raster" in p["preview_url"]
+
+
+@check("planetary-computer search + rendered preview")
+def t_pc():
+    r = tools.search_imagery("planetary-computer", ["sentinel-2-l2a"], place="Munich", max_cloud_cover=30, limit=1)
+    assert r["count"] >= 1
+    p = tools.preview_item("planetary-computer", r["items"][0]["collection"], r["items"][0]["id"])
+    assert "preview_url" in p
+
+
+if __name__ == "__main__":
+    for fn in [t_geocode, t_datasets, t_search, t_preview, t_stats, t_map, t_events, t_weather, t_veda, t_pc]:
+        fn()
+    print(f"\n{10 - len(FAILURES)}/10 passed")
+    sys.exit(1 if FAILURES else 0)
