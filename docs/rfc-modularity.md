@@ -44,7 +44,9 @@ Trap ledger, the detail that matters:
 - **Modular's freedom paid off once**: unconstrained by our `active_events` tool, the q1 run pulled NIFC/WFIGS ArcGIS feeds and returned *richer* fire data than EONET (containment %, same-day new starts). Curation cuts both ways.
 - **The experiment audited our own skill**: central q14 found the earth-data skill's Landsat `rescale="0,0.3"` guidance is wrong for PC's `landsat-c2-l2` (unscaled uint16 DN, and the C2 offset doesn't cancel in normalized differences). Fix queued.
 
-Caveats: n=6 questions, one model, one run per cell, self-reported call counts. And the big one: the modular config leaned on the model's *prior knowledge of these specific famous services* (it knew PC's SAS endpoint from memory). Against an arbitrary eoAPI instance not in any training set, that crutch disappears — which is exactly the case the self-documentation layer below has to carry.
+Caveats: n=6 questions, one model, one run per cell, self-reported call counts.
+
+And the one that matters most: **the modular config's 6/6 depends on the model already knowing these services.** When it hit Planetary Computer's auth wall, it recalled the SAS signing endpoint from training data — neither the skills nor PC itself supplied it. Earth Search, Planetary Computer and VEDA are famous enough to have been memorized; a private eoAPI deployment is not, and there a modular agent has nothing to fall back on. The experiment therefore measures modularity under best-case conditions, and the untested case — an instance the model has never seen — is precisely the one the self-documentation layer below exists to serve.
 
 **Reading of the result**: modularity is viable for correctness *today, on famous services, with a frontier model*; the federation layer's value is efficiency (~1.75× wall time), durability of artifacts, absorbed failure modes, and composition — not gatekeeping correctness. That reframes groundstation: less "the only way in," more "the amortized fast path plus the cross-service knowledge that has no other home."
 
@@ -54,25 +56,51 @@ Survey of the July 2026 landscape (full sourcing in the thread; headline finding
 
 - **Capability discovery is already solved — natively — for our stack.** STAC/OGC APIs self-describe their *shape*: landing page with `conformsTo` and typed link relations, `/conformance`, `/collections/{id}/queryables` for CQL2-filterable fields, OpenAPI via `service-desc`. eoAPI bundles three services that all do this. No new protocol needed at this layer.
 - **OpenAPI→MCP auto-generation is a documented trap, not a shortcut.** FastMCP's own author argues auto-converting REST APIs "poisons your agent": tool sprawl, parameter overload, multi-round-trip atomicity, and — the recurring phrase — *structure without strategy*. Speakeasy and TrueFoundry publish the same conclusion: curated beats generated. The curation step IS the judgment layer.
-- **Existing STAC MCP servers are thin wrappers.** The most active community one exposes ~8 endpoint-shaped tools and deliberately encodes no routing logic or parameter recipes. Nobody in the geo community (Development Seed, Element 84, Planetary Computer, Mapbox, CARTO) has yet published a machine-readable *usage-judgment* layer for a STAC/TiTiler instance; the public discussion sits at "MCP is coming" altitude.
+- **Existing STAC MCP servers are thin wrappers.** The most active community one exposes ~8 endpoint-shaped tools and deliberately encodes no routing logic or parameter recipes; the public discussion sits at "MCP is coming" altitude.
+- **But STAC's `render` extension is already a machine-readable usage-judgment layer — and it works.** Verified live: `openveda.cloud`'s `caldor-fire-burn-severity` declares `stac_extensions: ["render", "item-assets"]` and serves `{"dashboard": {"assets": ["cog_default"], "rescale": [[0,5]], "colormap_name": "inferno_r"}}`. This is exactly the kind of judgment no OpenAPI document carries — *which asset, what stretch, which colormap* — and it is already standardized, already deployed, and already consumed: the modular q5 run read those render parameters and used them verbatim. Any claim that "nothing serves usage judgment today" is too strong; the correct claim is that `render` covers the per-collection *render-recipe* slice and nothing covers the rest.
 - **llms.txt** has ~10% adoption but near-zero crawler/agent uptake and no API semantics — as a spec it's a link list. Its value here is only as a *well-known entry point*, not as the content format.
 - **Agent Skills (SKILL.md)** — now an open spec under the Agentic AI Foundation, supported by ~40 products — is the one format built to carry usage judgment (recipes, edge cases, failure workarounds, progressive disclosure). **Critical gap: the spec defines no hosting or discovery convention.** Skills are local directories; "a service advertises its own skill at a well-known URL" is unpaved road.
 - **The well-known-manifest lineage:** OpenAI's `/.well-known/ai-plugin.json` tried exactly this in 2023 and is dead. `agents.json` (wild-card-ai) is the closest survivor — OpenAPI plus "flows" (multi-call outcome contracts) and "links" (how to chain actions) at a well-known URL — the right *idea* for machine-readable judgment, but v0.1 with a tiny registry.
 
-So the three layers an agent needs are: (1) capability discovery — **solved** by STAC/OGC conformance; (2) a callable tool surface — **partial**, MCP works but auto-generation is an anti-pattern; (3) usage judgment — **the hole**. Nothing any instance serves today says which collection to pick, which pipeline (search→mosaic→tiles/stats) exists, what rescale makes a dataset readable, or what to do when a request 500s.
+So the three layers an agent needs are: (1) capability discovery — **solved** by STAC/OGC conformance; (2) a callable tool surface — **partial**, MCP works but auto-generation is an anti-pattern; (3) usage judgment — **partly solved, and that's the useful surprise**.
+
+The `render` extension already carries per-collection render recipes, and agents already read them. So the gap is narrower and better-shaped than "nothing exists":
+
+| Kind of judgment | Example | Served today? |
+|---|---|---|
+| Per-collection render recipe | `cog_default` + `rescale=0,5` + `inferno_r` | **Yes — `render` extension** |
+| Per-collection data quirks | "these bands are uint16 DN; the C2 offset doesn't cancel in a normalized difference" | No |
+| Deployment quirks | "this instance has no AWS credentials → requester-pays sources 500 here" | No |
+| Pipeline knowledge | search → mosaic → tiles/stats | No |
+| Failure recipes | "on a 500 from an `s3://` href, try another catalog's copy" | No |
+| Collection selection | "which collection answers this question" | No |
+
+The unserved rows have a shape in common: they are prose, not parameters. That is why `render` could be standardized as JSON and the rest resists it — and why the vehicle question below is a real design choice rather than a formality.
 
 ### The prototype: the instance serves its own judgment layer
 
 `compose.yml` now ships a `selfdoc` sidecar: `http://localhost:8001/llms.txt` is the agent entry point for the local tiler instance — what the service is, the deployment quirks OpenAPI can't express (no AWS credentials → requester-pays sources 500 here), and links to the service-level skills, served by the deployment itself.
 
-The point of the prototype: **the missing protocol is mostly a delivery convention, not a new spec.** STAC APIs are already unusually self-describing at the *capability* level (landing page, conformance classes, queryables). What no OpenAPI document or conformance class carries is *usage judgment* — which endpoint to prefer when, what to do on failure, parameter recipes that produce readable output. That judgment already has a portable container (a skill file); what it lacks is a well-known place for an instance to serve it. An `llms.txt` (or equivalent well-known URL) per deployment, linking to skill documents maintained alongside each service, would let an agent pointed at a bare eoAPI instance bootstrap everything groundstation currently pre-installs — except the cross-service layer, which by definition no single instance can serve.
+The point of the prototype: **the missing protocol is mostly a delivery convention, not a new spec.** The judgment that `render` doesn't cover already has a portable container (a skill file); what it lacks is a well-known place for an instance to serve it. An `llms.txt` per deployment, linking to skill documents maintained alongside each service, lets an agent pointed at a bare eoAPI instance bootstrap most of what groundstation pre-installs — except the cross-service layer, which by definition no single instance can serve.
+
+The prototype is one point in a design space, not the answer. Alternatives worth weighing:
+
+1. **Extend the `render` precedent.** STAC has an extension mechanism, a community process, and — as verified above — a working proof that per-collection recipes belong in collection metadata. Judgment mostly binds at the *collection* level ("this Landsat is uint16 DN"), which is exactly where `render` lives. Best fit for the "per-collection data quirks" row. Fits the other rows badly: JSON schemas hold parameters well and prose poorly.
+2. **Ship SKILL.md inside the package.** `pip install titiler` brings its skill; eoAPI vendors one. No serving, no URL, no new spec — distribution is the package manager you already have. Covers service-generic knowledge only: a packaged skill cannot know *your* deployment lacks AWS credentials.
+3. **A curated MCP shipped with eoAPI** — hand-written, never generated. Most adopted path; costs someone a server to run and version.
+4. **`agents.json` at `/.well-known/`.** Right content model (flows, links), right location, near-zero adoption — a bet on a v0.1 spec.
+5. **Generate the guidance from the instance's own data.** An endpoint that derives rescales from actual holdings instead of a human writing them down. Self-maintaining and genuinely novel; also the most work, and only reaches the rows that are computable.
+6. **Do nothing.** Frontier models already memorize famous services — this experiment is weak evidence for that. Fails precisely on the private instances that need it most.
+
+**Recommendation: a split, not a single vehicle.** Package-ship the service-generic skill (2); push collection-specific recipes into the `render` lineage (1), which is where the precedent and the community process already are; reserve a well-known URL (the prototype) for the genuine residue — deployment quirks and failure recipes that are neither generic enough to package nor schema-shaped enough to standardize.
 
 ### Proposed division of labor
 
 | Layer | Where it lives | Who maintains it |
 |---|---|---|
-| Service adapter (STAC, TiTiler, …) | per-service skill, versioned with the service | the service project (eoAPI, TiTiler upstream) |
-| Instance quirks + content | served by the deployment (`llms.txt` → skills) | whoever operates the instance |
+| Service adapter (STAC, TiTiler, …) | per-service skill, shipped *in the package* | the service project (eoAPI, TiTiler upstream) |
+| Per-collection recipes | collection metadata, `render` lineage | whoever publishes the collection |
+| Instance quirks + failure recipes | served by the deployment (`llms.txt` → skills) | whoever operates the instance |
 | Cross-service judgment + composition | a federation agent/toolset like groundstation | whoever owns the use case |
 
 ## What this means for groundstation
