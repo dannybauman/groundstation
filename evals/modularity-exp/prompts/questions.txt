@@ -1,0 +1,6 @@
+q1|Find the clearest Sentinel-2 scene of Lake Chelan from the past two weeks, tell me what's burning nearby, and give me a map I can share.
+q3|Optical is useless over the Barotse Floodplain in the wet season. Find recent Sentinel-1 radar scenes there instead and map one — check the collection's assets for the right rescale.
+q4|How much surface water is on the Barotse Floodplain right now vs early March? Use NDWI on Sentinel-2, give me the numbers and a two-layer map.
+q5|What does NASA VEDA have on the Caldor fire? Put the burn severity layer on a map over a current Sentinel-2 scene of the Eldorado National Forest.
+q14|Compare Jakarta's northern coastline between 2019 and now using Landsat — is there visible land change or new construction along the bay?
+q20|Find the same recent Sentinel-2 scene over Munich in both earth-search and planetary-computer, compare their reported cloud cover, preview both, and tell me if the catalogs agree.

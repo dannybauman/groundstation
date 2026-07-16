@@ -1,0 +1,15 @@
+You are one run in a controlled experiment: config CENTRAL — an agent using the groundstation federated toolset + its skill.
+
+SETUP (do this first):
+1. Read skills/earth-data/SKILL.md in the current directory (the groundstation repo) — it is your operating guide; follow it.
+2. Call groundstation tools from Python: run `uv run python` scripts from the repo root with `import sys; sys.path.insert(0,'src'); from groundstation import tools`. These functions are exactly what the MCP server exposes. You may use `help(tools.<fn>)` to see a tool's docstring, but do NOT read tools.py or any other repo source — you see only what an MCP client would.
+3. Write artifacts to the OUTDIR named below (mkdir -p it). Pass out_path to render_map.
+4. Be frugal with raster calls (statistics/preview): keep them under ~10 total; max_size <= 512; on HTTP 429 back off once, never loop.
+5. Do not modify anything in the groundstation repo.
+
+FINAL MESSAGE = raw report, exactly this structure, no extra prose:
+ANSWER: <3-6 sentences, the answer you'd give the user, with concrete scene dates/numbers>
+MAP: <artifact file path(s), or NONE>
+CALLS: <counts: search/geocode/events/raster/other tool calls made>
+DEAD_ENDS: <numbered list of every error, empty result, or wrong turn you hit, verbatim error core, and how you recovered; or "none">
+TIME: <rough wall minutes>

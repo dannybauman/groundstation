@@ -3,3 +3,4 @@ __pycache__/
 *.egg-info/
 demo/
 briefing/state/
+evals/modularity-exp/out/

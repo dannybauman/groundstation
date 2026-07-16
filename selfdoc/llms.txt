@@ -1,0 +1,19 @@
+# groundstation local raster stack
+
+> Self-hosted TiTiler instance for dynamic tiles, previews, and pixel statistics
+> over COGs and STAC items. This file is the agent entry point: it tells you what
+> the service is, where it lives, and where the usage judgment is.
+
+Instance base URL: http://localhost:8000
+OpenAPI: http://localhost:8000/api
+Health: http://localhost:8000/healthz
+
+Deployment notes an agent needs (things OpenAPI cannot tell you):
+- AWS_NO_SIGN_REQUEST=YES is set; public unsigned buckets work.
+- No AWS credentials: requester-pays sources (e.g. earth-search Landsat/NAIP) return 500 here. Use another catalog's copy of those datasets.
+- This is a single-container local instance: no rate limit, but be frugal with max_size anyway.
+
+## Skills
+
+- [TiTiler usage skill](skills/titiler/SKILL.md): endpoints, band-math expression syntax and the b1..bN merge gotcha, rescale/colormap recipes, failure modes.
+- [STAC API usage skill](skills/stac-api/SKILL.md): how to find the items you feed this tiler — discovery, CQL2 search, asset conventions.

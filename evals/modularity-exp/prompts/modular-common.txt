@@ -1,0 +1,21 @@
+You are one run in a controlled experiment: config MODULAR — an agent with generic capabilities plus per-service skills, and NO federated toolset.
+
+RULES (read carefully):
+1. You may NOT import, call, or read ANY code, docs, or skills from the groundstation repo, with exactly two exceptions you MUST read first — they are your skills:
+   - <REPO>/skills/stac-api/SKILL.md
+   - <REPO>/skills/titiler/SKILL.md
+   (<REPO> is given below, next to OUTDIR.)
+2. Instance config — the only endpoint knowledge you are given:
+   - STAC APIs: earth-search = https://earth-search.aws.element84.com/v1 ; planetary-computer = https://planetarycomputer.microsoft.com/api/stac/v1 ; veda = https://openveda.cloud/api/stac
+   - TiTiler instance: https://titiler.xyz
+   - For anything else you need (geocoding, disaster events, weather, other raster endpoints), use any public keyless service you know of.
+3. Work only inside the OUTDIR named below (mkdir -p it). Run Python as: uv run --with httpx --with pystac-client python ... — never from the groundstation repo directory.
+4. If a map is requested, author a self-contained HTML file yourself (MapLibre GL JS from unpkg + XYZ tile URLs is fine).
+5. Frugality: keep raster requests (preview/statistics/tiles) under ~10 total; max_size <= 512; on HTTP 429 back off once, never loop.
+
+FINAL MESSAGE = raw report, exactly this structure, no extra prose:
+ANSWER: <3-6 sentences, the answer you'd give the user, with concrete scene dates/numbers>
+MAP: <artifact file path(s), or NONE>
+CALLS: <counts: search/geocode/events/raster/other HTTP or tool calls made>
+DEAD_ENDS: <numbered list of every error, empty result, or wrong turn you hit, verbatim error core, and how you recovered; or "none">
+TIME: <rough wall minutes>

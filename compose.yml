@@ -20,3 +20,18 @@ services:
       # AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       # AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       # AWS_REQUEST_PAYER: requester
+
+  # Self-documentation prototype: the instance serves its own agent entry point.
+  #   docker compose up -d selfdoc   →   http://localhost:8001/llms.txt
+  # An agent pointed at a bare instance bootstraps the usage-judgment layer
+  # (skills/) from the service itself instead of a pre-installed plugin.
+  # See docs/rfc-modularity.md.
+  selfdoc:
+    image: python:3.12-alpine
+    command: python -m http.server 8001 -d /srv
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./selfdoc:/srv:ro
+      - ./skills/titiler:/srv/skills/titiler:ro
+      - ./skills/stac-api:/srv/skills/stac-api:ro

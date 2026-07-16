@@ -65,6 +65,10 @@ Everything important lives in `src/groundstation/tools.py` as plain functions wi
 
 The split matters: unit failures mean *we* broke it, live failures mean *the world* changed, grounding failures mean *the model* drifted. Different failures, different fixes.
 
+## Modularity: where each kind of knowledge lives
+
+The skill layer is split by scope, mirroring [the modularity RFC](rfc-modularity.md): `skills/stac-api/` and `skills/titiler/` carry *service-adapter* knowledge (how to drive any spec-compliant instance — candidates to upstream to the service projects), `skills/earth-data/` keeps the *cross-service judgment* (catalog routing, requester-pays workarounds, composition recipes) that no single-service skill can hold. The `selfdoc` compose service prototypes the third layer: a deployment serving its own quirks and skills at a well-known URL.
+
 ## File map
 
 ```
@@ -73,7 +77,10 @@ src/groundstation/
   server.py       # MCP wrapper (FastMCP, stdio)
   web.py          # FastAPI console backend + job runner
   static/index.html  # the console (single file, DS poster design language)
-skills/earth-data/SKILL.md   # the judgment layer for agents
+skills/earth-data/SKILL.md   # the judgment layer for agents (cross-service)
+skills/stac-api/SKILL.md     # service-level: any STAC API instance
+skills/titiler/SKILL.md      # service-level: any TiTiler instance
+selfdoc/llms.txt             # self-documenting-instance prototype (compose: selfdoc)
 briefing/brief.py            # brief + fleet + Slack delivery
 briefing/fleet.json          # example AOI watch list
 evals/                       # unit + live + grounding checks

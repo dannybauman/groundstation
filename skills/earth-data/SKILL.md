@@ -23,7 +23,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 ## Conventions that save round trips
 
 - Cloud filtering: pass `max_cloud_cover=20` for optical searches by default; relax only if nothing comes back.
-- Sentinel-2 true color: `assets=["visual"]` — one COG, no rescale needed. Landsat: `["red","green","blue"]` with `rescale="0,0.3"` (surface reflectance floats) — check `describe_collection` if colors look wrong.
+- Sentinel-2 true color: `assets=["visual"]` — one COG, no rescale needed. Landsat (planetary-computer, per the requester-pays exception): `["red","green","blue"]` are unscaled uint16 DN, not reflectance — a fixed `rescale="0,0.3"` renders blank; run `compute_statistics` first and stretch to ~p2–p98 (typically ≈`"7300,12400"`), and put the C2 scale/offset (`*0.0000275 - 0.2`) inside any index expression, since the offset doesn't cancel in normalized differences.
 - NDVI on Sentinel-2 (earth-search): `expression="(nir-red)/(nir+red)"`. NDWI: `"(green-nir)/(green+nir)"`. NBR (burn severity): `"(nir-swir22)/(nir+swir22)"` — compare pre/post fire. NDSI (snow): `"(green-swir16)/(green+swir16)"`, snow-covered where > 0.4. Asset names, not band numbers — translation to TiTiler band indices happens for you.
 - **Index layers on maps**: pass the same `expression` on the `render_map` item layer with `rescale="-1,1"` and `colormap_name="rdylgn"` (never bare `assets=[nir, red]` — that renders raw reflectance, which shows as blank).
 - **Overlay vs compare**: two rasters of the same collection auto-render as a swipe comparison; different collections stack as toggleable overlays (pass `compare` to override). A thematic layer over imagery (burn severity, land cover) should carry `opacity` ~0.75 so the imagery shows through.
