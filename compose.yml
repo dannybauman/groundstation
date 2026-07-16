@@ -32,6 +32,7 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - ./selfdoc:/srv:ro
+      # /srv is not :ro — Docker must mkdir the nested skills mountpoints under it.
+      - ./selfdoc:/srv
       - ./skills/titiler:/srv/skills/titiler:ro
       - ./skills/stac-api:/srv/skills/stac-api:ro
