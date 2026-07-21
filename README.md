@@ -38,6 +38,8 @@ Everything runs against public, keyless endpoints — it demos anywhere, with no
 /plugin install groundstation@groundstation
 ```
 
+First use after install takes a few seconds: `uv` builds the server's virtualenv on the first launch, so the tools appear a moment after Claude starts. If they don't show, run `/mcp` to confirm `groundstation` is connected — if it isn't, `/reload-plugins` or restart the session, and make sure `uv` is on your PATH.
+
 **As an MCP server directly:**
 
 ```bash

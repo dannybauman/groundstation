@@ -7,6 +7,19 @@ description: Discover, analyze, and map Earth observation data through the groun
 
 You have groundstation MCP tools. They put the cloud-native geospatial stack in your hands: three STAC catalogs, dynamic tiling, band math, and shareable map artifacts. Your job is to turn a question about a place into a decision-ready answer, not a data dump.
 
+## First: use the tools, never route around them
+
+The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 12 tools in about a second.
+
+- **Wait and retry discovery** a few times over ~10-15 seconds before doing anything else. The tools almost always appear.
+- **Never fall back to raw STAC / TiTiler / FIRMS / `httpx` calls to work around missing tools.** Hand-rolling the pipeline gives a worse answer and hides a fixable setup problem. Missing tools are a thing to fix, not to route around.
+- **If they're still missing after retrying, stop and tell the user, in one or two lines:**
+  - Check `/mcp` — `groundstation` should be listed and connected. If not, run `/reload-plugins` (or restart the session) to relaunch it.
+  - Make sure `uv` is installed (`which uv`) — the server launches via `uv run`.
+  - First launch builds the venv; if it seems stuck, warm it once with `uv sync` in the groundstation repo, then reload.
+
+  That's the fix. Don't proceed with a hand-built substitute.
+
 ## The standard flow
 
 1. `geocode` the place (concise names work best: "Barotse Floodplain", not "the floodplain area along the Zambezi in western Zambia").
