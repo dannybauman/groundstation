@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "briefing"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from groundstation import tools  # noqa: E402
-from groundstation.tools import _expression_to_bands  # noqa: E402
+from groundstation.tools import _bbox_coverage_pct, _expression_to_bands  # noqa: E402
 import brief  # noqa: E402
 import brief_checks  # noqa: E402
 
@@ -45,6 +45,20 @@ def t_expression_funcs_and_explicit_assets():
 def t_expression_bindex_passthrough():
     expr, assets = _expression_to_bands("(b1-b2)/(b1+b2)", ["nir", "red"])
     assert expr == "(b1-b2)/(b1+b2)"
+
+
+def t_coverage_full_partial_none():
+    aoi = [-114.3, 50.8, -113.8, 51.2]  # roughly Calgary
+    assert _bbox_coverage_pct(aoi, [-115.0, 50.0, -113.0, 52.0]) == 100.0
+    assert _bbox_coverage_pct(aoi, [-115.0, 50.0, -114.05, 52.0]) == 50.0  # the half-covered-city case
+    assert _bbox_coverage_pct(aoi, [-110.0, 50.8, -109.0, 51.2]) == 0.0
+
+
+def t_coverage_degenerate_inputs():
+    aoi = [-114.3, 50.8, -113.8, 51.2]
+    assert _bbox_coverage_pct(aoi, None) is None
+    assert _bbox_coverage_pct(aoi, [-115.0]) is None
+    assert _bbox_coverage_pct([-114.0, 51.0, -114.0, 51.0], [-115.0, 50.0, -113.0, 52.0]) is None
 
 
 def t_tile_url_expression():

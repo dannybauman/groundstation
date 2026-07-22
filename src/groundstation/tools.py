@@ -312,6 +312,25 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float | None:
+    # ponytail: bbox-overlap approximation — a tilted scene footprint covers
+    # less than its bbox suggests, and antimeridian-crossing boxes aren't
+    # handled; good enough to separate "clips the corner" from "covers the
+    # whole AOI" at city scale, swap in real footprint geometry if it matters.
+    if not item_bbox or len(item_bbox) < 4:
+        return None
+    aoi_area = (aoi[2] - aoi[0]) * (aoi[3] - aoi[1])
+    if aoi_area <= 0:
+        return None
+    w = max(aoi[0], item_bbox[0])
+    s = max(aoi[1], item_bbox[1])
+    e = min(aoi[2], item_bbox[2])
+    n = min(aoi[3], item_bbox[3])
+    if e <= w or n <= s:
+        return 0.0
+    return round(100.0 * (e - w) * (n - s) / aoi_area, 1)
+
+
 def search_imagery(
     catalog: str,
     collections: list[str],
@@ -326,7 +345,10 @@ def search_imagery(
     Provide either bbox [w, s, e, n] or a place name (geocoded for you).
     datetime_range is RFC3339, e.g. "2026-06-01T00:00:00Z/2026-07-09T00:00:00Z".
     Returns compact items sorted newest first; feed self_url/ids into
-    preview_item, compute_statistics, or render_map.
+    preview_item, compute_statistics, or render_map. Each item carries
+    covers_aoi_pct — how much of the searched area its bbox covers (100 =
+    full coverage; a low value means the scene only clips the area, so say
+    so or pick a fuller scene).
     """
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
@@ -348,7 +370,10 @@ def search_imagery(
         r = _client.post(f"{base}/search", json=body)
     r.raise_for_status()
     feats = r.json().get("features", [])
-    return {"bbox": bbox, "count": len(feats), "items": [_compact_item(catalog, f) for f in feats]}
+    items = [_compact_item(catalog, f) for f in feats]
+    for it in items:
+        it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
+    return {"bbox": bbox, "count": len(feats), "items": items}
 
 
 # ---------------------------------------------------------------- rasters
