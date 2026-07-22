@@ -17,6 +17,7 @@ The value here is the groundstation tools. If they aren't visible yet, the serve
   - Check `/mcp` — `groundstation` should be listed and connected. If not, run `/reload-plugins` (or restart the session) to relaunch it.
   - Make sure `uv` is installed (`which uv`) — the server launches via `uv run`.
   - First launch builds the venv; if it seems stuck, warm it once with `uv sync` in the groundstation repo, then reload.
+  - Or hand them one command: `scripts/doctor.sh` in the groundstation repo checks the whole chain (uv, server env, CLI, plugin wiring, endpoints) and prints the exact fix.
 
   That's the fix. Don't proceed with a hand-built substitute.
 

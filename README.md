@@ -40,6 +40,14 @@ Everything runs against public, keyless endpoints — it demos anywhere, with no
 
 First use after install takes a few seconds: `uv` builds the server's virtualenv on the first launch, so the tools appear a moment after Claude starts. If they don't show, run `/mcp` to confirm `groundstation` is connected — if it isn't, `/reload-plugins` or restart the session, and make sure `uv` is on your PATH.
 
+Or skip the guessing and run the preflight:
+
+```bash
+scripts/doctor.sh
+```
+
+It walks the first-run chain in the order it actually breaks (uv, server env, CLI, plugin wiring, endpoints) and prints the exact fix for the first broken link. Setting up on a new machine or prepping a demo room? Run it before opening Claude.
+
 **As an MCP server directly:**
 
 ```bash
