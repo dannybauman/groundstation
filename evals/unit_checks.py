@@ -112,6 +112,38 @@ def t_render_map_compare_override():
         assert "const COMPARE = true" in html
 
 
+def _render_3d(**kw) -> str:
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m3d.html")
+        layer = {"type": "item", "name": "s2", "catalog": "earth-search",
+                 "collection_id": "sentinel-2-l2a", "item_id": "X", "bbox": [0, 0, 1, 1]}
+        tools.render_map_3d("Torres del Paine", [0, 0, 1, 1], layer, out_path=out, **kw)
+        return Path(out).read_text(encoding="utf-8")
+
+
+def t_render_map_3d_terrain_source():
+    html = _render_3d()
+    assert '"type": "raster-dem"' in html and '"encoding": "terrarium"' in html
+    assert "s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png" in html
+
+
+def t_render_map_3d_imagery_and_attribution():
+    html = _render_3d()
+    assert "titiler.xyz/stac/tiles" in html and "assets=visual" in html
+    assert "Development Seed" in html and "AWS Terrarium" in html
+
+
+def t_render_map_3d_no_local_paths():
+    html = _render_3d()
+    assert "/Users/" not in html and "file://" not in html
+
+
+def t_render_map_3d_controls():
+    html = _render_3d(exaggeration=2.5)
+    assert 'id="exaggeration"' in html and 'id="flythrough"' in html and 'id="reset"' in html
+    assert 'value="2.5"' in html and "let exaggeration = 2.5" in html
+
+
 def t_pick_best_scene_prefers_coverage():
     items = [
         {"id": "full", "bbox": [0, 0, 1, 1], "cloud_cover": 5.0},
