@@ -112,7 +112,7 @@ Heads-up for editors: component *names* are joined by code (`src/groundstation/s
 
 ## Cloud object storage
 - kind: infra
-- what: the buckets the pixels actually live in — AWS S3 (sentinel-cogs, terrain tiles), Azure Blob (Planetary Computer, VEDA)
+- what: the cloud buckets the pixels actually live in
 - ds-role: uses
 - integration: every range request bottoms out here
 - speaks-to: COG + HTTP range requests

@@ -27,6 +27,14 @@ _CATALOG_COMPONENT = {
     "planetary-computer": "Planetary Computer",
 }
 
+# which bucket actually serves each catalog's pixels — the infra entry names
+# only these, so a pure earth-search map never mentions Azure
+_CATALOG_BUCKET = {
+    "earth-search": ("AWS S3", "sentinel-cogs"),
+    "veda": ("Azure Blob", "VEDA"),
+    "planetary-computer": ("Azure Blob", "Planetary Computer"),
+}
+
 
 REQUIRED_FIELDS = ("what", "ds-role", "integration", "speaks-to", "link")
 
@@ -84,7 +92,8 @@ def stack_instances(
         active_names |= {_CATALOG_COMPONENT[c] for c in catalogs if c in _CATALOG_COMPONENT}
         active_names |= {"STAC", "COG + HTTP range requests", "TiTiler", "Cloud object storage"}
     if facts.get("terrain"):
-        active_names.add("AWS Terrarium terrain")
+        # terrain tiles bottom out in a bucket too, even on a raster-only 3D map
+        active_names |= {"AWS Terrarium terrain", "Cloud object storage"}
     if facts.get("geocoded"):
         active_names |= {"Gazet", "Nominatim"}
     if facts.get("events"):
@@ -95,6 +104,17 @@ def stack_instances(
         "STAC": f"found {collections}" if collections else None,
         "COG + HTTP range requests": "streaming only the bytes each tile needs",
     }
+    buckets: dict[str, list[str]] = {}
+    for c in catalogs:
+        if c in _CATALOG_BUCKET:
+            provider, detail = _CATALOG_BUCKET[c]
+            buckets.setdefault(provider, []).append(detail)
+    if facts.get("terrain"):
+        buckets.setdefault("AWS S3", []).append("terrain tiles")
+    if buckets:
+        instance_bits["Cloud object storage"] = "streaming from " + " + ".join(
+            f"{provider} ({', '.join(details)})" for provider, details in buckets.items()
+        )
     for c in catalogs:
         cols = ", ".join(by_catalog.get(c) or [])
         if c in _CATALOG_COMPONENT and cols:

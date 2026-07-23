@@ -681,7 +681,7 @@ _BRAND_CSS = """  :root { --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --r
 _STACK_CHUNK = """<button id="stack-toggle" aria-expanded="false">Stack</button>
 <aside id="stack" aria-label="Technology stack">
   <h2>The stack behind this map</h2>
-  <p class="stack-sub">what is actually on screen, and the projects it flows through</p>
+  <p class="stack-sub">what is actually on screen · tap any entry for what it is and what it talks to</p>
   __ENTRIES__
 </aside>
 <style>
@@ -694,22 +694,30 @@ _STACK_CHUNK = """<button id="stack-toggle" aria-expanded="false">Stack</button>
     border-left: 3px solid var(--accent); padding: 46px 16px 16px; overflow-y: auto;
     transform: translateX(105%); transition: transform .22s ease; box-shadow: -2px 0 12px rgba(0,0,0,.12); }
   #stack.open { transform: none; }
-  @media (prefers-reduced-motion: reduce) { #stack { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { #stack, .stack-entry summary::after { transition: none; } }
   #stack h2 { font: 700 15px/1.2 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 2px; }
   #stack .stack-sub { margin: 0 0 12px; color: var(--mid); font-size: 11.5px; font-style: italic; }
   .stack-group { font: 700 10px/1 "Roboto Mono", monospace; letter-spacing: .14em; text-transform: uppercase;
     color: var(--mid); border-bottom: 1px solid var(--rule); padding-bottom: 4px; margin: 14px 0 8px; }
-  .stack-entry { display: flex; gap: 8px; margin: 0 0 10px; }
+  .stack-entry { margin: 0 0 9px; }
+  .stack-entry summary { display: flex; gap: 8px; cursor: pointer; list-style: none; }
+  .stack-entry summary::-webkit-details-marker { display: none; }
+  .stack-entry summary::after { content: "▸"; flex: none; margin-left: auto; color: var(--mid);
+    font-size: 10px; align-self: center; transition: transform .15s ease; }
+  .stack-entry[open] summary::after { transform: rotate(90deg); }
   .stack-entry .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
   .dot.k-data { background: var(--k-data); } .dot.k-access { background: var(--k-access); }
   .dot.k-tiling { background: var(--k-tiling); } .dot.k-viz { background: var(--k-viz); }
   .dot.k-standard { background: var(--k-standard); } .dot.k-infra { background: var(--k-infra); }
+  .s-head { display: flex; flex-direction: column; min-width: 0; }
   .stack-name { font-weight: 600; }
   .stack-name .role { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
     color: var(--accent); border: 1px solid currentColor; border-radius: 3px; padding: 2px 4px; margin-left: 6px;
     vertical-align: 1px; }
-  .stack-entry p { margin: 2px 0; color: var(--ink); }
   .stack-entry .inst { font: 11px/1.5 "Roboto Mono", monospace; color: var(--mid); }
+  .stack-entry .more { margin: 3px 0 2px 16px; }
+  .stack-entry .more p { margin: 2px 0; color: var(--ink); }
+  .stack-entry .spk { font: 10.5px/1.5 "Roboto Mono", monospace; color: var(--mid); margin: 2px 0; }
   .stack-entry a { color: var(--mid); font-size: 10.5px; text-decoration: none; border-bottom: 1px solid var(--rule); }
   .stack-entry a:hover { color: var(--accent); border-bottom-color: var(--accent); }
 </style>
@@ -904,12 +912,17 @@ def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
             last = e["kind"]
         # escape everything — instance lines carry caller-supplied collection
         # ids, and even curated stack.md text shouldn't be able to break markup
+        # ponytail: click-to-expand via native <details>, not hover — hover has
+        # no touch equivalent and details is keyboard-accessible for free
+        spk = e.get("speaks-to", "")
         parts.append(
-            f'<div class="stack-entry"><span class="dot k-{e["kind"]}"></span><div>'
-            f'<div class="stack-name">{escape(e["name"])}<span class="role">{escape(e["ds-role"])}</span></div>'
-            f'<p>{escape(e["what"])}</p><div class="inst">{escape(e["instance"])}</div>'
-            f'<a href="{escape(e["link"], quote=True)}" target="_blank" rel="noopener">{escape(e["link"].split("//")[-1])}</a>'
-            f"</div></div>"
+            f'<details class="stack-entry"><summary><span class="dot k-{e["kind"]}"></span><span class="s-head">'
+            f'<span class="stack-name">{escape(e["name"])}<span class="role">{escape(e["ds-role"])}</span></span>'
+            f'<span class="inst">{escape(e["instance"])}</span></span></summary>'
+            f'<div class="more"><p>{escape(e["what"])}</p>'
+            + (f'<div class="spk">speaks to {escape(spk)}</div>' if spk else "")
+            + f'<a href="{escape(e["link"], quote=True)}" target="_blank" rel="noopener">{escape(e["link"].split("//")[-1])}</a>'
+            f"</div></details>"
         )
     return "".join(parts)
 

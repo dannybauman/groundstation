@@ -428,6 +428,28 @@ def t_stack_map_honest_extra_facts():
     assert "Gazet" not in base and "NASA EONET" not in base
 
 
+def t_stack_infra_names_only_buckets_on_screen():
+    # the Rainier confusion: a pure earth-search map must never mention Azure —
+    # the infra entry is instance-specific like every other claim
+    comps = gstack.parse_stack()
+    e = next(x for x in gstack.stack_instances(comps, {**_STACK_FACTS, "terrain": True})
+             if x["name"] == "Cloud object storage")
+    assert e["instance"] == "streaming from AWS S3 (sentinel-cogs, terrain tiles)"
+    v = next(x for x in gstack.stack_instances(
+        comps, {"catalogs": ["veda"], "collections_by_catalog": {"veda": ["fire-severity"]}})
+        if x["name"] == "Cloud object storage")
+    assert v["instance"] == "streaming from Azure Blob (VEDA)"
+    assert "Azure" not in e["instance"] and "sentinel-cogs" not in v["instance"]
+
+
+def t_stack_panel_depth_on_demand():
+    # collapsed = name + role + instance; what/speaks-to/link revealed per entry
+    entries = gstack.stack_instances(gstack.parse_stack(), _STACK_FACTS)
+    html = tools._stack_panel_html(entries)
+    assert html.count("<details") == len(entries) and "<summary>" in html
+    assert "speaks to " in html and 'class="spk"' in html
+
+
 def t_brand_tokens_in_all_templates():
     # one shared token set: DS orange accent present in map, 3D, and postcard output
     html, _ = _render_stack_map()
