@@ -765,7 +765,13 @@ __BRAND__
     display: flex; align-items: center; justify-content: center; font: 13px system-ui; }
   .side-label { position: absolute; bottom: 52px; z-index: 2; background: rgba(247,244,239,.96); color: var(--ink);
     padding: 4px 11px; border-radius: 6px; font: 12px "Roboto", system-ui, sans-serif; box-shadow: 0 1px 5px rgba(0,0,0,.15); }
-</style></head><body>
+  /* #clean = snapshot mode for postcard bakes: map chrome off, story on
+     (divider + side labels stay; MapLibre's attribution control stays) */
+  .clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack,
+  .clean .maplibregl-ctrl-top-right { display: none !important; }
+</style>
+<script>if (location.hash === "#clean") document.documentElement.classList.add("clean");</script>
+</head><body>
 <div id="map"></div>
 <div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div></div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
@@ -910,6 +916,72 @@ def _artifact_path(out_path: str | None, prefix: str, title: str) -> str:
     return str(out_dir / f"{prefix}-{slugify(title)}.html")
 
 
+def _snapshot_artifact(html_path: str, width: int = 1200, height: int = 900) -> bytes:
+    """Rasterize an artifact for a postcard: headless Chromium, chrome hidden.
+
+    Waits for every MapLibre map on the page (window.gsMaps) to finish
+    loading tiles, auto-clicks "Load full coverage" when present, settles,
+    shoots. Raises RuntimeError with the exact install command when the
+    browser runtime is missing — callers turn that into a note, never a
+    broken artifact.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise RuntimeError(
+            "snapshot cards need playwright: uv add playwright && uv run playwright install chromium"
+        )
+    with sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception:
+            raise RuntimeError("chromium is not installed: run `uv run playwright install chromium` once")
+        try:
+            page = browser.new_page(viewport={"width": width, "height": height})
+            page.goto(Path(html_path).resolve().as_uri() + "#clean")
+            loaded = "window.gsMaps && window.gsMaps.every(m => m.loaded())"
+            page.wait_for_function(loaded, timeout=90000)
+            if page.evaluate("!!document.getElementById('loadmore')"):
+                page.evaluate("document.getElementById('loadmore').click()")
+                page.wait_for_function(loaded, timeout=90000)
+            page.wait_for_timeout(700)  # let the last tiles paint
+            return page.screenshot()
+        finally:
+            browser.close()
+
+
+def _map_stack_facts(
+    resolved: list[dict[str, Any]],
+    layers: list[dict[str, Any]],
+    extra_facts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The honest facts of a map render — shared by the panel and its postcard."""
+    items = [l for l in layers if l.get("type") == "item" and l.get("catalog") and l.get("collection_id")]
+    by_catalog: dict[str, list[str]] = {}
+    for l in items:
+        cols = by_catalog.setdefault(l["catalog"], [])
+        if l["collection_id"] not in cols:
+            cols.append(l["collection_id"])
+    hosts = set()
+    for r in resolved:
+        parts = r.get("tiles", "").split("/") if r.get("type") == "raster" else []
+        if len(parts) > 2 and parts[0] in ("http:", "https:") and parts[2]:
+            hosts.add(parts[2])
+    return {
+        "catalogs": sorted(by_catalog),
+        "collections_by_catalog": by_catalog,
+        "tiler_hosts": sorted(hosts),
+        "maplibre": True,  # both map artifacts render through MapLibre
+        # facts this function can't see default to false — callers that
+        # actually geocoded, fetched events, or draped terrain say so via
+        # extra_facts; the panel understates rather than fabricates
+        "terrain": False,
+        "geocoded": False,
+        "events": False,
+        **(extra_facts or {}),
+    }
+
+
 def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
     from html import escape
 
@@ -953,34 +1025,51 @@ def _stack_chunk_for(
         # a malformed curated file must not take the map down with it — the
         # parser stays loud (evals hit it directly), the artifact stays alive
         return None
-    items = [l for l in layers if l.get("type") == "item" and l.get("catalog") and l.get("collection_id")]
-    by_catalog: dict[str, list[str]] = {}
-    for l in items:
-        cols = by_catalog.setdefault(l["catalog"], [])
-        if l["collection_id"] not in cols:
-            cols.append(l["collection_id"])
-    hosts = set()
-    for r in resolved:
-        parts = r.get("tiles", "").split("/") if r.get("type") == "raster" else []
-        if len(parts) > 2 and parts[0] in ("http:", "https:") and parts[2]:
-            hosts.add(parts[2])
-    facts = {
-        "catalogs": sorted(by_catalog),
-        "collections_by_catalog": by_catalog,
-        "tiler_hosts": sorted(hosts),
-        "maplibre": True,  # both map artifacts render through MapLibre
-        # facts this function can't see default to false — callers that
-        # actually geocoded, fetched events, or draped terrain say so via
-        # extra_facts; the panel understates rather than fabricates
-        "terrain": False,
-        "geocoded": False,
-        "events": False,
-        **(extra_facts or {}),
-    }
-    entries = _stack.stack_instances(components, facts)
+    entries = _stack.stack_instances(components, _map_stack_facts(resolved, layers, extra_facts))
     if not entries:
         return None
     return _STACK_CHUNK.replace("__ENTRIES__", _stack_panel_html(entries))
+
+
+def _artifact_postcard(
+    artifact_path: str,
+    postcard: dict[str, Any],
+    facts: dict[str, Any],
+    layers: list[dict[str, Any]],
+    stack_layer: bool,
+) -> tuple[str | None, str | None]:
+    """Snapshot a rendered artifact into a share card. Returns (card_path, note).
+
+    The card inherits the artifact's own stack facts, so it claims exactly
+    what the view exercised — MapLibre, terrain, events, the lot — instead
+    of anyone re-typing the story.
+    """
+    import datetime as dt
+
+    try:
+        png = _snapshot_artifact(artifact_path)
+    except RuntimeError as e:
+        return None, str(e)
+    except Exception as e:
+        return None, f"postcard snapshot failed ({e.__class__.__name__}) — artifact is fine"
+    items = [l for l in layers if l.get("type") == "item"]
+    cols = sorted({l["collection_id"] for l in items if l.get("collection_id")})
+    cats = sorted({l["catalog"] for l in items if l.get("catalog") in CATALOGS})
+    source = ", ".join(CATALOGS[c]["notes"].split(":")[0] for c in cats) or "OpenStreetMap · CARTO basemap"
+    html = _postcard_html(
+        png,
+        postcard["place"],
+        postcard.get("date") or dt.date.today().isoformat(),
+        ", ".join(cols) or "interactive view",
+        source,
+        postcard.get("caption", ""),
+        None,
+        _stack_credit_html(facts) if stack_layer else None,
+        engine="STAC · MapLibre GL" if items else "MapLibre GL",
+    )
+    card_path = postcard.get("out_path") or _artifact_path(None, "postcard", postcard["place"])
+    Path(card_path).write_text(html, encoding="utf-8")
+    return card_path, None
 
 
 def render_map(
@@ -992,6 +1081,7 @@ def render_map(
     compare: bool | None = None,
     stack_layer: bool = False,
     stack_facts: dict[str, Any] | None = None,
+    postcard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write a self-contained interactive HTML map and return its file path.
 
@@ -1018,6 +1108,13 @@ def render_map(
     pass {"geocoded": True} if you resolved the place via geocode, and
     {"events": True} if an events layer came from active_events. Only claim
     what actually happened.
+
+    postcard: {"place": ..., "date": ..., "caption": ..., "out_path": ...}
+    also bakes a share card that shows THIS view — swipe divider, event
+    dots, overlays — via a headless-browser snapshot of the artifact.
+    Needs playwright + chromium once; without them you get the artifact
+    plus a postcard_note with the install command. Use when the view is
+    the story; a plain one-scene imagery card is render_postcard's job.
     """
     resolved = []
     raster_collections: list[str | None] = []
@@ -1056,6 +1153,14 @@ def render_map(
     out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
     if stack_note:
         out["note"] = stack_note
+    if postcard:
+        card_path, card_note = _artifact_postcard(
+            out_path, postcard, _map_stack_facts(resolved, layers, stack_facts), layers, stack_layer
+        )
+        if card_path:
+            out["postcard_path"] = card_path
+        if card_note:
+            out["postcard_note"] = card_note
     return out
 
 
@@ -1122,7 +1227,11 @@ __BRAND__
   #panel button:disabled { background: var(--mid); cursor: default; }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
     color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
-</style></head><body>
+  .clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack,
+  .clean .maplibregl-ctrl-top-right { display: none !important; }
+</style>
+<script>if (location.hash === "#clean") document.documentElement.classList.add("clean");</script>
+</head><body>
 <div id="map"></div>
 <div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p>
   <label>Terrain exaggeration: <span id="exagValue">__EXAGGERATION__</span>&times;</label>
@@ -1184,6 +1293,7 @@ def render_map_3d(
     exaggeration: float = 1.5,
     stack_layer: bool = False,
     extra_layers: list[dict[str, Any]] | None = None,
+    postcard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write a self-contained 3D terrain fly-through with imagery draped over it.
 
@@ -1204,6 +1314,11 @@ def render_map_3d(
     full_coverage_set when the best scene clips the AOI (covers_aoi_pct
     below ~95) — the gaps become one click away without loading tiles nobody
     asked for. They drape beneath the main scene, so it always wins.
+
+    postcard: {"place": ..., "date": ..., "caption": ...} bakes a share card
+    of the actual 3D view — pitched terrain, drape, extras auto-loaded —
+    via a headless-browser snapshot. Same playwright/chromium requirement
+    as render_map's postcard option.
     """
     # ponytail: one draped layer; add a second when a real ask needs it
     resolved = _resolve_layer(layer)
@@ -1273,6 +1388,17 @@ def render_map_3d(
     out = {"path": out_path, "title": title}
     if stack_note:
         out["note"] = stack_note
+    if postcard:
+        all_layers = [layer, *(extra_layers or [])]
+        card_path, card_note = _artifact_postcard(
+            out_path, postcard,
+            _map_stack_facts([resolved, *extras], all_layers, {"terrain": True}),
+            all_layers, stack_layer,
+        )
+        if card_path:
+            out["postcard_path"] = card_path
+        if card_note:
+            out["postcard_note"] = card_note
     return out
 
 
@@ -1306,7 +1432,7 @@ __BRAND__
     <p class="meta">__DATE__ · __COLLECTION__</p>
     __CAPTION__
     <div class="credit">
-      <div>Development Seed labs · STAC · __ENGINE__ · __SOURCE__</div>
+      <div>Development Seed labs · __ENGINE__ · __SOURCE__</div>
       __LICENSE__
       __STACK__
     </div>
@@ -1322,14 +1448,13 @@ def _catalog_source(catalog: str, collection_id: str) -> str:
     return f"{collection_id} via {name}"
 
 
-def _stack_credit_for(
-    catalog: str, collection_id: str, tiler_host: str | None, mosaic_scenes: int = 0
-) -> str | None:
+def _stack_credit_html(facts: dict[str, Any]) -> str | None:
     """The back-of-postcard stack listing: static credit lines, no links, no toggle.
 
-    A postcard is a still — no MapLibre, no live tiles — so the join only
-    claims the pipeline that produced the embedded pixels. Links stay out on
-    purpose: the card's no-live-URLs guarantee covers the credit block too.
+    Facts-driven so any card tells its own truth — an imagery card claims no
+    map engine, a snapshot-of-a-map card claims MapLibre and whatever the
+    map exercised. Links stay out on purpose: the card's no-live-URLs
+    guarantee covers the credit block too.
     """
     from html import escape
 
@@ -1339,12 +1464,7 @@ def _stack_credit_for(
         components = _stack.parse_stack()
     except (FileNotFoundError, ValueError):
         return None
-    entries = _stack.stack_instances(components, {
-        "catalogs": [catalog],
-        "collections_by_catalog": {catalog: [collection_id]},
-        "tiler_hosts": [tiler_host] if tiler_host else [],
-        "mosaic_scenes": mosaic_scenes,
-    })
+    entries = _stack.stack_instances(components, facts)
     if not entries:
         return None
     ds_attr = ' class="ds"'
@@ -1354,6 +1474,17 @@ def _stack_credit_for(
         for e in entries
     )
     return f'<div class="stack-list"><div>the stack behind this card:</div>{lines}</div>'
+
+
+def _stack_credit_for(
+    catalog: str, collection_id: str, tiler_host: str | None, mosaic_scenes: int = 0
+) -> str | None:
+    return _stack_credit_html({
+        "catalogs": [catalog],
+        "collections_by_catalog": {catalog: [collection_id]},
+        "tiler_hosts": [tiler_host] if tiler_host else [],
+        "mosaic_scenes": mosaic_scenes,
+    })
 
 
 def _intersect_bbox(a: list[float], b: list[float]) -> list[float] | None:
@@ -1440,7 +1571,7 @@ def _postcard_html(
     caption: str = "",
     license_: str | None = None,
     stack_html: str | None = None,
-    engine: str = "TiTiler",
+    engine: str = "STAC · TiTiler",
 ) -> str:
     import base64
 
@@ -1561,7 +1692,7 @@ def render_postcard(
     html = _postcard_html(
         png, place, date, collection_id,
         _catalog_source(catalog, collection_id), caption, license_, stack_html,
-        engine="rio-tiler" if mosaic_scenes else "TiTiler",
+        engine="STAC · rio-tiler" if mosaic_scenes else "STAC · TiTiler",
     )
     if out_path is None:
         out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))

@@ -492,6 +492,22 @@ def t_stack_mosaic_card_honesty_and_ds_marks():
     assert '<b class="ds">rio-tiler</b>' in listing
 
 
+def t_snapshot_card_templates_and_facts():
+    # both map templates carry the snapshot hooks: gsMaps for load-detection,
+    # #clean to strip chrome (story elements — divider, side labels — stay)
+    map_html, _ = _render_stack_map()
+    for html in (map_html, _render_3d()):
+        assert "window.gsMaps" in html and 'location.hash === "#clean"' in html
+        assert ".clean #panel" in html
+    # a snapshot card inherits the map's facts: MapLibre + events claimed
+    # only because the view exercised them; imagery cards still claim neither
+    facts = tools._map_stack_facts([], [{"type": "geojson", "name": "ev"}], {"events": True})
+    listing = tools._stack_credit_html(facts)
+    assert "MapLibre GL" in listing and "NASA EONET" in listing
+    single = tools._stack_credit_for("earth-search", "sentinel-2-l2a", "titiler.xyz")
+    assert "MapLibre" not in single and "EONET" not in single
+
+
 def t_brand_tokens_in_all_templates():
     # one shared token set: DS orange accent present in map, 3D, and postcard output
     html, _ = _render_stack_map()
