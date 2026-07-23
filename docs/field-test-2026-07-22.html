@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>groundstation field test №2 — the wave edition, actually run</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
+  --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
+  --calm: #2e7d32; --blue: #1d4e8f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
+header { border-bottom: 2px solid var(--ink); padding: 42px 24px 30px; }
+.wrap { max-width: 1060px; margin: 0 auto; }
+header h1 { font: 700 34px/1.1 'Roboto Condensed', sans-serif; margin: 0 0 6px; letter-spacing: .02em; }
+header h1 .dot { display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); margin-right: 12px; }
+header .sub { font: 500 11.5px 'Roboto Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--mid); }
+header p.lede { max-width: 760px; font-size: 16px; margin: 16px 0 0; color: var(--mid); }
+.stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 26px auto 0; max-width: 1060px; padding: 0; }
+.stat { flex: 1; min-width: 160px; background: var(--white); border: 1px solid var(--rule); border-top: 3px solid var(--accent); padding: 12px 16px; }
+.stat b { display: block; font: 600 30px 'Roboto Condensed', sans-serif; color: var(--accent); }
+.stat span { font-size: 12px; color: var(--mid); }
+main { padding: 10px 24px 60px; }
+h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
+  display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
+h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 16px; }
+@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.card .top { display: flex; align-items: center; gap: 10px; }
+.card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.card .tag { font: 500 10px 'Roboto Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); border: 1px solid var(--rule); padding: 3px 8px; }
+.card .who { margin-left: auto; font: 400 10.5px 'Roboto Mono', monospace; color: var(--muted); }
+.label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
+.answer { font-size: 13.5px; color: var(--mid); }
+.answer b { color: var(--ink); }
+.learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
+.learning b { color: var(--accent); font-style: normal; }
+.shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
+.fig { position: relative; display: block; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; }
+.fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
+  background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
+.fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 0 40px; }
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <h1><span class="dot"></span>THE FIELD TEST №2</h1>
+  <div class="sub">groundstation · 10 prompts · one day of new features · July 22, 2026 · Development Seed labs</div>
+  <p class="lede">Every example below ran for real against live data on July 22: real STAC searches, real event feeds, real weather, real artifacts you can open. The focus is everything that shipped in the last day — 3D fly-throughs, auto-mosaics, postcards, the stack layer, local-model synthesis, scheduled sweeps — pointed at what is actually happening on Earth this week.</p>
+</div></header>
+
+<div class="stats wrap" style="padding: 0 24px">
+  <div class="stat"><b>10/10</b><span>prompts answered with working artifacts</span></div>
+  <div class="stat"><b>7</b><span>features shipped today, all exercised</span></div>
+  <div class="stat"><b>11</b><span>live wildfires on one Oregon map</span></div>
+  <div class="stat"><b>0</b><span>API keys needed for any of it</span></div>
+</div>
+
+<main class="wrap">
+<h2 class="round">Round 1 — the new artifacts, pointed at this week's Earth</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">1</div><div class="tag">3d fly-through</div><div class="who">fire country</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me the terrain around the BROOK fire in Shasta County in 3D — I want to understand what the crews are working in.</div></div>
+<div class="answer"><div class="label">Output</div>Found the live EONET fire, picked a <b>0.01%-cloud July 7 scene at 98.2% coverage</b>, and draped it over real terrain at 1.8× exaggeration. The canyon country east of the Sacramento Valley reads instantly — this is steep ground.</div>
+<a class="fig" href="/demo/map3d-brook-fire-shasta.html" target="_blank" title="open the live artifact"><img src="img/w2-map3d-brook-fire-shasta.jpg" alt="artifact produced by example 1" loading="lazy"><span class="open">live 3D ↗</span></a>
+<div class="shows">render_map_3d, new today: live event → terrain answer in one call</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">2</div><div class="tag">3d fly-through</div><div class="who">the reference case</div></div>
+<div><div class="label">Input</div><div class="prompt">Give me a 3D fly-through of Torres del Paine.</div></div>
+<div class="answer"><div class="label">Output</div>Southern-hemisphere winter light on the towers: <b>1.6% cloud, 96.5% coverage, July 10</b>. Exaggeration slider, orbiting fly-through, reset view — all in a self-contained page with keyless terrain tiles that shares as-is.</div>
+<a class="fig" href="/demo/map3d-torres-del-paine.html" target="_blank" title="open the live artifact"><img src="img/w2-map3d-torres-del-paine.jpg" alt="artifact produced by example 2" loading="lazy"><span class="open">live 3D ↗</span></a>
+<div class="shows">the page that used to be hand-written per request is now one tool call</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">3</div><div class="tag">auto-mosaic + stack</div><div class="who">the regression case</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me Calgary. All of it. And show me what's behind the map.</div></div>
+<div class="answer"><div class="label">Output</div>Calgary spans two UTM zones, so no single scene covers it. The search returned a <b>same-day two-tile set at 100% union coverage</b> without being asked twice, and the Stack toggle reveals the pipeline: Earth Search → COG range requests → TiTiler serving sentinel-2-l2a via titiler.xyz → MapLibre, each with a role badge and a kind-colored dot.</div>
+<a class="fig" href="/demo/map-calgary-full-coverage-stack.html" target="_blank" title="open the live artifact"><img src="img/w2-map-calgary-full-coverage-stack.jpg" alt="artifact produced by example 3" loading="lazy"><span class="open">live map + stack ↗</span></a>
+<div class="shows">full_coverage_set and stack_layer, both new today, on one artifact</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">4</div><div class="tag">live events</div><div class="who">wildfire season</div></div>
+<div><div class="label">Input</div><div class="prompt">What's burning in north-central Oregon right now? Map every active fire over current imagery.</div></div>
+<div class="answer"><div class="label">Output</div><b>Eleven live EONET fires</b> — the Hay Creek Complex, Rowe Creek Complex, and nine more across Gilliam, Sherman, Wasco, and Wheeler counties — as clickable markers over a <b>four-tile same-day mosaic (July 17, 100% union coverage)</b>. Weather context: 0.4mm of rain in the past week, 34.5°C ahead.</div>
+<a class="fig" href="/demo/map-hay-creek-complex.html" target="_blank" title="open the live artifact"><img src="img/w2-map-hay-creek-complex.jpg" alt="artifact produced by example 4" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="learning"><b>Learning →</b> the first pass used the single best scene — 63.8% coverage. The auto-mosaic turned that into a four-tile 100% answer, which is exactly the reprompt it was built to remove.</div>
+<div class="shows">auto-mosaic scaling past two tiles on a real fire complex</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">5</div><div class="tag">postcard</div><div class="who">share-ready</div></div>
+<div><div class="label">Input</div><div class="prompt">Make me a postcard of the country the BROOK fire is burning in.</div></div>
+<div class="answer"><div class="label">Output</div>One card: the July 7 scene as <b>embedded pixels (nothing expires, nothing links out)</b>, place, date, caption, and the attribution block — Development Seed labs · STAC · TiTiler · sentinel-2-l2a via Element 84 Earth Search. Posting it anywhere stays a human call.</div>
+<a class="fig" href="/demo/postcard-shasta-brook-fire.html" target="_blank" title="open the live artifact"><img src="img/w2-postcard-shasta-brook-fire.jpg" alt="artifact produced by example 5" loading="lazy"><span class="open">live postcard ↗</span></a>
+<div class="learning"><b>Learning →</b> an iceberg postcard (A76C, South Atlantic) came back empty — Sentinel-2 doesn't acquire open ocean. The honest zero beat a wrong artifact.</div>
+<div class="shows">render_postcard, new today: durable, attributed, safe to share</div>
+</div>
+</div>
+
+<h2 class="round">Round 2 — analysis, synthesis, and the machinery that runs alone</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">6</div><div class="tag">index postcard</div><div class="who">agriculture</div></div>
+<div><div class="label">Input</div><div class="prompt">NDVI postcard of the Salinas Valley at the height of the growing season.</div></div>
+<div class="answer"><div class="label">Output</div>The valley floor glows green against the dry July hills: <b>NDVI mean 0.331, July 17, 3.3% cloud</b>, rendered with the rdylgn colormap and captioned so the colors explain themselves. Index cards take the same expression machinery as index map layers.</div>
+<a class="fig" href="/demo/postcard-salinas-ndvi.html" target="_blank" title="open the live artifact"><img src="img/w2-postcard-salinas-ndvi.jpg" alt="artifact produced by example 6" loading="lazy"><span class="open">live postcard ↗</span></a>
+<div class="learning"><b>Learning →</b> geocoding 'Salinas Valley' returned Salinas Valley State Prison — a 1km box. The region-scale sanity check in the skill caught it, and the AOI was widened to the actual valley.</div>
+<div class="shows">band math + colormap on a shareable card</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">7</div><div class="tag">storm watch</div><div class="who">gulf coast</div></div>
+<div><div class="label">Input</div><div class="prompt">Where is Tropical Storm Bertha, and what does the week look like for the Florida Panhandle coast?</div></div>
+<div class="answer"><div class="label">Output</div>Bertha's EONET position (July 21) mapped against the newest coastal scene, with the forward signal read honestly: <b>winds already easing (51 → 18 km/h) and under 7mm of rain across the whole week ahead</b> — this system is not the panhandle's problem this week. The best coastal scene covers 49.8% and the answer says so.</div>
+<a class="fig" href="/demo/map-tropical-storm-bertha.html" target="_blank" title="open the live artifact"><img src="img/w2-map-tropical-storm-bertha.jpg" alt="artifact produced by example 7" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="shows">events + forward weather + coverage honesty in one read</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">8</div><div class="tag">local model</div><div class="who">runs on this laptop</div></div>
+<div><div class="label">Input</div><div class="prompt">Brief me on Chelan County — but synthesize it on the local model, not the cloud.</div></div>
+<div class="answer"><div class="label">Output</div>Ollama's qwen2.5-coder:7b wrote a coherent brief on this laptop: the two named wildfires, the NDVI slip, the heat. Then <b>the eval gate failed it — dates and the NDVI number weren't cited to spec</b> — which is the design working: local output gets the same quality bar as cloud output, and a sweep would have withheld it from Slack rather than posting it.</div>
+<div class="learning"><b>Learning →</b> the gate is what makes 'run it locally when possible' safe rather than aspirational. A failing local brief degrades to the claude path, then to the deterministic brief — the chain never returns nothing.</div>
+<div class="shows">local synthesis + preflight + eval gate, all new today</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">9</div><div class="tag">scheduled sweep</div><div class="who">nobody at the keyboard</div></div>
+<div><div class="label">Input</div><div class="prompt">Run the morning fleet sweep, dry-run the Slack post.</div></div>
+<div class="answer"><div class="label">Output</div>Four areas triaged in one run: <b>Chelan WATCH</b> (same two uncontained fires, NDVI 0.626 → 0.609 under record heat), <b>Laredo WATCH</b> (day seven of a 42.4°C heat wave, NDVI down 19.6%), <b>Efate CALM</b>. Chelan's brief opened with 'steady state since the last run today' — it remembers yesterday. The payload printed instead of posting.</div>
+<a class="fig" href="/demo/morning-sweep-2026-07-22.html" target="_blank" title="open the live artifact"><img src="img/w2-morning-sweep.jpg" alt="artifact produced by example 9" loading="lazy"><span class="open">sweep index ↗</span></a>
+<div class="learning"><b>Learning →</b> Barotse's summary read calm but carried a WATCH tag — the alert extraction takes the first CALM/WATCH/ACT match anywhere in the text. Now filed as the next fix, which is the field test doing its job.</div>
+<div class="shows">lockfile, log, eval-gated posting, day-over-day memory</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">10</div><div class="tag">first run</div><div class="who">the next machine</div></div>
+<div><div class="label">Input</div><div class="prompt">bash scripts/doctor.sh — on a machine that just cloned this.</div></div>
+<div class="answer"><div class="label">Output</div>The preflight walks the chain in the order it breaks — uv, server env, CLI, plugin wiring, endpoints, and <b>new today: whether the copy Claude runs is current</b>, printing the exact update command when it's behind. On a TTY it wears the new masthead and status colors; piped, it stays byte-clean plain text.</div>
+<div class="learning"><b>Learning →</b> plugin installs are cached per version, so six merged PRs deliver nothing until the version bumps and the user updates — the doctor now says which copy is running and how to move.</div>
+<div class="shows">the whole first-run and upgrade path, hardened today</div>
+</div>
+</div>
+<div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
+bash scripts/doctor.sh                    # walks the setup chain, prints the fix
+uv run evals/unit_checks.py               # 59 offline checks
+uv run evals/run_evals.py                 # live checks against real endpoints
+uv run scripts/field_test.py docs/field-test-2026-07-22.cases.json   # rebuild this page</code></div>
+</main>
+
+<footer>field test №2 · July 22, 2026 · built with the field-test factory (scripts/field_test.py) · groundstation · Development Seed labs</footer>
+
+</body>
+</html>
