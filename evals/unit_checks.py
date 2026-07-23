@@ -230,6 +230,58 @@ def t_brief_checks_catch_missing_section():
     assert any("missing section" in p for p in problems)
 
 
+# ---- scheduled sweeps: gate header, transition guarantee, run.sh lock ----
+
+import datetime as dt  # noqa: E402
+import subprocess  # noqa: E402
+
+
+def t_slack_payload_withheld_header():
+    results = [{"place": "A", "alert": "CALM", "tldr": "Quiet."}]
+    p = brief.slack_payload(results, dt.date(2026, 7, 22), total=2, withheld=1)
+    assert "1 of 2 areas, 1 withheld by checks" in p["text"]
+    assert "A" in p["text"]
+
+
+def t_slack_payload_all_pass_unchanged():
+    results = [{"place": "A", "alert": "CALM", "tldr": "Quiet."}]
+    p = brief.slack_payload(results, dt.date(2026, 7, 22))
+    assert "(1 areas)" in p["text"] and "withheld" not in p["text"]
+
+
+def t_transition_note_added_when_model_forgot():
+    md = "## TL;DR\nAll quiet, alert level CALM as of 2026-07-22.\n## What changed\n- nothing"
+    out = brief._ensure_transition_note(md, "WATCH")
+    assert "stood down from the last run's WATCH" in out
+    assert out.index("stood down") < out.index("All quiet")
+
+
+def t_transition_note_respects_existing_mention():
+    md = "## TL;DR\nYesterday's WATCH stands down, CALM today.\n## What changed\n- x"
+    assert brief._ensure_transition_note(md, "WATCH") == md
+
+
+def t_transition_note_only_on_deescalation():
+    md = "## TL;DR\nStill WATCH, winds rising.\n"
+    assert brief._ensure_transition_note(md, "WATCH") == md
+    assert brief._ensure_transition_note("## TL;DR\nCALM.\n", None) == "## TL;DR\nCALM.\n"
+    assert brief._ensure_transition_note("## TL;DR\nCALM.\n", "CALM") == "## TL;DR\nCALM.\n"
+
+
+def t_run_sh_skips_when_lock_held():
+    root = Path(brief.__file__).resolve().parents[1]
+    lock = root / "briefing" / "state" / ".run.lock"
+    lock.mkdir(parents=True, exist_ok=True)  # fresh lock = a run in progress
+    try:
+        r = subprocess.run(
+            ["bash", str(root / "briefing" / "run.sh")],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert r.returncode == 0 and "already running" in r.stdout
+    finally:
+        lock.rmdir()
+
+
 # ---- local synthesis routing (stubbed endpoint on loopback, deterministic) ----
 
 import contextlib  # noqa: E402

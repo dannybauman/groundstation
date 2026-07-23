@@ -194,6 +194,23 @@ def synthesize(data: dict) -> str:
     return "\n".join(lines)
 
 
+def _ensure_transition_note(md: str, prev_alert: str | None) -> str:
+    """Deterministic day-over-day honesty: a CALM brief after a WATCH/ACT run
+    must say so even when the model forgot. The synth prompt asks for it; this
+    guarantees it."""
+    if prev_alert not in ("WATCH", "ACT"):
+        return md
+    m = re.search(r"\b(CALM|WATCH|ACT)\b", md)
+    if not m or m.group(1) != "CALM":
+        return md
+    lowered = md.lower()
+    if any(t in lowered for t in ("stand", "stood down", "de-escalat", "calmer than", "yesterday", "last run")):
+        return md
+    return md.replace(
+        "## TL;DR\n", f"## TL;DR\nCALM — stood down from the last run's {prev_alert}. ", 1
+    )
+
+
 def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
     """NDVI delta between the newest scene and a same-tile baseline ~1 month back."""
     tile = tools._mgrs_tile(best["id"])
@@ -332,6 +349,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         except Exception:
             pass
     md = synthesize(data)
+    md = _ensure_transition_note(md, (data.get("previous_run") or {}).get("alert"))
 
     html = (
         PAGE.replace("__PLACE__", place)
@@ -401,8 +419,13 @@ INDEX = """<!doctype html>
 ALERT_EMOJI = {"ACT": "🔴", "WATCH": "🟠", "CALM": "🟢"}
 
 
-def slack_payload(results: list[dict], today: dt.date) -> dict:
-    lines = [f"🌍 *Morning sweep — {today.strftime('%A, %B %d')}* ({len(results)} areas)"]
+def slack_payload(results: list[dict], today: dt.date, total: int | None = None, withheld: int = 0) -> dict:
+    scope = (
+        f"{len(results)} of {total} areas, {withheld} withheld by checks"
+        if withheld
+        else f"{len(results)} areas"
+    )
+    lines = [f"🌍 *Morning sweep — {today.strftime('%A, %B %d')}* ({scope})"]
     for r in results:
         first_sentence = (r["tldr"].split(". ")[0].rstrip(".") + ".").replace("**", "*")
         lines.append(f"{ALERT_EMOJI.get(r['alert'], '⚪')} *{r['alert']}* — {r['place']}: {first_sentence}")
@@ -451,7 +474,26 @@ def build_fleet(config_path: Path, out_dir: Path, slack_webhook: str | None = No
     index_path = out_dir / f"morning-sweep-{today.isoformat()}.html"
     index_path.write_text(html, encoding="utf-8")
     print(f"\nindex: {index_path}")
-    deliver_slack(slack_payload(results, today), slack_webhook, slack_dry_run)
+    # quality gate: a generative product can't post garbage. Failing briefs stay
+    # on disk and in the HTML index, but are withheld from the Slack post — and
+    # the post says so instead of pretending.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    import brief_checks
+
+    passed, withheld = [], 0
+    for r in results:
+        stem = r["brief"][:-5]  # drop .html
+        problems = brief_checks.check_brief(out_dir / f"{stem}.md", out_dir / f"{stem}.data.json")
+        if problems:
+            withheld += 1
+            print(f"withheld from Slack ({r['place']}): {problems}", file=sys.stderr)
+        else:
+            passed.append(r)
+    deliver_slack(
+        slack_payload(passed, today, total=len(results), withheld=withheld),
+        slack_webhook,
+        slack_dry_run,
+    )
     return index_path
 
 
