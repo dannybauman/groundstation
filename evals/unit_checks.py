@@ -489,6 +489,11 @@ def t_preview_bbox_crops_to_aoi():
     assert "/stac/preview.png" in tools.preview_item("earth-search", "sentinel-2-l2a", "X")["preview_url"]
     assert tools._intersect_bbox([0, 0, 2, 2], [1, 1, 3, 3]) == [1, 1, 2, 2]
     assert tools._intersect_bbox([0, 0, 1, 1], [2, 2, 3, 3]) is None
+    # clamping must not move the frame off the subject: trims shrink both
+    # sides, so the AOI center (the mountain) stays the picture center
+    assert tools._centered_clamp([0, 0, 4, 4], [1, 1, 10, 10]) == [1, 1, 3, 3]
+    assert tools._centered_clamp([0, 0, 4, 4], [5, 5, 10, 10]) is None
+    assert tools._centered_clamp([0, 0, 4, 4], [3.5, 0, 10, 4]) == [3.5, 0, 4, 4]  # center off-scene: plain clamp
 
 
 def t_pick_best_scene_prefers_coverage():

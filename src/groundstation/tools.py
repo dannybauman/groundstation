@@ -1350,6 +1350,24 @@ def _intersect_bbox(a: list[float], b: list[float]) -> list[float] | None:
     return [w, s, e, n] if w < e and s < n else None
 
 
+def _centered_clamp(aoi: list[float], item_bbox: list[float]) -> list[float] | None:
+    """Clamp aoi inside item_bbox WITHOUT moving its center.
+
+    A plain intersection trims only the off-scene edges, which drags the
+    frame's center away from the subject. Shrink symmetrically instead: the
+    subject stays centered, the crop just gets tighter.
+    """
+    inner = _intersect_bbox(aoi, item_bbox)
+    if inner is None:
+        return None
+    cx, cy = (aoi[0] + aoi[2]) / 2, (aoi[1] + aoi[3]) / 2
+    half_x = min(cx - inner[0], inner[2] - cx)
+    half_y = min(cy - inner[1], inner[3] - cy)
+    if half_x <= 0 or half_y <= 0:  # center is off-scene; nothing to center on
+        return inner
+    return [cx - half_x, cy - half_y, cx + half_x, cy + half_y]
+
+
 def _shareable_license(license_: str | None) -> str | None:
     # STAC uses "proprietary"/"various" as its not-an-SPDX-id placeholder, not as
     # a claim about terms — printing it on a share card misinforms, so omit it
@@ -1420,12 +1438,13 @@ def render_postcard(
     """
     if bbox is not None:
         # clamp to the scene's own bbox so an AOI hanging off the tile can't
-        # print a nodata band. ponytail: bbox math only — a diagonal swath
-        # edge (footprint != bbox) can still clip a corner; footprint
+        # print a nodata band — center-preserving, so the subject stays in
+        # the middle of the frame. ponytail: bbox math only — a diagonal
+        # swath edge (footprint != bbox) can still clip a corner; footprint
         # clipping when a real ask needs it
         try:
             item = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}")
-            clamped = _intersect_bbox(bbox, item.get("bbox") or bbox)
+            clamped = _centered_clamp(bbox, item.get("bbox") or bbox)
             bbox = clamped or bbox
         except Exception:
             pass
