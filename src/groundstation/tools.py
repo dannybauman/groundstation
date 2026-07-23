@@ -721,8 +721,9 @@ _STACK_CHUNK = """<button id="stack-toggle" aria-expanded="false">Stack</button>
   .s-head { display: flex; flex-direction: column; min-width: 0; }
   .stack-name { font-weight: 600; }
   .stack-name .role { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
-    color: var(--accent); border: 1px solid currentColor; border-radius: 3px; padding: 2px 4px; margin-left: 6px;
+    color: var(--mid); border: 1px solid var(--rule); border-radius: 3px; padding: 2px 4px; margin-left: 6px;
     vertical-align: 1px; }
+  .stack-name .role.ds { background: var(--accent); border-color: var(--accent); color: #fff; }
   .stack-entry .inst { font: 11px/1.5 "Roboto Mono", monospace; color: var(--mid); }
   .stack-entry .more { margin: 3px 0 2px 16px; }
   .stack-entry .more p { margin: 2px 0; color: var(--ink); }
@@ -924,9 +925,12 @@ def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
         # ponytail: click-to-expand via native <details>, not hover — hover has
         # no touch equivalent and details is keyboard-accessible for free
         spk = e.get("speaks-to", "")
+        from groundstation.stack import DS_OWN
+
+        role_cls = "role ds" if e["ds-role"] in DS_OWN else "role"
         parts.append(
             f'<details class="stack-entry"><summary><span class="dot k-{e["kind"]}"></span><span class="s-head">'
-            f'<span class="stack-name">{escape(e["name"])}<span class="role">{escape(e["ds-role"])}</span></span>'
+            f'<span class="stack-name">{escape(e["name"])}<span class="{role_cls}">{escape(e["ds-role"])}</span></span>'
             f'<span class="inst">{escape(e["instance"])}</span></span></summary>'
             f'<div class="more"><p>{escape(e["what"])}</p>'
             + (f'<div class="spk">speaks to {escape(spk)}</div>' if spk else "")
@@ -1293,6 +1297,7 @@ __BRAND__
   .credit div { margin: 2px 0; }
   .stack-list { margin-top: 8px; font-size: 11px; }
   .stack-list b { color: var(--ink); font-weight: 600; }
+  .stack-list b.ds { color: var(--accent); }
 </style></head><body>
 <div class="card">
   <img src="data:image/png;base64,__IMAGE__" alt="__PLACE__, __DATE__">
@@ -1301,7 +1306,7 @@ __BRAND__
     <p class="meta">__DATE__ · __COLLECTION__</p>
     __CAPTION__
     <div class="credit">
-      <div>Development Seed labs · STAC · TiTiler · __SOURCE__</div>
+      <div>Development Seed labs · STAC · __ENGINE__ · __SOURCE__</div>
       __LICENSE__
       __STACK__
     </div>
@@ -1317,7 +1322,9 @@ def _catalog_source(catalog: str, collection_id: str) -> str:
     return f"{collection_id} via {name}"
 
 
-def _stack_credit_for(catalog: str, collection_id: str, tiler_host: str | None) -> str | None:
+def _stack_credit_for(
+    catalog: str, collection_id: str, tiler_host: str | None, mosaic_scenes: int = 0
+) -> str | None:
     """The back-of-postcard stack listing: static credit lines, no links, no toggle.
 
     A postcard is a still — no MapLibre, no live tiles — so the join only
@@ -1336,11 +1343,15 @@ def _stack_credit_for(catalog: str, collection_id: str, tiler_host: str | None) 
         "catalogs": [catalog],
         "collections_by_catalog": {catalog: [collection_id]},
         "tiler_hosts": [tiler_host] if tiler_host else [],
+        "mosaic_scenes": mosaic_scenes,
     })
     if not entries:
         return None
+    ds_attr = ' class="ds"'
     lines = "".join(
-        f"<div><b>{escape(e['name'])}</b> — {escape(e['instance'])}</div>" for e in entries
+        f'<div><b{ds_attr if e["ds-role"] in _stack.DS_OWN else ""}>{escape(e["name"])}</b>'
+        f" — {escape(e['instance'])}</div>"
+        for e in entries
     )
     return f'<div class="stack-list"><div>the stack behind this card:</div>{lines}</div>'
 
@@ -1348,6 +1359,50 @@ def _stack_credit_for(catalog: str, collection_id: str, tiler_host: str | None) 
 def _intersect_bbox(a: list[float], b: list[float]) -> list[float] | None:
     w, s, e, n = max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])
     return [w, s, e, n] if w < e and s < n else None
+
+
+def _mosaic_png(
+    catalog: str,
+    collection_id: str,
+    item_ids: list[str],
+    bbox: list[float],
+    assets: list[str] | None = None,
+    rescale: str | None = None,
+    colormap_name: str | None = None,
+    expression: str | None = None,
+    max_size: int = 1024,
+) -> tuple[bytes, int]:
+    """Bake one PNG from several scenes with rio-tiler (Development Seed).
+
+    Reads the COGs directly over HTTP range requests — no tiler involved —
+    and merges scene by scene, first valid pixel wins. Item order is
+    priority order: put the best scene first, fills after.
+    """
+    os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+    from rio_tiler.io import STACReader
+    from rio_tiler.mosaic import mosaic_reader
+
+    base = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/"
+
+    def _read(url: str, bbox: tuple, **kw: Any):
+        with STACReader(url) as r:
+            return r.part(bbox, **kw)
+
+    kw: dict[str, Any] = {"bounds_crs": "epsg:4326", "dst_crs": "epsg:4326", "max_size": max_size}
+    if expression:
+        kw.update(expression=expression, asset_as_band=True)
+        rescale = rescale or "-1,1"
+    else:
+        kw["assets"] = assets or _default_assets(collection_id)
+    img, used = mosaic_reader([base + i for i in item_ids], _read, tuple(bbox), **kw)
+    if rescale:
+        lo, hi = (float(v) for v in rescale.split(","))
+        img = img.rescale(((lo, hi),))
+    if colormap_name:
+        from rio_tiler.colormap import cmap as _cmap
+
+        img = img.apply_colormap(_cmap.get(colormap_name))
+    return img.render(img_format="PNG"), len(used)
 
 
 def _centered_clamp(aoi: list[float], item_bbox: list[float]) -> list[float] | None:
@@ -1385,11 +1440,13 @@ def _postcard_html(
     caption: str = "",
     license_: str | None = None,
     stack_html: str | None = None,
+    engine: str = "TiTiler",
 ) -> str:
     import base64
 
     return (
         _POSTCARD_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
+        .replace("__ENGINE__", engine)
         .replace("__IMAGE__", base64.b64encode(png).decode())
         .replace("__PLACE__", place)
         .replace("__DATE__", date)
@@ -1416,6 +1473,7 @@ def render_postcard(
     out_path: str | None = None,
     stack_layer: bool = False,
     bbox: list[float] | None = None,
+    fill_item_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Write a share-ready card for one scene: pixels embedded, attribution baked in.
 
@@ -1435,27 +1493,60 @@ def render_postcard(
     bbox [w, s, e, n]: frame the card to this area instead of the whole
     scene. Pass the AOI — the subject fills the frame and scene-edge nodata
     stays off the card. Pick a scene that covers the bbox first.
+
+    fill_item_ids: when no single scene covers the bbox (a swath-edge AOI),
+    pass the REST of a same-day full_coverage_set — the card bakes as a
+    rio-tiler mosaic read straight from the COGs, main scene winning where
+    scenes overlap. Same-day fills keep the seam invisible. Needs bbox;
+    earth-search-style catalogs only (PC/VEDA fall back to single scene).
     """
     if bbox is not None:
-        # clamp to the scene's own bbox so an AOI hanging off the tile can't
-        # print a nodata band — center-preserving, so the subject stays in
-        # the middle of the frame. ponytail: bbox math only — a diagonal
-        # swath edge (footprint != bbox) can still clip a corner; footprint
-        # clipping when a real ask needs it
+        # clamp to the scenes' union bbox so an AOI hanging off the data
+        # can't print a nodata band — center-preserving, so the subject
+        # stays in the middle of the frame. ponytail: bbox math only — a
+        # diagonal swath edge (footprint != bbox) can still clip a corner
+        # on single-scene cards; fills exist for exactly that case
         try:
-            item = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}")
-            clamped = _centered_clamp(bbox, item.get("bbox") or bbox)
-            bbox = clamped or bbox
+            boxes = []
+            for i in (item_id, *(fill_item_ids or [])):
+                item = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{i}")
+                if item.get("bbox"):
+                    boxes.append(item["bbox"])
+            if boxes:
+                union = [min(b[0] for b in boxes), min(b[1] for b in boxes),
+                         max(b[2] for b in boxes), max(b[3] for b in boxes)]
+                bbox = _centered_clamp(bbox, union) or bbox
         except Exception:
             pass
-    p = preview_item(
-        catalog, collection_id, item_id, assets, rescale,
-        max_size=1024, colormap_name=colormap_name, expression=expression, bbox=bbox,
-    )
-    if "preview_url" not in p:
-        return p
-    r = _client.get(p["preview_url"], timeout=90)
-    r.raise_for_status()
+    png, mosaic_scenes, mosaic_note = None, 0, None
+    if fill_item_ids:
+        if bbox is None:
+            mosaic_note = "fill_item_ids ignored: a mosaic card needs bbox"
+        elif CATALOGS[catalog]["raster"] != "titiler-xyz":
+            mosaic_note = f"mosaic cards need direct COG access; {catalog} fell back to the single scene"
+        else:
+            try:
+                png, mosaic_scenes = _mosaic_png(
+                    catalog, collection_id, [item_id, *fill_item_ids], bbox,
+                    assets, rescale, colormap_name, expression,
+                )
+            except Exception as e:
+                # a card must always render — fall back to the single scene
+                mosaic_note = f"mosaic failed ({e.__class__.__name__}); single-scene card"
+    tiler_host = None
+    if png is None:
+        p = preview_item(
+            catalog, collection_id, item_id, assets, rescale,
+            max_size=1024, colormap_name=colormap_name, expression=expression, bbox=bbox,
+        )
+        if "preview_url" not in p:
+            return p
+        r = _client.get(p["preview_url"], timeout=90)
+        r.raise_for_status()
+        png = r.content
+        from urllib.parse import urlsplit
+
+        tiler_host = urlsplit(p["preview_url"]).netloc
     # ponytail: license from collection metadata only; per-item attribution
     # when a catalog needs it
     try:
@@ -1464,14 +1555,13 @@ def render_postcard(
         license_ = None
     stack_html, stack_note = None, None
     if stack_layer:
-        from urllib.parse import urlsplit
-
-        stack_html = _stack_credit_for(catalog, collection_id, urlsplit(p["preview_url"]).netloc)
+        stack_html = _stack_credit_for(catalog, collection_id, tiler_host, mosaic_scenes)
         if stack_html is None:
             stack_note = "stack listing skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = _postcard_html(
-        r.content, place, date, collection_id,
+        png, place, date, collection_id,
         _catalog_source(catalog, collection_id), caption, license_, stack_html,
+        engine="rio-tiler" if mosaic_scenes else "TiTiler",
     )
     if out_path is None:
         out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
@@ -1479,8 +1569,11 @@ def render_postcard(
         out_path = str(out_dir / f"postcard-{slugify(place)}-{slugify(date)}.html")
     Path(out_path).write_text(html, encoding="utf-8")
     out = {"path": out_path}
-    if stack_note:
-        out["note"] = stack_note
+    if mosaic_scenes:
+        out["mosaic_scenes"] = mosaic_scenes
+    notes = "; ".join(n for n in (mosaic_note, stack_note) if n)
+    if notes:
+        out["note"] = notes
     return out
 
 
