@@ -514,11 +514,18 @@ def t_snapshot_card_templates_and_facts():
     assert "MapLibre GL" in listing and "NASA EONET" in listing
     single = tools._stack_credit_for("earth-search", "sentinel-2-l2a", "titiler.xyz")
     assert "MapLibre" not in single and "EONET" not in single
-    # viewport matches the bbox shape, so the frame IS the asked-for area
-    w, h = tools._card_viewport([0, 45, 2, 45.7])  # wide box at 45N
-    assert w == 1200 and 550 <= h < 700
-    assert tools._card_viewport([0, 0, 1, 3])[1] == int(1200 * 1.6)  # tall boxes clamp
-    assert tools._card_viewport(None) == (1200, 900)
+    # cards take deliberate standard shapes, trimmed centrally from the bbox
+    r, bb = tools._snap_aspect([0, 45, 2, 45.7], "map")  # wide box at 45N
+    assert r in tools._CARD_RATIOS.values()
+    assert bb[0] > 0 and bb[2] < 2 and (bb[0] + bb[2]) / 2 == 1.0  # trimmed lon, center kept
+    assert tools._snap_aspect([0, 0, 1, 1], "compare")[0] == 2 / 3  # divider wants landscape
+    assert tools._snap_aspect([0, 0, 1, 1], "3d")[0] == 2 / 3
+    assert tools._snap_aspect([0, 0, 1, 1], "map", "2:3")[0] == 3 / 2  # explicit override
+    try:
+        tools._snap_aspect([0, 0, 1, 1], "map", "9:16")
+        raise AssertionError("bad aspect must be loud")
+    except ValueError:
+        pass
 
 
 def t_brand_tokens_in_all_templates():

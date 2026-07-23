@@ -556,6 +556,10 @@ def preview_item(
     if colormap_name:
         params.append(("colormap_name", colormap_name))
     params.append(("max_size", str(max_size)))
+    if part:
+        # web mercator like every map view — a 4326 crop looks E-W stretched
+        # at mid latitudes, and cards should match what the maps show
+        params.append(("dst_crs", "epsg:3857"))
     q = str(httpx.QueryParams(params))
     path = f"bbox/{part}.png" if part else "preview.png"
     return {"preview_url": f"{TITILER}/stac/{path}?{q}", "backend": "titiler-xyz"}
@@ -916,20 +920,47 @@ def _artifact_path(out_path: str | None, prefix: str, title: str) -> str:
     return str(out_dir / f"{prefix}-{slugify(title)}.html")
 
 
-def _card_viewport(bbox: list[float] | None, width: int = 1200) -> tuple[int, int]:
-    """Viewport aspect-matched to the bbox (lat-corrected), so the frame IS
-    the asked-for area instead of a fixed 4:3 window showing extra."""
+# standard card shapes (name -> height/width). A card is a deliberate
+# object; its shape should be a design choice, not whatever the bbox
+# happened to be after geocoding.
+_CARD_RATIOS = {"3:2": 2 / 3, "4:3": 3 / 4, "1:1": 1.0, "4:5": 5 / 4, "2:3": 3 / 2}
+
+
+def _snap_aspect(
+    bbox: list[float], kind: str = "map", override: str | None = None
+) -> tuple[float, list[float]]:
+    """Pick a standard card ratio for the scenario, trim the bbox to hit it.
+
+    Swipe compares and 3D vistas force landscape 3:2 (the divider and the
+    horizon both need width); everything else snaps to the nearest standard.
+    The trim is central, so the frame stays data and the subject stays put.
+    Returns (height/width, trimmed_bbox).
+    """
     import math
 
-    if not bbox:
-        return width, 900
-    dlon = max(bbox[2] - bbox[0], 1e-6)
-    dlat = max(bbox[3] - bbox[1], 1e-6)
-    aspect = dlat / (dlon * math.cos(math.radians((bbox[1] + bbox[3]) / 2)))
-    return width, int(width * min(1.6, max(0.55, aspect)))
+    if override is not None and override not in _CARD_RATIOS:
+        raise ValueError(f"aspect must be one of {sorted(_CARD_RATIOS)}, got {override!r}")
+    cx, cy = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+    cos = max(math.cos(math.radians(cy)), 1e-9)
+    dlon = max(bbox[2] - bbox[0], 1e-9)
+    dlat = max(bbox[3] - bbox[1], 1e-9)
+    aspect = dlat / (dlon * cos)
+    if override:
+        ratio = _CARD_RATIOS[override]
+    elif kind in ("compare", "3d"):
+        ratio = _CARD_RATIOS["3:2"]
+    else:
+        ratio = min(_CARD_RATIOS.values(), key=lambda r: abs(r - aspect))
+    if aspect > ratio:  # too tall for the shape: trim latitude
+        dlat = ratio * dlon * cos
+    else:  # too wide: trim longitude
+        dlon = dlat / (ratio * cos)
+    return ratio, [cx - dlon / 2, cy - dlat / 2, cx + dlon / 2, cy + dlat / 2]
 
 
-def _snapshot_artifact(html_path: str, width: int = 1200, height: int = 900) -> bytes:
+def _snapshot_artifact(
+    html_path: str, width: int = 1200, height: int = 900, fit_bbox: list[float] | None = None
+) -> bytes:
     """Rasterize an artifact for a postcard: headless Chromium, chrome hidden.
 
     Waits for every MapLibre map on the page (window.gsMaps) to finish
@@ -954,11 +985,12 @@ def _snapshot_artifact(html_path: str, width: int = 1200, height: int = 900) -> 
             page.goto(Path(html_path).resolve().as_uri() + "#clean")
             loaded = "window.gsMaps && window.gsMaps.every(m => m.loaded())"
             page.wait_for_function(loaded, timeout=90000)
-            # re-fit to the exact bbox, zero padding, keeping any pitch —
+            # re-fit to the card's bbox, zero padding, keeping any pitch —
             # the load-time fit pads 40px and leaks area beyond the data
+            bb = json.dumps(fit_bbox) if fit_bbox else "BBOX"
             page.evaluate(
-                "window.gsMaps.forEach(m => { try { m.fitBounds("
-                "[[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],"
+                "window.gsMaps.forEach(m => { try { const B = " + bb + "; m.fitBounds("
+                "[[B[0], B[1]], [B[2], B[3]]],"
                 "{ padding: 0, duration: 0, pitch: m.getPitch(), bearing: m.getBearing() }"
                 ") } catch (e) {} })"
             )
@@ -1060,6 +1092,7 @@ def _artifact_postcard(
     layers: list[dict[str, Any]],
     stack_layer: bool,
     bbox: list[float] | None = None,
+    kind: str = "map",
 ) -> tuple[str | None, str | None]:
     """Snapshot a rendered artifact into a share card. Returns (card_path, note).
 
@@ -1069,9 +1102,13 @@ def _artifact_postcard(
     """
     import datetime as dt
 
+    if bbox:
+        # loud on a bad aspect string — that's caller input, not runtime luck
+        ratio, fit_bbox = _snap_aspect(bbox, kind, postcard.get("aspect"))
+    else:
+        ratio, fit_bbox = 3 / 4, None
     try:
-        w, h = _card_viewport(bbox)
-        png = _snapshot_artifact(artifact_path, w, h)
+        png = _snapshot_artifact(artifact_path, 1200, int(1200 * ratio), fit_bbox)
     except RuntimeError as e:
         return None, str(e)
     except Exception as e:
@@ -1179,7 +1216,8 @@ def render_map(
         out["note"] = stack_note
     if postcard:
         card_path, card_note = _artifact_postcard(
-            out_path, postcard, _map_stack_facts(resolved, layers, stack_facts), layers, stack_layer, bbox
+            out_path, postcard, _map_stack_facts(resolved, layers, stack_facts), layers, stack_layer,
+            bbox, "compare" if compare else "map",
         )
         if card_path:
             out["postcard_path"] = card_path
@@ -1417,7 +1455,7 @@ def render_map_3d(
         card_path, card_note = _artifact_postcard(
             out_path, postcard,
             _map_stack_facts([resolved, *extras], all_layers, {"terrain": True}),
-            all_layers, stack_layer, bbox,
+            all_layers, stack_layer, bbox, "3d",
         )
         if card_path:
             out["postcard_path"] = card_path
@@ -1550,7 +1588,8 @@ def _mosaic_png(
         with STACReader(url) as r:
             return r.part(bbox, **kw)
 
-    kw: dict[str, Any] = {"bounds_crs": "epsg:4326", "dst_crs": "epsg:4326", "max_size": max_size}
+    # mercator output to match the map views (4326 stretches E-W at mid lat)
+    kw: dict[str, Any] = {"bounds_crs": "epsg:4326", "dst_crs": "epsg:3857", "max_size": max_size}
     if expression:
         kw.update(expression=expression, asset_as_band=True)
         rescale = rescale or "-1,1"
@@ -1636,6 +1675,7 @@ def render_postcard(
     stack_layer: bool = False,
     bbox: list[float] | None = None,
     fill_item_ids: list[str] | None = None,
+    aspect: str | None = None,
 ) -> dict[str, Any]:
     """Write a share-ready card for one scene: pixels embedded, attribution baked in.
 
@@ -1654,7 +1694,10 @@ def render_postcard(
 
     bbox [w, s, e, n]: frame the card to this area instead of the whole
     scene. Pass the AOI — the subject fills the frame and scene-edge nodata
-    stays off the card. Pick a scene that covers the bbox first.
+    stays off the card. Pick a scene that covers the bbox first. The frame
+    snaps to the nearest standard card shape (3:2, 4:3, 1:1, 4:5, 2:3) by
+    trimming centrally; pass aspect="2:3" etc. to choose the shape when the
+    scene calls for it (a tall coastline wants portrait).
 
     fill_item_ids: when no single scene covers the bbox (a swath-edge AOI),
     pass the REST of a same-day full_coverage_set — the card bakes as a
@@ -1680,6 +1723,9 @@ def render_postcard(
                 bbox = _centered_clamp(bbox, union) or bbox
         except Exception:
             pass
+        # then shape it: nearest standard card ratio (or the caller's pick),
+        # trimmed centrally — inside the clamp, so still all data
+        _, bbox = _snap_aspect(bbox, "imagery", aspect)
     png, mosaic_scenes, mosaic_note = None, 0, None
     if fill_item_ids:
         if bbox is None:
