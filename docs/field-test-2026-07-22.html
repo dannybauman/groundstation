@@ -136,7 +136,7 @@ footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var
 <div><div class="label">Input</div><div class="prompt">Run the morning fleet sweep, dry-run the Slack post.</div></div>
 <div class="answer"><div class="label">Output</div>Four areas triaged in one run: <b>Chelan WATCH</b> (same two uncontained fires, NDVI 0.626 → 0.609 under record heat), <b>Laredo WATCH</b> (day seven of a 42.4°C heat wave, NDVI down 19.6%), <b>Efate CALM</b>. Chelan's brief opened with 'steady state since the last run today' — it remembers yesterday. The payload printed instead of posting.</div>
 <a class="fig" href="/demo/morning-sweep-2026-07-22.html" target="_blank" title="open the live artifact"><img src="img/w2-morning-sweep.jpg" alt="artifact produced by example 9" loading="lazy"><span class="open">sweep index ↗</span></a>
-<div class="learning"><b>Learning →</b> Barotse's summary read calm but carried a WATCH tag — the alert extraction takes the first CALM/WATCH/ACT match anywhere in the text. Now filed as the next fix, which is the field test doing its job.</div>
+<div class="learning"><b>Learning →</b> Barotse's Slack line read like an all-clear under a WATCH tag: the payload quoted the TL;DR's first sentence and the reason lived in sentence two. Fixed the same night (the line now prefers the sentence naming the alert level), which is the field test doing its job.</div>
 <div class="shows">lockfile, log, eval-gated posting, day-over-day memory</div>
 </div>
 

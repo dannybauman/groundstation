@@ -107,7 +107,7 @@
           "artifact": "/demo/morning-sweep-2026-07-22.html",
           "artifact_label": "sweep index ↗",
           "image": "img/w2-morning-sweep.jpg",
-          "learning": "Barotse's summary read calm but carried a WATCH tag — the alert extraction takes the first CALM/WATCH/ACT match anywhere in the text. Now filed as the next fix, which is the field test doing its job.",
+          "learning": "Barotse's Slack line read like an all-clear under a WATCH tag: the payload quoted the TL;DR's first sentence and the reason lived in sentence two. Fixed the same night (the line now prefers the sentence naming the alert level), which is the field test doing its job.",
           "shows": "lockfile, log, eval-gated posting, day-over-day memory"
         },
         {
