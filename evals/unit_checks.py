@@ -348,6 +348,20 @@ def t_slack_payload_all_pass_unchanged():
     assert "(1 areas)" in p["text"] and "withheld" not in p["text"]
 
 
+def t_slack_line_justifies_its_own_tag():
+    # the live Barotse case: WATCH tag, but the TL;DR opens with an all-clear
+    # and the reason lives in sentence two — the line must carry the reason
+    tldr = ("No active fire, flood, or storm alerts in or near the Barotse Floodplain. "
+            "The signal worth flagging is vegetation. "
+            "Alert level: **WATCH** — NDVI fell 10.8% against two rainless weeks.")
+    p = brief.slack_payload([{"place": "Barotse", "alert": "WATCH", "tldr": tldr}], dt.date(2026, 7, 22))
+    assert "NDVI fell 10.8%" in p["text"] and "No active fire" not in p["text"]
+    # first sentence still wins when it already names the level (or for CALM)
+    p2 = brief.slack_payload([{"place": "A", "alert": "CALM", "tldr": "Quiet everywhere. Nothing to flag."}],
+                             dt.date(2026, 7, 22))
+    assert "Quiet everywhere." in p2["text"]
+
+
 def t_transition_note_added_when_model_forgot():
     md = "## TL;DR\nAll quiet, alert level CALM as of 2026-07-22.\n## What changed\n- nothing"
     out = brief._ensure_transition_note(md, "WATCH")
