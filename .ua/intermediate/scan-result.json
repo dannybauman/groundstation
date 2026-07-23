@@ -1,0 +1,315 @@
+{
+  "name": "groundstation",
+  "description": "Earth data, agent-ready: an MCP server + Claude skill over the cloud-native geospatial stack (STAC, TiTiler, Gazet), with a web console and scheduled briefings against public keyless endpoints.",
+  "languages": [
+    "html",
+    "json",
+    "markdown",
+    "python",
+    "shell",
+    "toml",
+    "yaml"
+  ],
+  "frameworks": [
+    "FastAPI",
+    "Uvicorn",
+    "Docker Compose",
+    "GitHub Actions"
+  ],
+  "files": [
+    {
+      "path": ".claude-plugin/marketplace.json",
+      "language": "json",
+      "sizeLines": 15,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "language": "json",
+      "sizeLines": 9,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "language": "yaml",
+      "sizeLines": 18,
+      "fileCategory": "infra"
+    },
+    {
+      "path": ".github/workflows/live-evals.yml",
+      "language": "yaml",
+      "sizeLines": 20,
+      "fileCategory": "infra"
+    },
+    {
+      "path": ".mcp.json",
+      "language": "json",
+      "sizeLines": 8,
+      "fileCategory": "config"
+    },
+    {
+      "path": ".ua/.understandignore",
+      "language": "unknown",
+      "sizeLines": 11,
+      "fileCategory": "code"
+    },
+    {
+      "path": ".ua/config.json",
+      "language": "json",
+      "sizeLines": 1,
+      "fileCategory": "config"
+    },
+    {
+      "path": "README.md",
+      "language": "markdown",
+      "sizeLines": 189,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "briefing/brief.py",
+      "language": "python",
+      "sizeLines": 517,
+      "fileCategory": "code"
+    },
+    {
+      "path": "briefing/fleet.json",
+      "language": "json",
+      "sizeLines": 6,
+      "fileCategory": "config"
+    },
+    {
+      "path": "briefing/run.sh",
+      "language": "shell",
+      "sizeLines": 34,
+      "fileCategory": "script"
+    },
+    {
+      "path": "compose.yml",
+      "language": "yaml",
+      "sizeLines": 38,
+      "fileCategory": "infra"
+    },
+    {
+      "path": "docs/adr-local-models.md",
+      "language": "markdown",
+      "sizeLines": 23,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/architecture.md",
+      "language": "markdown",
+      "sizeLines": 88,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/examples.md",
+      "language": "markdown",
+      "sizeLines": 89,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/field-test-2026-07-22.cases.json",
+      "language": "json",
+      "sizeLines": 126,
+      "fileCategory": "config"
+    },
+    {
+      "path": "docs/field-test-2026-07-22.html",
+      "language": "html",
+      "sizeLines": 160,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "docs/field-test.html",
+      "language": "html",
+      "sizeLines": 288,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "docs/rfc-modularity.md",
+      "language": "markdown",
+      "sizeLines": 112,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "docs/stack.md",
+      "language": "markdown",
+      "sizeLines": 119,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "evals/brief_checks.py",
+      "language": "python",
+      "sizeLines": 79,
+      "fileCategory": "code"
+    },
+    {
+      "path": "evals/modularity-exp/collect.sh",
+      "language": "shell",
+      "sizeLines": 13,
+      "fileCategory": "script"
+    },
+    {
+      "path": "evals/modularity-exp/prompts/central-common.txt",
+      "language": "txt",
+      "sizeLines": 15,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "evals/modularity-exp/prompts/modular-common.txt",
+      "language": "txt",
+      "sizeLines": 21,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "evals/modularity-exp/prompts/questions.txt",
+      "language": "txt",
+      "sizeLines": 6,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "evals/modularity-exp/rubric.md",
+      "language": "markdown",
+      "sizeLines": 14,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "evals/modularity-exp/runner.sh",
+      "language": "shell",
+      "sizeLines": 48,
+      "fileCategory": "script"
+    },
+    {
+      "path": "evals/run_evals.py",
+      "language": "python",
+      "sizeLines": 198,
+      "fileCategory": "code"
+    },
+    {
+      "path": "evals/unit_checks.py",
+      "language": "python",
+      "sizeLines": 642,
+      "fileCategory": "code"
+    },
+    {
+      "path": "pyproject.toml",
+      "language": "toml",
+      "sizeLines": 23,
+      "fileCategory": "config"
+    },
+    {
+      "path": "scripts/doctor.sh",
+      "language": "shell",
+      "sizeLines": 117,
+      "fileCategory": "script"
+    },
+    {
+      "path": "scripts/field_test.py",
+      "language": "python",
+      "sizeLines": 147,
+      "fileCategory": "code"
+    },
+    {
+      "path": "selfdoc/llms.txt",
+      "language": "txt",
+      "sizeLines": 19,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "skills/earth-data/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 85,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "skills/stac-api/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 42,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "skills/titiler/SKILL.md",
+      "language": "markdown",
+      "sizeLines": 43,
+      "fileCategory": "docs"
+    },
+    {
+      "path": "src/groundstation/server.py",
+      "language": "python",
+      "sizeLines": 55,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/groundstation/stack.py",
+      "language": "python",
+      "sizeLines": 112,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/groundstation/static/index.html",
+      "language": "html",
+      "sizeLines": 809,
+      "fileCategory": "markup"
+    },
+    {
+      "path": "src/groundstation/tools.py",
+      "language": "python",
+      "sizeLines": 1459,
+      "fileCategory": "code"
+    },
+    {
+      "path": "src/groundstation/web.py",
+      "language": "python",
+      "sizeLines": 216,
+      "fileCategory": "code"
+    }
+  ],
+  "totalFiles": 41,
+  "filteredByIgnore": 0,
+  "estimatedComplexity": "moderate",
+  "importMap": {
+    ".claude-plugin/marketplace.json": [],
+    ".claude-plugin/plugin.json": [],
+    ".github/workflows/ci.yml": [],
+    ".github/workflows/live-evals.yml": [],
+    ".mcp.json": [],
+    ".ua/.understandignore": [],
+    ".ua/config.json": [],
+    "README.md": [],
+    "briefing/brief.py": [],
+    "briefing/fleet.json": [],
+    "briefing/run.sh": [],
+    "compose.yml": [],
+    "docs/adr-local-models.md": [],
+    "docs/architecture.md": [],
+    "docs/examples.md": [],
+    "docs/field-test-2026-07-22.cases.json": [],
+    "docs/field-test-2026-07-22.html": [],
+    "docs/field-test.html": [],
+    "docs/rfc-modularity.md": [],
+    "docs/stack.md": [],
+    "evals/brief_checks.py": [],
+    "evals/modularity-exp/collect.sh": [],
+    "evals/modularity-exp/prompts/central-common.txt": [],
+    "evals/modularity-exp/prompts/modular-common.txt": [],
+    "evals/modularity-exp/prompts/questions.txt": [],
+    "evals/modularity-exp/rubric.md": [],
+    "evals/modularity-exp/runner.sh": [],
+    "evals/run_evals.py": [],
+    "evals/unit_checks.py": [
+      "evals/brief_checks.py"
+    ],
+    "pyproject.toml": [],
+    "scripts/doctor.sh": [],
+    "scripts/field_test.py": [],
+    "selfdoc/llms.txt": [],
+    "skills/earth-data/SKILL.md": [],
+    "skills/stac-api/SKILL.md": [],
+    "skills/titiler/SKILL.md": [],
+    "src/groundstation/server.py": [],
+    "src/groundstation/stack.py": [],
+    "src/groundstation/static/index.html": [],
+    "src/groundstation/tools.py": [],
+    "src/groundstation/web.py": []
+  }
+}

@@ -1,0 +1,11 @@
+# .understandignore — active exclusions for groundstation analysis
+*.egg-info/
+demo/
+briefing/state/
+evals/modularity-exp/out/
+selfdoc/skills/
+.gstack/
+docs/img/
+__pycache__/
+uv.lock
+.claude/settings.local.json

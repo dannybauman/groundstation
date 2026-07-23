@@ -1,0 +1,2237 @@
+{
+  "version": "1.0.0",
+  "gitCommitHash": "537404ed2b073e81e78f411f8f758f0abd272af9",
+  "generatedAt": "2026-07-23T05:56:00.233Z",
+  "files": {
+    ".claude-plugin/marketplace.json": {
+      "filePath": ".claude-plugin/marketplace.json",
+      "contentHash": "e4e2a260d1bb9145f311bae96516de8cd5cc066449f8b8371886fb4b1ab81c23",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 16,
+      "hasStructuralAnalysis": true
+    },
+    ".claude-plugin/plugin.json": {
+      "filePath": ".claude-plugin/plugin.json",
+      "contentHash": "f59bafcc85d0b253188f54b0932af57c5542ada0ecc15087f24b393a091d2700",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 10,
+      "hasStructuralAnalysis": true
+    },
+    ".github/workflows/ci.yml": {
+      "filePath": ".github/workflows/ci.yml",
+      "contentHash": "1a95860129858313c95e79e932bed88bcec68990ae02dc45eb44be30ff0755e6",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 19,
+      "hasStructuralAnalysis": true
+    },
+    ".github/workflows/live-evals.yml": {
+      "filePath": ".github/workflows/live-evals.yml",
+      "contentHash": "d8db44c0ab82565f13db1a681e69878b58ddd038abcaa091f709a8a56fd82a61",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 21,
+      "hasStructuralAnalysis": true
+    },
+    ".mcp.json": {
+      "filePath": ".mcp.json",
+      "contentHash": "02a5549ea54339d36c8ba01a018dd99a55d95709db1f5117ff976d946b2c9a2d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 9,
+      "hasStructuralAnalysis": true
+    },
+    "README.md": {
+      "filePath": "README.md",
+      "contentHash": "6d06017a95673184ab9fec4da78ac72605d70a73caa854e5bab5790ed9e6d071",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 194,
+      "hasStructuralAnalysis": true
+    },
+    "briefing/brief.py": {
+      "filePath": "briefing/brief.py",
+      "contentHash": "a9dd8eb29c950e1e6c696991f8d62580eeb6fd78df2d2d118717b8b0eca6d934",
+      "functions": [
+        {
+          "name": "md_to_html",
+          "params": [
+            "md"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "_synthesize_local",
+          "params": [
+            "prompt"
+          ],
+          "returnType": "str | None",
+          "exported": true,
+          "lineCount": 43
+        },
+        {
+          "name": "synthesize",
+          "params": [
+            "data"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 32
+        },
+        {
+          "name": "_ensure_transition_note",
+          "params": [
+            "md",
+            "prev_alert"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "ndvi_change",
+          "params": [
+            "best",
+            "today",
+            "days"
+          ],
+          "returnType": "dict | None",
+          "exported": true,
+          "lineCount": 29
+        },
+        {
+          "name": "build_brief",
+          "params": [
+            "place",
+            "days",
+            "out_dir"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 144
+        },
+        {
+          "name": "slack_payload",
+          "params": [
+            "results",
+            "today",
+            "total",
+            "withheld"
+          ],
+          "returnType": "dict",
+          "exported": true,
+          "lineCount": 18
+        },
+        {
+          "name": "deliver_slack",
+          "params": [
+            "payload",
+            "webhook",
+            "dry_run"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "build_fleet",
+          "params": [
+            "config_path",
+            "out_dir",
+            "slack_webhook",
+            "slack_dry_run"
+          ],
+          "returnType": "Path",
+          "exported": true,
+          "lineCount": 49
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "argparse",
+          "specifiers": [
+            "argparse"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "dt"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "groundstation",
+          "specifiers": [
+            "tools"
+          ]
+        }
+      ],
+      "exports": [
+        "md_to_html",
+        "_synthesize_local",
+        "synthesize",
+        "_ensure_transition_note",
+        "ndvi_change",
+        "build_brief",
+        "slack_payload",
+        "deliver_slack",
+        "build_fleet"
+      ],
+      "totalLines": 524,
+      "hasStructuralAnalysis": true
+    },
+    "briefing/fleet.json": {
+      "filePath": "briefing/fleet.json",
+      "contentHash": "2b0c1f7aa72f7249b27f85473785c747f5d90512358e89c42ceaf34e191fc28d",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 7,
+      "hasStructuralAnalysis": true
+    },
+    "briefing/run.sh": {
+      "filePath": "briefing/run.sh",
+      "contentHash": "5fd5944d75930c400bd0a6c0701d322c79586b9504c22f25eb1394f704e32f9b",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 35,
+      "hasStructuralAnalysis": true
+    },
+    "compose.yml": {
+      "filePath": "compose.yml",
+      "contentHash": "556b1674e7903495f30a137b5b1d9874d4d0193c92061ff6b7e81aa79a4b4889",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 39,
+      "hasStructuralAnalysis": true
+    },
+    "docs/adr-local-models.md": {
+      "filePath": "docs/adr-local-models.md",
+      "contentHash": "ad754a520727340b64b8fb75bc1f8a1f1c352d546cfc18d86ca9de4a35e0a1bb",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 24,
+      "hasStructuralAnalysis": true
+    },
+    "docs/architecture.md": {
+      "filePath": "docs/architecture.md",
+      "contentHash": "a0feca8ee0f62c99daf692bbfd8568d1cf19df5f95b74148f944333a4b77cf88",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 89,
+      "hasStructuralAnalysis": true
+    },
+    "docs/examples.md": {
+      "filePath": "docs/examples.md",
+      "contentHash": "606b1e49ab4fe677da640702584dd0325f39db0a7833960b6ab6c14a266a50af",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 90,
+      "hasStructuralAnalysis": true
+    },
+    "docs/field-test-2026-07-22.cases.json": {
+      "filePath": "docs/field-test-2026-07-22.cases.json",
+      "contentHash": "ab7ef4ac5594ec709a0cb50cbbf2139b95998a5b862c3bd56be26618baf1dbfe",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 127,
+      "hasStructuralAnalysis": true
+    },
+    "docs/field-test-2026-07-22.html": {
+      "filePath": "docs/field-test-2026-07-22.html",
+      "contentHash": "425f305972f28d3054af670285695d6495c99888468a8361649a6a4d876a0869",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 161,
+      "hasStructuralAnalysis": false
+    },
+    "docs/field-test.html": {
+      "filePath": "docs/field-test.html",
+      "contentHash": "e60c462c2f07d237e261e159f09a5fcf268c79671e26a2cd37012d9c12ba4edf",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 289,
+      "hasStructuralAnalysis": false
+    },
+    "docs/rfc-modularity.md": {
+      "filePath": "docs/rfc-modularity.md",
+      "contentHash": "e92c430860a5eea9f33fef6634547a10ae6526ee6a5c9b2e4927d8638334e142",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 113,
+      "hasStructuralAnalysis": true
+    },
+    "docs/stack.md": {
+      "filePath": "docs/stack.md",
+      "contentHash": "e5dd4f5edf6bd92cfe2bbbd634413db0c5ae69c289db7967771c431849b6adec",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 120,
+      "hasStructuralAnalysis": true
+    },
+    "evals/brief_checks.py": {
+      "filePath": "evals/brief_checks.py",
+      "contentHash": "6972b091b41a92fb9247058e68f66a1b41ef87ce97b6c7b960b8d4e18599554e",
+      "functions": [
+        {
+          "name": "check_brief",
+          "params": [
+            "md_path",
+            "data_path"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "main",
+          "params": [
+            "demo_dir"
+          ],
+          "returnType": "int",
+          "exported": true,
+          "lineCount": 19
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        }
+      ],
+      "exports": [
+        "check_brief",
+        "main"
+      ],
+      "totalLines": 80,
+      "hasStructuralAnalysis": true
+    },
+    "evals/modularity-exp/collect.sh": {
+      "filePath": "evals/modularity-exp/collect.sh",
+      "contentHash": "0f76ff85fbdf769ca93d3f5bd0244545c1f1eb142e9e213b9fa51251e3aae717",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 14,
+      "hasStructuralAnalysis": true
+    },
+    "evals/modularity-exp/prompts/central-common.txt": {
+      "filePath": "evals/modularity-exp/prompts/central-common.txt",
+      "contentHash": "b967daf0a832139f27b50f68e8dc2fdb1b3cfddf13631b685b835db422390e35",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 16,
+      "hasStructuralAnalysis": false
+    },
+    "evals/modularity-exp/prompts/modular-common.txt": {
+      "filePath": "evals/modularity-exp/prompts/modular-common.txt",
+      "contentHash": "42ed0a62a1af2944d972f877e674cda2d8ef4e59407a9e6bc2030b630ff006e9",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 22,
+      "hasStructuralAnalysis": false
+    },
+    "evals/modularity-exp/prompts/questions.txt": {
+      "filePath": "evals/modularity-exp/prompts/questions.txt",
+      "contentHash": "0cec0811f571a8e5df8297c47e7b49930b3c83317d515e867eb56d53be4fc8db",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 7,
+      "hasStructuralAnalysis": false
+    },
+    "evals/modularity-exp/rubric.md": {
+      "filePath": "evals/modularity-exp/rubric.md",
+      "contentHash": "ad86598c9133c54f5fdbe8e6fc74dda885b90a8a21f47696d95f5e41e2e999fc",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 15,
+      "hasStructuralAnalysis": true
+    },
+    "evals/modularity-exp/runner.sh": {
+      "filePath": "evals/modularity-exp/runner.sh",
+      "contentHash": "61a43ed4a6afaac438e886aeb7e9a56be407f76ecb60b6c6fab988c458a7fe23",
+      "functions": [
+        {
+          "name": "run_one",
+          "params": [],
+          "exported": false,
+          "lineCount": 19
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 49,
+      "hasStructuralAnalysis": true
+    },
+    "evals/run_evals.py": {
+      "filePath": "evals/run_evals.py",
+      "contentHash": "d6a5751d333029b872b69ecb12313ede5a0a6600cdf85bdf53729e9f8fbba556",
+      "functions": [
+        {
+          "name": "check",
+          "params": [
+            "name"
+          ],
+          "exported": true,
+          "lineCount": 14
+        },
+        {
+          "name": "t_geocode",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_datasets",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_search",
+          "params": [],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "t_full_coverage_calgary",
+          "params": [],
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "t_preview",
+          "params": [],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "t_stats",
+          "params": [],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "t_map",
+          "params": [],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "t_postcard",
+          "params": [],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "t_events",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "t_weather",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_veda",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_pc",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_local_synth_live",
+          "params": [],
+          "exported": true,
+          "lineCount": 35
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "tempfile",
+          "specifiers": [
+            "tempfile"
+          ]
+        },
+        {
+          "source": "traceback",
+          "specifiers": [
+            "traceback"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "groundstation",
+          "specifiers": [
+            "tools"
+          ]
+        }
+      ],
+      "exports": [
+        "check",
+        "t_geocode",
+        "t_datasets",
+        "t_search",
+        "t_full_coverage_calgary",
+        "t_preview",
+        "t_stats",
+        "t_map",
+        "t_postcard",
+        "t_events",
+        "t_weather",
+        "t_veda",
+        "t_pc",
+        "t_local_synth_live"
+      ],
+      "totalLines": 199,
+      "hasStructuralAnalysis": true
+    },
+    "evals/unit_checks.py": {
+      "filePath": "evals/unit_checks.py",
+      "contentHash": "9a0824eff1075ec6ba365c3a19f0f014512bcb0baf9dd25db330a44c467f4aeb",
+      "functions": [
+        {
+          "name": "check",
+          "params": [
+            "name",
+            "fn"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "t_expression_ndvi",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_expression_funcs_and_explicit_assets",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_expression_bindex_passthrough",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_coverage_full_partial_none",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_coverage_degenerate_inputs",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_fcs_item",
+          "params": [
+            "id_",
+            "day",
+            "bbox",
+            "collection"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "t_full_coverage_set_two_halves",
+          "params": [],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "t_full_coverage_set_single_covering_item",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "t_full_coverage_set_never_mixes_days",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_full_coverage_set_prefers_newest_full_day",
+          "params": [],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "t_union_coverage_no_double_count",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "t_tile_url_expression",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_tile_url_default_visual",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_render_map_compare_mode",
+          "params": [],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "t_render_map_overlay_mode",
+          "params": [],
+          "exported": true,
+          "lineCount": 13
+        },
+        {
+          "name": "t_render_map_compare_override",
+          "params": [],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "t_skill_tool_count_matches_server",
+          "params": [],
+          "exported": true,
+          "lineCount": 10
+        },
+        {
+          "name": "t_plugin_version_is_semver",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_postcard",
+          "params": [
+            "**kw"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_postcard_embeds_pixels_not_urls",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_postcard_attribution_block",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "t_postcard_license_placeholder_omitted",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "t_postcard_no_local_paths_and_small",
+          "params": [],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_render_3d",
+          "params": [
+            "**kw"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "t_render_map_3d_terrain_source",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "t_render_map_3d_imagery_and_attribution",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "t_render_map_3d_no_local_paths",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_render_map_3d_controls",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "t_stack_parse_all_fields",
+          "params": [],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "_bad_stack",
+          "params": [
+            "body"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "t_stack_parse_curation_mistakes_fail_loudly",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "t_stack_parse_leading_heading_not_dropped",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_stack_join_names_the_real_render",
+          "params": [],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "t_stack_join_understates_without_rasters",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_stack_active_names_exist_in_stack_md",
+          "params": [],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "t_stack_group_order_and_attribution_shape",
+          "params": [],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "t_stack_panel_escapes_untrusted_values",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "t_stack_no_ansi_when_piped_static",
+          "params": [],
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_render_stack_map",
+          "params": [
+            "**kw"
+          ],
+          "returnType": "tuple[str, dict]",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "t_stack_layer_toggle_present_when_on",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "t_stack_layer_absent_by_default",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "t_stack_layer_missing_stack_md_skips_gracefully",
+          "params": [],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "t_brand_tokens_in_all_templates",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "t_pick_best_scene_prefers_coverage",
+          "params": [],
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "t_expression_defaults_rescale",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_slugify",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_last_days_window",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_md_to_html",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_alert_extraction",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_fixture",
+          "params": [
+            "md",
+            "events"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "t_brief_checks_pass",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_brief_checks_catch_hallucination",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_brief_checks_catch_missing_section",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_slack_payload_withheld_header",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_slack_payload_all_pass_unchanged",
+          "params": [],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "t_slack_line_justifies_its_own_tag",
+          "params": [],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "t_transition_note_added_when_model_forgot",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_transition_note_respects_existing_mention",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_transition_note_only_on_deescalation",
+          "params": [],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "t_run_sh_skips_when_lock_held",
+          "params": [],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_env",
+          "params": [
+            "**kv"
+          ],
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "_stub_llm",
+          "params": [
+            "content"
+          ],
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "t_local_synth_declines_without_model",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_local_synth_declines_oversize_prompt",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_local_synth_declines_unreachable_endpoint",
+          "params": [],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "t_local_synth_uses_local_and_strips_think",
+          "params": [],
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "t_local_synth_everything_down_still_briefs",
+          "params": [],
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "t_local_synth_claude_default_never_touches_local",
+          "params": [],
+          "exported": true,
+          "lineCount": 14
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "base64",
+          "specifiers": [
+            "base64"
+          ]
+        },
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "tempfile",
+          "specifiers": [
+            "tempfile"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "groundstation",
+          "specifiers": [
+            "tools"
+          ]
+        },
+        {
+          "source": "groundstation.tools",
+          "specifiers": [
+            "_bbox_coverage_pct",
+            "_expression_to_bands"
+          ]
+        },
+        {
+          "source": "brief",
+          "specifiers": [
+            "brief"
+          ]
+        },
+        {
+          "source": "brief_checks",
+          "specifiers": [
+            "brief_checks"
+          ]
+        },
+        {
+          "source": "groundstation",
+          "specifiers": [
+            "gstack"
+          ]
+        },
+        {
+          "source": "datetime",
+          "specifiers": [
+            "dt"
+          ]
+        },
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "contextlib",
+          "specifiers": [
+            "contextlib"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        }
+      ],
+      "exports": [
+        "check",
+        "t_expression_ndvi",
+        "t_expression_funcs_and_explicit_assets",
+        "t_expression_bindex_passthrough",
+        "t_coverage_full_partial_none",
+        "t_coverage_degenerate_inputs",
+        "_fcs_item",
+        "t_full_coverage_set_two_halves",
+        "t_full_coverage_set_single_covering_item",
+        "t_full_coverage_set_never_mixes_days",
+        "t_full_coverage_set_prefers_newest_full_day",
+        "t_union_coverage_no_double_count",
+        "t_tile_url_expression",
+        "t_tile_url_default_visual",
+        "t_render_map_compare_mode",
+        "t_render_map_overlay_mode",
+        "t_render_map_compare_override",
+        "t_skill_tool_count_matches_server",
+        "t_plugin_version_is_semver",
+        "_postcard",
+        "t_postcard_embeds_pixels_not_urls",
+        "t_postcard_attribution_block",
+        "t_postcard_license_placeholder_omitted",
+        "t_postcard_no_local_paths_and_small",
+        "_render_3d",
+        "t_render_map_3d_terrain_source",
+        "t_render_map_3d_imagery_and_attribution",
+        "t_render_map_3d_no_local_paths",
+        "t_render_map_3d_controls",
+        "t_stack_parse_all_fields",
+        "_bad_stack",
+        "t_stack_parse_curation_mistakes_fail_loudly",
+        "t_stack_parse_leading_heading_not_dropped",
+        "t_stack_join_names_the_real_render",
+        "t_stack_join_understates_without_rasters",
+        "t_stack_active_names_exist_in_stack_md",
+        "t_stack_group_order_and_attribution_shape",
+        "t_stack_panel_escapes_untrusted_values",
+        "t_stack_no_ansi_when_piped_static",
+        "_render_stack_map",
+        "t_stack_layer_toggle_present_when_on",
+        "t_stack_layer_absent_by_default",
+        "t_stack_layer_missing_stack_md_skips_gracefully",
+        "t_brand_tokens_in_all_templates",
+        "t_pick_best_scene_prefers_coverage",
+        "t_expression_defaults_rescale",
+        "t_slugify",
+        "t_last_days_window",
+        "t_md_to_html",
+        "t_alert_extraction",
+        "_fixture",
+        "t_brief_checks_pass",
+        "t_brief_checks_catch_hallucination",
+        "t_brief_checks_catch_missing_section",
+        "t_slack_payload_withheld_header",
+        "t_slack_payload_all_pass_unchanged",
+        "t_slack_line_justifies_its_own_tag",
+        "t_transition_note_added_when_model_forgot",
+        "t_transition_note_respects_existing_mention",
+        "t_transition_note_only_on_deescalation",
+        "t_run_sh_skips_when_lock_held",
+        "_env",
+        "_stub_llm",
+        "t_local_synth_declines_without_model",
+        "t_local_synth_declines_oversize_prompt",
+        "t_local_synth_declines_unreachable_endpoint",
+        "t_local_synth_uses_local_and_strips_think",
+        "t_local_synth_everything_down_still_briefs",
+        "t_local_synth_claude_default_never_touches_local"
+      ],
+      "totalLines": 657,
+      "hasStructuralAnalysis": true
+    },
+    "pyproject.toml": {
+      "filePath": "pyproject.toml",
+      "contentHash": "3e9290ffd3936cf347e351344bf65946669c006b3a0776a21f11241f3e0cd9e3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 24,
+      "hasStructuralAnalysis": true
+    },
+    "scripts/doctor.sh": {
+      "filePath": "scripts/doctor.sh",
+      "contentHash": "20e0d348248ee5c41e626ec812a6cda41409db04369301c6194709d27a2a27b9",
+      "functions": [
+        {
+          "name": "ok",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        },
+        {
+          "name": "bad",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        },
+        {
+          "name": "note",
+          "params": [],
+          "exported": false,
+          "lineCount": 1
+        }
+      ],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 118,
+      "hasStructuralAnalysis": true
+    },
+    "scripts/field_test.py": {
+      "filePath": "scripts/field_test.py",
+      "contentHash": "9733e7cb554f35cfb3b60877ce3d9a54d0425a45359ed93ba8103edb94f3906e",
+      "functions": [
+        {
+          "name": "_card",
+          "params": [
+            "n",
+            "c"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "build",
+          "params": [
+            "cases_path"
+          ],
+          "returnType": "Path",
+          "exported": true,
+          "lineCount": 28
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        }
+      ],
+      "exports": [
+        "_card",
+        "build"
+      ],
+      "totalLines": 148,
+      "hasStructuralAnalysis": true
+    },
+    "selfdoc/llms.txt": {
+      "filePath": "selfdoc/llms.txt",
+      "contentHash": "81bea259bf9101323890fdb9c038a790712ff0ba2758d1ad00a679b50648ba55",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 20,
+      "hasStructuralAnalysis": false
+    },
+    "skills/earth-data/SKILL.md": {
+      "filePath": "skills/earth-data/SKILL.md",
+      "contentHash": "f838cbdd6b8826bfef5a685382ecfe556b325ca92d10e0087c23819d43b13074",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 86,
+      "hasStructuralAnalysis": true
+    },
+    "skills/stac-api/SKILL.md": {
+      "filePath": "skills/stac-api/SKILL.md",
+      "contentHash": "a1c7f128438f14ea5e17c16165dcd460da5d7ce8265f2f3722f2eb377acd21df",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 43,
+      "hasStructuralAnalysis": true
+    },
+    "skills/titiler/SKILL.md": {
+      "filePath": "skills/titiler/SKILL.md",
+      "contentHash": "185f6fe86e9b0eb2daedd82423f8818bcf8822caeeec1f10504551df9cc380c3",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 44,
+      "hasStructuralAnalysis": true
+    },
+    "src/groundstation/server.py": {
+      "filePath": "src/groundstation/server.py",
+      "contentHash": "13ef6755c38f403dff81132c734749f46ec2ee39fc77b6e1c20b1f97990d7a3f",
+      "functions": [
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 2
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "mcp.server.fastmcp",
+          "specifiers": [
+            "FastMCP"
+          ]
+        },
+        {
+          "source": "groundstation",
+          "specifiers": [
+            "tools"
+          ]
+        }
+      ],
+      "exports": [
+        "main"
+      ],
+      "totalLines": 56,
+      "hasStructuralAnalysis": true
+    },
+    "src/groundstation/stack.py": {
+      "filePath": "src/groundstation/stack.py",
+      "contentHash": "fa1fcf4844e9a0eade62794b344a74e2f1dadeb42cd6a4596c18dc758920578a",
+      "functions": [
+        {
+          "name": "parse_stack",
+          "params": [
+            "path"
+          ],
+          "returnType": "list[dict[str, str]]",
+          "exported": true,
+          "lineCount": 27
+        },
+        {
+          "name": "stack_instances",
+          "params": [
+            "components",
+            "facts"
+          ],
+          "returnType": "list[dict[str, Any]]",
+          "exported": true,
+          "lineCount": 50
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any"
+          ]
+        }
+      ],
+      "exports": [
+        "parse_stack",
+        "stack_instances"
+      ],
+      "totalLines": 113,
+      "hasStructuralAnalysis": true
+    },
+    "src/groundstation/static/index.html": {
+      "filePath": "src/groundstation/static/index.html",
+      "contentHash": "d17c67118e919aabc0f6c3f59012ff064a32fca92974177caf1ab2fc2e1c6d88",
+      "functions": [],
+      "classes": [],
+      "imports": [],
+      "exports": [],
+      "totalLines": 810,
+      "hasStructuralAnalysis": false
+    },
+    "src/groundstation/tools.py": {
+      "filePath": "src/groundstation/tools.py",
+      "contentHash": "68e5ad1313b339f01ca1ca9ceffe850195c22ea27e48d18a35e26cf0119720b9",
+      "functions": [
+        {
+          "name": "slugify",
+          "params": [
+            "text",
+            "max_len"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "_resolve_bbox",
+          "params": [
+            "place",
+            "bbox"
+          ],
+          "returnType": "list[float] | dict[str, Any]",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "last_days_window",
+          "params": [
+            "days",
+            "end_days_ago"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 7
+        },
+        {
+          "name": "pick_best_scene",
+          "params": [
+            "items",
+            "aoi_bbox"
+          ],
+          "returnType": "dict[str, Any] | None",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "_coverage",
+          "params": [
+            "item",
+            "aoi_bbox"
+          ],
+          "returnType": "float",
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "_mgrs_tile",
+          "params": [
+            "item_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_union_coverage_pct",
+          "params": [
+            "aoi",
+            "boxes"
+          ],
+          "returnType": "float",
+          "exported": true,
+          "lineCount": 25
+        },
+        {
+          "name": "find_full_coverage_set",
+          "params": [
+            "items",
+            "aoi_bbox",
+            "threshold"
+          ],
+          "returnType": "dict[str, Any] | None",
+          "exported": true,
+          "lineCount": 43
+        },
+        {
+          "name": "_pc_mosaic_id",
+          "params": [
+            "collection_id",
+            "item_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "_get_json",
+          "params": [
+            "url"
+          ],
+          "returnType": "Any",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "geocode",
+          "params": [
+            "query"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 79
+        },
+        {
+          "name": "reverse_geocode",
+          "params": [
+            "lat",
+            "lon"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 11
+        },
+        {
+          "name": "list_catalogs",
+          "params": [],
+          "returnType": "list[dict[str, str]]",
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "_collections",
+          "params": [
+            "catalog"
+          ],
+          "returnType": "list[dict[str, Any]]",
+          "exported": true,
+          "lineCount": 16
+        },
+        {
+          "name": "search_datasets",
+          "params": [
+            "keywords",
+            "catalog"
+          ],
+          "returnType": "list[dict[str, Any]]",
+          "exported": true,
+          "lineCount": 33
+        },
+        {
+          "name": "describe_collection",
+          "params": [
+            "catalog",
+            "collection_id"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "_compact_item",
+          "params": [
+            "catalog",
+            "item"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 15
+        },
+        {
+          "name": "_bbox_coverage_pct",
+          "params": [
+            "aoi",
+            "item_bbox"
+          ],
+          "returnType": "float | None",
+          "exported": true,
+          "lineCount": 17
+        },
+        {
+          "name": "search_imagery",
+          "params": [
+            "catalog",
+            "collections",
+            "bbox",
+            "place",
+            "datetime_range",
+            "max_cloud_cover",
+            "limit"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 52
+        },
+        {
+          "name": "_expression_idents",
+          "params": [
+            "expression"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 8
+        },
+        {
+          "name": "_expression_to_bands",
+          "params": [
+            "expression",
+            "assets"
+          ],
+          "returnType": "tuple[str, list[str]]",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "_default_assets",
+          "params": [
+            "collection"
+          ],
+          "returnType": "list[str]",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "preview_item",
+          "params": [
+            "catalog",
+            "collection_id",
+            "item_id",
+            "assets",
+            "rescale",
+            "max_size",
+            "colormap_name",
+            "expression"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 56
+        },
+        {
+          "name": "compute_statistics",
+          "params": [
+            "catalog",
+            "collection_id",
+            "item_id",
+            "expression",
+            "assets",
+            "aoi_geojson"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 51
+        },
+        {
+          "name": "tile_url_template",
+          "params": [
+            "catalog",
+            "collection_id",
+            "item_id",
+            "assets",
+            "rescale",
+            "colormap_name",
+            "expression"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 59
+        },
+        {
+          "name": "_resolve_layer",
+          "params": [
+            "l"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 30
+        },
+        {
+          "name": "_artifact_path",
+          "params": [
+            "out_path",
+            "prefix",
+            "title"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_stack_panel_html",
+          "params": [
+            "entries"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 20
+        },
+        {
+          "name": "_stack_chunk_for",
+          "params": [
+            "resolved",
+            "layers"
+          ],
+          "returnType": "str | None",
+          "exported": true,
+          "lineCount": 35
+        },
+        {
+          "name": "render_map",
+          "params": [
+            "title",
+            "bbox",
+            "layers",
+            "subtitle",
+            "out_path",
+            "compare",
+            "stack_layer"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 69
+        },
+        {
+          "name": "render_map_3d",
+          "params": [
+            "title",
+            "bbox",
+            "layer",
+            "subtitle",
+            "out_path",
+            "exaggeration"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 65
+        },
+        {
+          "name": "_catalog_source",
+          "params": [
+            "catalog",
+            "collection_id"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "_shareable_license",
+          "params": [
+            "license_"
+          ],
+          "returnType": "str | None",
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_postcard_html",
+          "params": [
+            "png",
+            "place",
+            "date",
+            "collection_id",
+            "source",
+            "caption",
+            "license_"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "render_postcard",
+          "params": [
+            "catalog",
+            "collection_id",
+            "item_id",
+            "place",
+            "date",
+            "assets",
+            "rescale",
+            "colormap_name",
+            "expression",
+            "caption",
+            "out_path"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 48
+        },
+        {
+          "name": "compare_dates",
+          "params": [
+            "place",
+            "bbox",
+            "window_before",
+            "window_after",
+            "expression",
+            "max_cloud_cover",
+            "label"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 82
+        },
+        {
+          "name": "active_events",
+          "params": [
+            "bbox",
+            "days",
+            "pad"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 59
+        },
+        {
+          "name": "weather_summary",
+          "params": [
+            "lat",
+            "lon",
+            "past_days"
+          ],
+          "returnType": "dict[str, Any]",
+          "exported": true,
+          "lineCount": 21
+        }
+      ],
+      "classes": [],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "os",
+          "specifiers": [
+            "os"
+          ]
+        },
+        {
+          "source": "re",
+          "specifiers": [
+            "re"
+          ]
+        },
+        {
+          "source": "time",
+          "specifiers": [
+            "time"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "typing",
+          "specifiers": [
+            "Any"
+          ]
+        },
+        {
+          "source": "httpx",
+          "specifiers": [
+            "httpx"
+          ]
+        }
+      ],
+      "exports": [
+        "slugify",
+        "_resolve_bbox",
+        "last_days_window",
+        "pick_best_scene",
+        "_coverage",
+        "_mgrs_tile",
+        "_union_coverage_pct",
+        "find_full_coverage_set",
+        "_pc_mosaic_id",
+        "_get_json",
+        "geocode",
+        "reverse_geocode",
+        "list_catalogs",
+        "_collections",
+        "search_datasets",
+        "describe_collection",
+        "_compact_item",
+        "_bbox_coverage_pct",
+        "search_imagery",
+        "_expression_idents",
+        "_expression_to_bands",
+        "_default_assets",
+        "preview_item",
+        "compute_statistics",
+        "tile_url_template",
+        "_resolve_layer",
+        "_artifact_path",
+        "_stack_panel_html",
+        "_stack_chunk_for",
+        "render_map",
+        "render_map_3d",
+        "_catalog_source",
+        "_shareable_license",
+        "_postcard_html",
+        "render_postcard",
+        "compare_dates",
+        "active_events",
+        "weather_summary"
+      ],
+      "totalLines": 1460,
+      "hasStructuralAnalysis": true
+    },
+    "src/groundstation/web.py": {
+      "filePath": "src/groundstation/web.py",
+      "contentHash": "96ab22e108dac5f1e403e633e9e324cb5805baf18c87a159cfb2eb2687430de5",
+      "functions": [
+        {
+          "name": "index",
+          "params": [],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "api_geocode",
+          "params": [
+            "q"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "api_revgeo",
+          "params": [
+            "lat",
+            "lon"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "api_scenes",
+          "params": [
+            "w",
+            "s",
+            "e",
+            "n",
+            "days",
+            "max_cloud"
+          ],
+          "exported": true,
+          "lineCount": 12
+        },
+        {
+          "name": "api_events",
+          "params": [
+            "w",
+            "s",
+            "e",
+            "n",
+            "days"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "api_weather",
+          "params": [
+            "lat",
+            "lon"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "api_ndvi",
+          "params": [
+            "collection",
+            "item"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "api_compare",
+          "params": [
+            "place",
+            "w",
+            "s",
+            "e",
+            "n"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "api_artifacts",
+          "params": [],
+          "exported": true,
+          "lineCount": 6
+        },
+        {
+          "name": "_run_job",
+          "params": [
+            "job_id",
+            "argv",
+            "input_text"
+          ],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 24
+        },
+        {
+          "name": "_start_job",
+          "params": [
+            "argv",
+            "input_text"
+          ],
+          "returnType": "str",
+          "exported": true,
+          "lineCount": 9
+        },
+        {
+          "name": "api_brief",
+          "params": [
+            "req"
+          ],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "api_ask",
+          "params": [
+            "req"
+          ],
+          "exported": true,
+          "lineCount": 21
+        },
+        {
+          "name": "api_insight",
+          "params": [
+            "req"
+          ],
+          "exported": true,
+          "lineCount": 4
+        },
+        {
+          "name": "api_job",
+          "params": [
+            "job_id"
+          ],
+          "exported": true,
+          "lineCount": 5
+        },
+        {
+          "name": "main",
+          "params": [],
+          "returnType": "None",
+          "exported": true,
+          "lineCount": 4
+        }
+      ],
+      "classes": [
+        {
+          "name": "BriefReq",
+          "methods": [],
+          "properties": [
+            "place",
+            "days"
+          ],
+          "exported": true,
+          "lineCount": 3
+        },
+        {
+          "name": "AskReq",
+          "methods": [],
+          "properties": [
+            "question"
+          ],
+          "exported": true,
+          "lineCount": 2
+        },
+        {
+          "name": "InsightReq",
+          "methods": [],
+          "properties": [
+            "query",
+            "data"
+          ],
+          "exported": true,
+          "lineCount": 3
+        }
+      ],
+      "imports": [
+        {
+          "source": "json",
+          "specifiers": [
+            "json"
+          ]
+        },
+        {
+          "source": "subprocess",
+          "specifiers": [
+            "subprocess"
+          ]
+        },
+        {
+          "source": "sys",
+          "specifiers": [
+            "sys"
+          ]
+        },
+        {
+          "source": "threading",
+          "specifiers": [
+            "threading"
+          ]
+        },
+        {
+          "source": "uuid",
+          "specifiers": [
+            "uuid"
+          ]
+        },
+        {
+          "source": "pathlib",
+          "specifiers": [
+            "Path"
+          ]
+        },
+        {
+          "source": "fastapi",
+          "specifiers": [
+            "FastAPI"
+          ]
+        },
+        {
+          "source": "fastapi.responses",
+          "specifiers": [
+            "FileResponse",
+            "JSONResponse"
+          ]
+        },
+        {
+          "source": "fastapi.staticfiles",
+          "specifiers": [
+            "StaticFiles"
+          ]
+        },
+        {
+          "source": "pydantic",
+          "specifiers": [
+            "BaseModel"
+          ]
+        },
+        {
+          "source": "groundstation",
+          "specifiers": [
+            "tools"
+          ]
+        }
+      ],
+      "exports": [
+        "index",
+        "api_geocode",
+        "api_revgeo",
+        "api_scenes",
+        "api_events",
+        "api_weather",
+        "api_ndvi",
+        "api_compare",
+        "api_artifacts",
+        "BriefReq",
+        "AskReq",
+        "InsightReq",
+        "_run_job",
+        "_start_job",
+        "api_brief",
+        "api_ask",
+        "api_insight",
+        "api_job",
+        "main"
+      ],
+      "totalLines": 217,
+      "hasStructuralAnalysis": true
+    }
+  }
+}
