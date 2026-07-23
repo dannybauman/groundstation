@@ -90,6 +90,8 @@ Not sure which copy you're running? `scripts/doctor.sh` says so, and prints the 
 - "Any active flood alerts along the Rio Grande between El Paso and Laredo? Alerts, week-ahead rain, latest usable imagery, one map."
 - "Compare vegetation in the Yirgacheffe coffee region between January and now, and tell me which scenes you'd trust."
 - "Brief me on Efate, Vanuatu: open alerts, the week ahead, the most recent cloud-free scene, all on a map."
+- "Give me a 3D fly-through of Torres del Paine."
+- "Make me a postcard of that I could post."
 
 First `search_datasets` call takes ~20–30s while collection lists cache; everything after is instant.
 
@@ -104,6 +106,8 @@ First `search_datasets` call takes ~20–30s while collection lists cache; every
 | `compute_statistics` | band math over an item — NDVI is `(nir-red)/(nir+red)` | TiTiler statistics |
 | `compare_dates` | **"what changed?"** in one call: same-tile scenes, index delta, swipe map | all of the above |
 | `render_map` | self-contained interactive HTML maps; two rasters → automatic swipe compare | MapLibre + live tiles |
+| `render_map_3d` | terrain fly-throughs: imagery draped over real relief, exaggeration slider, orbit | MapLibre terrain + keyless AWS Terrarium tiles |
+| `render_postcard` | durable share cards: embedded pixels, attribution baked in, nothing expires | TiTiler previews |
 | `active_events` / `weather_summary` | open fires/floods/storms + past & coming week | NASA EONET, GDACS, Open-Meteo |
 
 The paired skill in `skills/earth-data/` carries the judgment layer: which catalog for what, asset conventions, index-layer recipes, "always end spatial answers with a map."

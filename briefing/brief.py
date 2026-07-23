@@ -427,8 +427,14 @@ def slack_payload(results: list[dict], today: dt.date, total: int | None = None,
     )
     lines = [f"🌍 *Morning sweep — {today.strftime('%A, %B %d')}* ({scope})"]
     for r in results:
-        first_sentence = (r["tldr"].split(". ")[0].rstrip(".") + ".").replace("**", "*")
-        lines.append(f"{ALERT_EMOJI.get(r['alert'], '⚪')} *{r['alert']}* — {r['place']}: {first_sentence}")
+        # the Slack line must justify its own tag: a WATCH whose TL;DR opens
+        # with "no active alerts" (reason in sentence two) quoted only sentence
+        # one and read like a contradiction — prefer the sentence that names
+        # the alert level, fall back to the first
+        sentences = [s for s in r["tldr"].split(". ") if s.strip()]
+        pick = next((s for s in sentences if r["alert"] in s), sentences[0] if sentences else "")
+        line = (pick.rstrip(".") + ".").replace("**", "*")
+        lines.append(f"{ALERT_EMOJI.get(r['alert'], '⚪')} *{r['alert']}* — {r['place']}: {line}")
     lines.append(f"_full briefs + maps: morning-sweep-{today.isoformat()}.html_")
     return {"text": "\n".join(lines)}
 
