@@ -1,0 +1,2583 @@
+{
+ "version": "1.0.0",
+ "project": {
+  "name": "groundstation",
+  "languages": [
+   "python",
+   "markdown",
+   "json",
+   "shell",
+   "html",
+   "yaml",
+   "toml"
+  ],
+  "frameworks": [
+   "FastAPI",
+   "Uvicorn",
+   "Docker Compose",
+   "GitHub Actions"
+  ],
+  "description": "Earth data, agent-ready: an MCP server + Claude skill over the cloud-native geospatial stack (STAC, TiTiler, Gazet)",
+  "analyzedAt": "2026-07-23T05:54:54.185634+00:00",
+  "gitCommitHash": "537404ed2b073e81e78f411f8f758f0abd272af9"
+ },
+ "nodes": [
+  {
+   "id": "pipeline:.github/workflows/ci.yml",
+   "type": "pipeline",
+   "name": "ci.yml",
+   "filePath": ".github/workflows/ci.yml",
+   "summary": "GitHub Actions CI workflow running on pushes to main and pull requests: syncs dependencies with uv, smoke-tests that the groundstation tools/server/web modules import, then runs the offline unit checks in evals/unit_checks.py.",
+   "tags": [
+    "ci-cd",
+    "testing",
+    "infrastructure",
+    "github-actions"
+   ],
+   "complexity": "simple",
+   "languageNotes": "Uses uv (astral-sh/setup-uv) instead of pip for dependency sync, keeping the CI environment identical to local uv-managed dev."
+  },
+  {
+   "id": "pipeline:.github/workflows/live-evals.yml",
+   "type": "pipeline",
+   "name": "live-evals.yml",
+   "filePath": ".github/workflows/live-evals.yml",
+   "summary": "Scheduled GitHub Actions workflow (Mondays 13:00 UTC, plus manual dispatch) that runs live integration evals in evals/run_evals.py against real public geospatial endpoints (Earth Search, VEDA, Planetary Computer, titiler.xyz, EONET, GDACS, Open-Meteo). Failures signal the live demo is broken now, not a code regression.",
+   "tags": [
+    "ci-cd",
+    "integration-testing",
+    "monitoring",
+    "github-actions",
+    "scheduled"
+   ],
+   "complexity": "simple",
+   "languageNotes": "Deliberately separated from CI: hits external services, so it runs on a cron schedule rather than per-commit to avoid flaky PR failures."
+  },
+  {
+   "id": "config:.mcp.json",
+   "type": "config",
+   "name": ".mcp.json",
+   "filePath": ".mcp.json",
+   "summary": "Registers the groundstation MCP server with Claude Code, launching it via uv from the plugin root so the tools become available in-session.",
+   "tags": [
+    "configuration",
+    "mcp",
+    "entry-point"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "document:README.md",
+   "type": "document",
+   "name": "README.md",
+   "filePath": "README.md",
+   "summary": "Project overview and user guide: quickstart install, example prompts, what an agent gets from the MCP tools, scheduled Earth-briefing sweeps, local-model notes, and titiler.xyz good-neighbor guidance.",
+   "tags": [
+    "documentation",
+    "entry-point",
+    "quickstart",
+    "overview"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "service:compose.yml",
+   "type": "service",
+   "name": "compose.yml",
+   "filePath": "compose.yml",
+   "summary": "Docker Compose stack with two optional services: a local TiTiler instance for sustained tile rendering (to avoid hammering titiler.xyz) and a selfdoc prototype that serves llms.txt plus skill files so an agent can bootstrap from the running instance.",
+   "tags": [
+    "orchestration",
+    "infrastructure",
+    "containerization"
+   ],
+   "complexity": "simple",
+   "languageNotes": "Sets AWS_NO_SIGN_REQUEST for public buckets; requester-pays collections (NAIP, Landsat) need your own AWS credentials uncommented."
+  },
+  {
+   "id": "service:compose.yml:titiler",
+   "type": "service",
+   "name": "titiler",
+   "filePath": "compose.yml",
+   "summary": "Local TiTiler container (ghcr.io/developmentseed/titiler) on port 8000, configured for unsigned requests against public buckets, as a self-hosted alternative to titiler.xyz.",
+   "tags": [
+    "containerization",
+    "tile-server",
+    "infrastructure"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "service:compose.yml:selfdoc",
+   "type": "service",
+   "name": "selfdoc",
+   "filePath": "compose.yml",
+   "summary": "Self-documentation prototype: a python http.server on port 8001 mounting selfdoc/ and the titiler and stac-api skill directories, so an agent pointed at a bare instance can bootstrap its usage-judgment layer from the service itself.",
+   "tags": [
+    "containerization",
+    "documentation",
+    "prototype"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "config:pyproject.toml",
+   "type": "config",
+   "name": "pyproject.toml",
+   "filePath": "pyproject.toml",
+   "summary": "Python package definition for groundstation: mcp and httpx dependencies, hatchling build, and console scripts wiring groundstation to server:main and groundstation-web to web:main (with an optional fastapi/uvicorn web group).",
+   "tags": [
+    "configuration",
+    "build-system",
+    "packaging"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "document:docs/adr-local-models.md",
+   "type": "document",
+   "name": "adr-local-models.md",
+   "filePath": "docs/adr-local-models.md",
+   "summary": "Accepted ADR (July 2026) restricting local models to exactly one job: brief synthesis via synthesize() in briefing/brief.py, with a mandatory preflight and fall-through chain (local, claude -p, deterministic data-only brief). Explicitly rules out local tool-calling, model routers, and per-tool model selection until a laptop-class model passes agentic probes.",
+   "tags": [
+    "documentation",
+    "adr",
+    "decision-record",
+    "local-models"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "document:docs/architecture.md",
+   "type": "document",
+   "name": "architecture.md",
+   "filePath": "docs/architecture.md",
+   "summary": "Core architecture doc: plain Python tool functions in tools.py exposed through three doors (MCP server, web console, briefing engine), with per-catalog raster routing, static HTML map artifacts, a three-layer eval reliability model, and a file map of the whole repo. Records the key design decisions and what is deliberately not built.",
+   "tags": [
+    "documentation",
+    "architecture",
+    "design-decisions",
+    "overview"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Uses a mermaid flowchart to diagram the three-doors-one-engine shape."
+  },
+  {
+   "id": "document:docs/examples.md",
+   "type": "document",
+   "name": "examples.md",
+   "filePath": "docs/examples.md",
+   "summary": "Field-test log of thirty example prompts actually run against the MCP tools plus earth-data skill across three rounds, with the improvements each round produced (swipe-vs-overlay rules, Sentinel-1 recipe, geocode sanity checks) and the headless claude -p repro command.",
+   "tags": [
+    "documentation",
+    "field-test",
+    "examples",
+    "eval-log"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "config:docs/field-test-2026-07-22.cases.json",
+   "type": "config",
+   "name": "field-test-2026-07-22.cases.json",
+   "filePath": "docs/field-test-2026-07-22.cases.json",
+   "summary": "Structured case data for the July 22 2026 field-test report page: title, lede, headline stats, per-round prompt/answer cases, repro command, and footer, separated from the HTML presentation.",
+   "tags": [
+    "configuration",
+    "field-test",
+    "page-data",
+    "eval-log"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:docs/field-test-2026-07-22.html",
+   "type": "file",
+   "name": "field-test-2026-07-22.html",
+   "filePath": "docs/field-test-2026-07-22.html",
+   "summary": "Rendered field-test report page for the July 22 2026 run, presenting the case data from field-test-2026-07-22.cases.json in the same stats-plus-round-cards format as the original field-test.html.",
+   "tags": [
+    "field-test",
+    "report-page",
+    "static-html",
+    "eval-log"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:docs/field-test.html",
+   "type": "file",
+   "name": "field-test.html",
+   "filePath": "docs/field-test.html",
+   "summary": "Self-contained static showcase page for the July 9 2026 field test: 30 prompt cards across 3 rounds with real run excerpts, links to the live generated maps, per-case learnings, headline stats (30/30 correct, 14 improvements shipped), and the headless repro command.",
+   "tags": [
+    "field-test",
+    "report-page",
+    "static-html",
+    "showcase"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Pure static HTML/CSS with no JavaScript; card grid links out to the generated demo maps."
+  },
+  {
+   "id": "document:docs/rfc-modularity.md",
+   "type": "document",
+   "name": "rfc-modularity.md",
+   "filePath": "docs/rfc-modularity.md",
+   "summary": "RFC on agent-ready geo services: reports an experiment comparing central federation against modular per-service skills, analyzes gaps in service self-documentation, prototypes an instance serving its own judgment layer, and proposes a division of labor between service-adapter skills and cross-service judgment.",
+   "tags": [
+    "documentation",
+    "rfc",
+    "modularity",
+    "skills-architecture"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "document:docs/stack.md",
+   "type": "document",
+   "name": "stack.md",
+   "filePath": "docs/stack.md",
+   "summary": "Component-by-component guide to the cloud-native geospatial stack groundstation sits on: STAC and its three catalogs (Earth Search, NASA VEDA, Planetary Computer), TiTiler, COG range requests, MapLibre GL, Terrarium terrain, Gazet and Nominatim geocoding, EONET/GDACS/Open-Meteo monitoring feeds, and cloud object storage.",
+   "tags": [
+    "documentation",
+    "stack-overview",
+    "geospatial",
+    "reference"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:evals/modularity-exp/runner.sh",
+   "type": "file",
+   "name": "runner.sh",
+   "filePath": "evals/modularity-exp/runner.sh",
+   "summary": "Harness for the central-vs-modular comparison experiment: runs 6 field-test questions against 2 configs as parallel headless claude sessions with a pre-approved tool allowlist, writing per-run report.md and logs under out/.",
+   "tags": [
+    "eval-harness",
+    "experiment",
+    "shell-script",
+    "parallel-jobs"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Uses mkdir-based locking to prevent concurrent runs and jobs -rp / wait -n for a bounded parallel job pool (MAXJOBS)."
+  },
+  {
+   "id": "function:evals/modularity-exp/runner.sh:run_one",
+   "type": "function",
+   "name": "run_one",
+   "filePath": "evals/modularity-exp/runner.sh",
+   "lineRange": [
+    18,
+    36
+   ],
+   "summary": "Runs a single experiment cell (config x question): assembles the prompt from the config's common prompt file, launches a timeboxed headless claude session with a restricted allowlist, and captures report.md, stderr.log, and a runner.log status line.",
+   "tags": [
+    "eval-harness",
+    "subprocess",
+    "prompt-assembly"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:evals/modularity-exp/collect.sh",
+   "type": "file",
+   "name": "collect.sh",
+   "filePath": "evals/modularity-exp/collect.sh",
+   "summary": "Concatenates all experiment run reports (central and modular configs) from the output directory into one stream for grading against rubric.md, falling back to stderr tails when a report is missing.",
+   "tags": [
+    "eval-harness",
+    "report-collection",
+    "shell-script"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "document:evals/modularity-exp/rubric.md",
+   "type": "document",
+   "name": "rubric.md",
+   "filePath": "evals/modularity-exp/rubric.md",
+   "summary": "Pre-registered grading rubric for the modularity experiment: PASS/PARTIAL/FAIL criteria for each of the 6 field-test questions, plus secondary metrics (raster calls, dead ends, wall time) and a trap ledger of known pitfalls.",
+   "tags": [
+    "documentation",
+    "eval-rubric",
+    "experiment"
+   ],
+   "complexity": "simple",
+   "languageNotes": "Written before any run completed to avoid post-hoc grading bias (pre-registration)."
+  },
+  {
+   "id": "document:evals/modularity-exp/prompts/central-common.txt",
+   "type": "document",
+   "name": "central-common.txt",
+   "filePath": "evals/modularity-exp/prompts/central-common.txt",
+   "summary": "Common prompt preamble for the CENTRAL arm of the modularity experiment: the agent uses the federated groundstation toolset plus its earth-data skill, calling tools via Python as an MCP client would, with frugality rules for raster calls and a strict structured final-report format (ANSWER/MAP/CALLS/DEAD_ENDS/TIME).",
+   "tags": [
+    "evaluation",
+    "prompt",
+    "experiment-config",
+    "documentation"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "document:evals/modularity-exp/prompts/modular-common.txt",
+   "type": "document",
+   "name": "modular-common.txt",
+   "filePath": "evals/modularity-exp/prompts/modular-common.txt",
+   "summary": "Common prompt preamble for the MODULAR arm of the modularity experiment: the agent gets only per-service skills (stac-api, titiler SKILL.md files) and raw endpoint URLs with no federated toolset, must author its own HTML maps, and reports in the same structured ANSWER/MAP/CALLS/DEAD_ENDS/TIME format as the CENTRAL arm.",
+   "tags": [
+    "evaluation",
+    "prompt",
+    "experiment-config",
+    "documentation"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "document:evals/modularity-exp/prompts/questions.txt",
+   "type": "document",
+   "name": "questions.txt",
+   "filePath": "evals/modularity-exp/prompts/questions.txt",
+   "summary": "Pipe-delimited task list (q1, q3, q4, q5, q14, q20) for the modularity experiment: six Earth-observation questions spanning Sentinel-2 clear-scene search, Sentinel-1 radar mapping, NDWI water comparison, VEDA burn severity overlays, Landsat coastline change, and cross-catalog agreement checks.",
+   "tags": [
+    "evaluation",
+    "test-cases",
+    "prompt",
+    "documentation"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "config:.claude-plugin/marketplace.json",
+   "type": "config",
+   "name": "marketplace.json",
+   "filePath": ".claude-plugin/marketplace.json",
+   "summary": "Claude Code plugin marketplace manifest declaring the groundstation plugin (source ./, owned by dannybauman) with its Earth-data pitch and the uv prerequisite.",
+   "tags": [
+    "configuration",
+    "plugin",
+    "marketplace",
+    "distribution"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "config:.claude-plugin/plugin.json",
+   "type": "config",
+   "name": "plugin.json",
+   "filePath": ".claude-plugin/plugin.json",
+   "summary": "Plugin manifest for groundstation v0.3.0 \u2014 name, semver version (asserted by an eval), description, and Development Seed authorship for Claude Code plugin installs.",
+   "tags": [
+    "configuration",
+    "plugin",
+    "versioning"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:briefing/brief.py",
+   "type": "file",
+   "name": "brief.py",
+   "filePath": "briefing/brief.py",
+   "summary": "Proactive AOI briefing generator built on the groundstation tools: gathers EONET/GDACS events, Open-Meteo weather, fresh STAC imagery and an NDVI delta, has Claude (or a local LLM fallback) synthesize a decision-ready markdown brief, then writes a shareable HTML page with map, runs grounding checks, and optionally delivers a Slack fleet summary.",
+   "tags": [
+    "briefing",
+    "llm-synthesis",
+    "entry-point",
+    "automation",
+    "geospatial"
+   ],
+   "complexity": "complex",
+   "languageNotes": "Imports groundstation.tools via a sys.path insert rather than packaging, so the scanner records no static project imports."
+  },
+  {
+   "id": "config:briefing/fleet.json",
+   "type": "config",
+   "name": "fleet.json",
+   "filePath": "briefing/fleet.json",
+   "summary": "Fleet roster for scheduled sweeps: four AOIs (Chelan County, Efate, Barotse Floodplain, Laredo) each with a lookback window in days.",
+   "tags": [
+    "configuration",
+    "briefing",
+    "aoi-roster"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:briefing/run.sh",
+   "type": "file",
+   "name": "run.sh",
+   "filePath": "briefing/run.sh",
+   "summary": "Cron/launchd entrypoint for the fleet sweep: takes an atomic mkdir lock (reclaiming stale ones after 2h), logs to briefing/state/run.log, and runs brief.py in fleet mode with pass-through args.",
+   "tags": [
+    "automation",
+    "cron",
+    "locking",
+    "entry-point"
+   ],
+   "complexity": "simple",
+   "languageNotes": "Uses mkdir as the atomic lock primitive; the lock-skip behavior is exercised by an offline unit check."
+  },
+  {
+   "id": "file:evals/brief_checks.py",
+   "type": "file",
+   "name": "brief_checks.py",
+   "filePath": "evals/brief_checks.py",
+   "summary": "Grounding and structure checker for generated Earth briefs: verifies each brief-*.md against its .data.json snapshot for required sections, an alert level, no hallucinated event names, and a consistent NDVI delta.",
+   "tags": [
+    "validation",
+    "llm-grounding",
+    "evals",
+    "quality-gate"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:evals/run_evals.py",
+   "type": "file",
+   "name": "run_evals.py",
+   "filePath": "evals/run_evals.py",
+   "summary": "Live integration evals hitting real endpoints (geocoding, three STAC catalogs, TiTiler previews, stats, maps, events, weather, local LLM synthesis) \u2014 each check the smallest thing that fails if that integration breaks.",
+   "tags": [
+    "test",
+    "integration-test",
+    "evals",
+    "live-endpoints"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:evals/unit_checks.py",
+   "type": "file",
+   "name": "unit_checks.py",
+   "filePath": "evals/unit_checks.py",
+   "summary": "Offline, deterministic unit checks run by CI: band-math expression parsing, coverage math, tile URL and map rendering output, postcard/3D HTML invariants, brief synthesis fallbacks with a stubbed LLM, Slack payload shaping, and cross-artifact consistency (skill tool count vs server, plugin semver, run.sh lock).",
+   "tags": [
+    "test",
+    "unit-test",
+    "ci",
+    "deterministic"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "file:scripts/doctor.sh",
+   "type": "file",
+   "name": "doctor.sh",
+   "filePath": "scripts/doctor.sh",
+   "summary": "First-run preflight that walks the setup chain in break order (uv, venv build, Claude CLI, plugin wiring, endpoints) and prints the exact fix for the first broken link; read-only apart from warming the venv.",
+   "tags": [
+    "diagnostics",
+    "setup",
+    "developer-experience",
+    "shell"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "file:scripts/field_test.py",
+   "type": "file",
+   "name": "field_test.py",
+   "filePath": "scripts/field_test.py",
+   "summary": "Reusable field-test page factory: reads a curated cases JSON (rounds of live prompts, answers, learnings, artifact links) and renders the standard single-file HTML field-test report next to it. Owns the entire page format inline so each field-test edition is just a new cases file.",
+   "tags": [
+    "utility",
+    "report-generator",
+    "html-templating",
+    "cli",
+    "field-test"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Single-file generator with the full HTML/CSS template as a module constant; output path is derived by stripping .cases.json to .html. Cases are trusted curated input, so inline markup in answer/learning is deliberately not escaped."
+  },
+  {
+   "id": "document:selfdoc/llms.txt",
+   "type": "document",
+   "name": "llms.txt",
+   "filePath": "selfdoc/llms.txt",
+   "summary": "llms.txt agent entry point for a self-hosted local TiTiler raster stack: base URL, health endpoint, deployment gotchas (unsigned S3 only, requester-pays returns 500), and pointers to the TiTiler and STAC API usage skills.",
+   "tags": [
+    "documentation",
+    "agent-entry-point",
+    "llms-txt",
+    "self-hosting"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "document:skills/earth-data/SKILL.md",
+   "type": "document",
+   "name": "earth-data SKILL.md",
+   "filePath": "skills/earth-data/SKILL.md",
+   "summary": "The primary agent skill for the groundstation MCP tools: insists on using the tools rather than routing around them (with cold-start and stale-install recovery steps), then codifies the standard flow, catalog choice, convention shortcuts, 3D/postcard/briefing features, and judgment rules.",
+   "tags": [
+    "documentation",
+    "agent-skill",
+    "workflow",
+    "mcp"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "document:skills/stac-api/SKILL.md",
+   "type": "document",
+   "name": "stac-api SKILL.md",
+   "filePath": "skills/stac-api/SKILL.md",
+   "summary": "Instance-agnostic STAC API usage skill: bootstrap from the root URL, search patterns (CQL2), how to read items, and judgment guidance for any STAC deployment.",
+   "tags": [
+    "documentation",
+    "agent-skill",
+    "stac",
+    "api-usage"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "document:skills/titiler/SKILL.md",
+   "type": "document",
+   "name": "titiler SKILL.md",
+   "filePath": "skills/titiler/SKILL.md",
+   "summary": "Instance-agnostic TiTiler usage skill: the three endpoints that matter, the band-math expression b1..bN merge gotcha, why layers render blank without rescale/colormap, and how to be a good client.",
+   "tags": [
+    "documentation",
+    "agent-skill",
+    "titiler",
+    "raster"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:src/groundstation/server.py",
+   "type": "file",
+   "name": "server.py",
+   "filePath": "src/groundstation/server.py",
+   "summary": "The MCP server entry point: a FastMCP instance that registers the 14 tool functions from tools.py as a fixed TOOLS tuple (count asserted by an eval to stay in sync with the earth-data skill) and runs over stdio.",
+   "tags": [
+    "entry-point",
+    "mcp-server",
+    "api-handler"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "file:src/groundstation/stack.py",
+   "type": "file",
+   "name": "stack.py",
+   "filePath": "src/groundstation/stack.py",
+   "summary": "The stack attribution layer (epic G): parses the human-curated docs/stack.md into validated component dicts, then joins them with a render artifact's real facts (catalogs, collections, tiler hosts, terrain, geocoding, events) to produce specific per-component instance lines for the Stack panel. Understates rather than fabricates, and keeps attribution role-shaped so no person names enter.",
+   "tags": [
+    "parser",
+    "data-model",
+    "attribution",
+    "stack-layer",
+    "validation"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Fail-loud curation contract: any stack.md mistake (bad kind, invalid ds-role, missing required field, duplicate component) raises ValueError at parse time rather than degrading silently. DS_ROLES is a closed enum by design."
+  },
+  {
+   "id": "file:src/groundstation/static/index.html",
+   "type": "file",
+   "name": "index.html",
+   "filePath": "src/groundstation/static/index.html",
+   "summary": "Single-file groundstation web console UI: a MapLibre map plus a narrator rail of cards, wired to the FastAPI /api endpoints for geocoding, scene search, events, weather, NDVI, comparisons, brief jobs, and free-text asks.",
+   "tags": [
+    "component",
+    "web-console",
+    "maplibre",
+    "single-page"
+   ],
+   "complexity": "complex",
+   "languageNotes": "Self-contained HTML with inline CSS/JS; MapLibre and fonts load from CDNs with subresource integrity hashes."
+  },
+  {
+   "id": "file:src/groundstation/tools.py",
+   "type": "file",
+   "name": "tools.py",
+   "filePath": "src/groundstation/tools.py",
+   "summary": "The core toolbox: 36 plain, MCP-ready functions over the cloud-native geospatial stack \u2014 geocoding, three STAC catalogs (Earth Search, VEDA, Planetary Computer), TiTiler previews/statistics/tile URLs with band-math expressions, coverage math, interactive and 3D map rendering, postcards, date comparisons, EONET/GDACS events, and Open-Meteo weather. Backs both the MCP server and the briefing generator.",
+   "tags": [
+    "service",
+    "geospatial",
+    "stac",
+    "titiler",
+    "api-client"
+   ],
+   "complexity": "complex",
+   "languageNotes": "Follows the developmentseed/mcp-toolsets shape: typed args, docstrings doubling as tool descriptions, JSON-serializable returns, no framework coupling."
+  },
+  {
+   "id": "file:src/groundstation/web.py",
+   "type": "file",
+   "name": "web.py",
+   "filePath": "src/groundstation/web.py",
+   "summary": "FastAPI web console backend: thin GET endpoints wrapping the same tool functions the MCP server exposes, plus a background job system (subprocess + thread + polling) for the two long operations \u2014 Earth brief generation and free-text agent asks via claude -p.",
+   "tags": [
+    "api-handler",
+    "web-server",
+    "fastapi",
+    "job-queue"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:briefing/brief.py:md_to_html",
+   "type": "function",
+   "name": "md_to_html",
+   "filePath": "briefing/brief.py",
+   "lineRange": [
+    86,
+    109
+   ],
+   "summary": "Minimal markdown-to-HTML converter for the brief body (headings, bullets, paragraphs, bold) \u2014 just enough for the generated page, no dependency.",
+   "tags": [
+    "utility",
+    "markdown",
+    "rendering"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:briefing/brief.py:_synthesize_local",
+   "type": "function",
+   "name": "_synthesize_local",
+   "filePath": "briefing/brief.py",
+   "lineRange": [
+    118,
+    160
+   ],
+   "summary": "Local-LLM fallback synthesis via an OpenAI-compatible endpoint (Ollama by default): declines gracefully without a model, on oversize prompts, or when the endpoint is unreachable, and strips <think> blocks from the response.",
+   "tags": [
+    "llm-synthesis",
+    "fallback",
+    "local-model"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:briefing/brief.py:synthesize",
+   "type": "function",
+   "name": "synthesize",
+   "filePath": "briefing/brief.py",
+   "lineRange": [
+    163,
+    194
+   ],
+   "summary": "Turns the gathered monitoring JSON into a markdown brief: routes to the local LLM when GROUNDSTATION_LOCAL is set, otherwise shells out to claude -p, with a deterministic data-dump fallback if both fail.",
+   "tags": [
+    "llm-synthesis",
+    "routing",
+    "fallback"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:briefing/brief.py:_ensure_transition_note",
+   "type": "function",
+   "name": "_ensure_transition_note",
+   "filePath": "briefing/brief.py",
+   "lineRange": [
+    197,
+    211
+   ],
+   "summary": "Post-processes the synthesized brief to guarantee an alert de-escalation from the previous run is mentioned, inserting a note when the model forgot.",
+   "tags": [
+    "validation",
+    "post-processing",
+    "alerting"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:briefing/brief.py:ndvi_change",
+   "type": "function",
+   "name": "ndvi_change",
+   "filePath": "briefing/brief.py",
+   "lineRange": [
+    214,
+    242
+   ],
+   "summary": "Computes the vegetation delta for the AOI: finds a same-MGRS-tile baseline scene from roughly a month back and compares mean NDVI between it and the freshest scene via compute_statistics.",
+   "tags": [
+    "analysis",
+    "ndvi",
+    "change-detection"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:briefing/brief.py:build_brief",
+   "type": "function",
+   "name": "build_brief",
+   "filePath": "briefing/brief.py",
+   "lineRange": [
+    245,
+    388
+   ],
+   "summary": "The per-AOI pipeline: geocode, gather events/weather/imagery, pick the best scene, compute NDVI change, render the interactive map, synthesize the brief with previous-run state, and write HTML, markdown, and a .data.json grounding snapshot.",
+   "tags": [
+    "orchestration",
+    "pipeline",
+    "briefing"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:briefing/brief.py:slack_payload",
+   "type": "function",
+   "name": "slack_payload",
+   "filePath": "briefing/brief.py",
+   "lineRange": [
+    422,
+    439
+   ],
+   "summary": "Builds the fleet Slack message: one emoji-tagged TL;DR line per AOI, with a header noting briefs withheld by failed grounding checks.",
+   "tags": [
+    "slack",
+    "formatting",
+    "notification"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:briefing/brief.py:deliver_slack",
+   "type": "function",
+   "name": "deliver_slack",
+   "filePath": "briefing/brief.py",
+   "lineRange": [
+    442,
+    452
+   ],
+   "summary": "Posts the fleet summary to a Slack webhook, with a dry-run mode that prints the payload instead.",
+   "tags": [
+    "slack",
+    "delivery",
+    "webhook"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:briefing/brief.py:build_fleet",
+   "type": "function",
+   "name": "build_fleet",
+   "filePath": "briefing/brief.py",
+   "lineRange": [
+    455,
+    503
+   ],
+   "summary": "Fleet mode: builds a brief per configured AOI, sorts results by alert severity, writes an index page, runs brief_checks grounding gates, and delivers only the passing briefs to Slack.",
+   "tags": [
+    "orchestration",
+    "fleet",
+    "quality-gate"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:evals/brief_checks.py:check_brief",
+   "type": "function",
+   "name": "check_brief",
+   "filePath": "evals/brief_checks.py",
+   "lineRange": [
+    21,
+    53
+   ],
+   "summary": "Checks one brief against its data snapshot: required sections present, alert level stated, capitalized event-like names actually appear in the source data, and the NDVI delta in prose matches the computed value.",
+   "tags": [
+    "validation",
+    "llm-grounding",
+    "hallucination-check"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:evals/brief_checks.py:main",
+   "type": "function",
+   "name": "main",
+   "filePath": "evals/brief_checks.py",
+   "lineRange": [
+    56,
+    74
+   ],
+   "summary": "CLI driver: pairs every brief-*.md in the demo dir with its .data.json, runs check_brief on each, prints results, and exits nonzero on any failure.",
+   "tags": [
+    "entry-point",
+    "cli",
+    "validation"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:evals/run_evals.py:t_full_coverage_calgary",
+   "type": "function",
+   "name": "t_full_coverage_calgary",
+   "filePath": "evals/run_evals.py",
+   "lineRange": [
+    63,
+    79
+   ],
+   "summary": "Live eval asserting search_imagery with require_full_coverage returns a same-day set of scenes that jointly cover the Calgary bbox.",
+   "tags": [
+    "test",
+    "integration-test",
+    "coverage"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:evals/run_evals.py:t_local_synth_live",
+   "type": "function",
+   "name": "t_local_synth_live",
+   "filePath": "evals/run_evals.py",
+   "lineRange": [
+    156,
+    190
+   ],
+   "summary": "Live eval of the local-LLM synthesis path: skips politely if no local endpoint/model is up, otherwise synthesizes a brief from a real demo fixture and runs the grounding checks on the output.",
+   "tags": [
+    "test",
+    "integration-test",
+    "local-model"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:evals/unit_checks.py:_stub_llm",
+   "type": "function",
+   "name": "_stub_llm",
+   "filePath": "evals/unit_checks.py",
+   "lineRange": [
+    404,
+    428
+   ],
+   "summary": "Context manager that stubs httpx get/post so local-synthesis unit checks can exercise the LLM path (including <think> stripping and outage behavior) with no network.",
+   "tags": [
+    "test",
+    "stub",
+    "test-helper"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:evals/unit_checks.py:_env",
+   "type": "function",
+   "name": "_env",
+   "filePath": "evals/unit_checks.py",
+   "lineRange": [
+    391,
+    401
+   ],
+   "summary": "Context manager that temporarily sets/unsets environment variables (None removes) and restores them afterward, used by the synthesis-routing checks.",
+   "tags": [
+    "test",
+    "test-helper",
+    "environment"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:geocode",
+   "type": "function",
+   "name": "geocode",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    195,
+    273
+   ],
+   "summary": "Resolves a place name to coordinates and a bbox, blending gazetteer sources with fallbacks so concise natural names ('Barotse Floodplain') resolve reliably.",
+   "tags": [
+    "geocoding",
+    "mcp-tool",
+    "api-client"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:reverse_geocode",
+   "type": "function",
+   "name": "reverse_geocode",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    276,
+    286
+   ],
+   "summary": "Resolves lat/lon back to a place name for labeling map clicks and scans.",
+   "tags": [
+    "geocoding",
+    "utility",
+    "api-client"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:search_datasets",
+   "type": "function",
+   "name": "search_datasets",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    315,
+    347
+   ],
+   "summary": "Keyword search over collections across the three configured STAC catalogs, returning compact ranked hits for dataset discovery.",
+   "tags": [
+    "stac",
+    "discovery",
+    "mcp-tool"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:describe_collection",
+   "type": "function",
+   "name": "describe_collection",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    350,
+    369
+   ],
+   "summary": "Fetches one STAC collection's metadata (extent, assets, bands) so an agent can decide whether and how to query it.",
+   "tags": [
+    "stac",
+    "metadata",
+    "mcp-tool"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:search_imagery",
+   "type": "function",
+   "name": "search_imagery",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    411,
+    462
+   ],
+   "summary": "STAC item search with bbox/date/cloud filters and per-item bbox coverage percentages, optionally assembling a same-day full-coverage scene set for AOIs that span multiple tiles.",
+   "tags": [
+    "stac",
+    "search",
+    "mcp-tool",
+    "coverage"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:preview_item",
+   "type": "function",
+   "name": "preview_item",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    497,
+    552
+   ],
+   "summary": "Builds a TiTiler preview URL for a STAC item \u2014 visual assets or a band-math expression with rescale/colormap \u2014 routed to the right raster backend per catalog.",
+   "tags": [
+    "titiler",
+    "preview",
+    "mcp-tool",
+    "raster"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:compute_statistics",
+   "type": "function",
+   "name": "compute_statistics",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    555,
+    605
+   ],
+   "summary": "Pixel statistics for a STAC item via TiTiler, supporting band-math expressions (e.g. NDVI) and per-catalog raster routing \u2014 the numeric backbone of change detection.",
+   "tags": [
+    "titiler",
+    "statistics",
+    "mcp-tool",
+    "analysis"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:tile_url_template",
+   "type": "function",
+   "name": "tile_url_template",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    608,
+    666
+   ],
+   "summary": "Produces an XYZ tile URL template for an item (visual default or expression with rescale/colormap), the building block map clients and render_map consume.",
+   "tags": [
+    "titiler",
+    "tiles",
+    "mcp-tool"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:render_map",
+   "type": "function",
+   "name": "render_map",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    838,
+    888
+   ],
+   "summary": "Writes a shareable interactive MapLibre HTML map from layered item/geojson specs, with compare (swipe) and overlay modes.",
+   "tags": [
+    "map-rendering",
+    "mcp-tool",
+    "artifact",
+    "maplibre"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:render_map_3d",
+   "type": "function",
+   "name": "render_map_3d",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    964,
+    1027
+   ],
+   "summary": "Writes a 3D terrain fly-through HTML artifact: imagery draped over a terrain source with attribution and navigation controls, all URLs remote so the file is shareable.",
+   "tags": [
+    "map-rendering",
+    "3d-terrain",
+    "mcp-tool",
+    "artifact"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:render_postcard",
+   "type": "function",
+   "name": "render_postcard",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    1100,
+    1147
+   ],
+   "summary": "Renders a self-contained HTML postcard of a scene with pixels embedded as base64 (no live URLs or local paths), including attribution and license only when shareable.",
+   "tags": [
+    "artifact",
+    "mcp-tool",
+    "attribution",
+    "rendering"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:compare_dates",
+   "type": "function",
+   "name": "compare_dates",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    1150,
+    1231
+   ],
+   "summary": "Before/after comparison for a place: finds suitable scene pairs across dates and produces a swipe-compare map plus statistics for the change story.",
+   "tags": [
+    "change-detection",
+    "mcp-tool",
+    "comparison"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:active_events",
+   "type": "function",
+   "name": "active_events",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    1237,
+    1295
+   ],
+   "summary": "Pulls active natural events near a bbox from NASA EONET and GDACS, normalized for briefings and map overlays.",
+   "tags": [
+    "events",
+    "monitoring",
+    "mcp-tool",
+    "api-client"
+   ],
+   "complexity": "complex"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:weather_summary",
+   "type": "function",
+   "name": "weather_summary",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    1298,
+    1318
+   ],
+   "summary": "Compact recent-plus-forecast weather summary for a point via Open-Meteo, feeding the briefing's weather signal section.",
+   "tags": [
+    "weather",
+    "mcp-tool",
+    "api-client"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:src/groundstation/tools.py:find_full_coverage_set",
+   "type": "function",
+   "name": "find_full_coverage_set",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    124,
+    166
+   ],
+   "summary": "Greedy selection of a same-day scene set that jointly covers the bbox, preferring the newest day that reaches full coverage and never mixing acquisition days.",
+   "tags": [
+    "coverage",
+    "algorithm",
+    "geometry"
+   ],
+   "complexity": "moderate",
+   "languageNotes": "Union coverage uses a grid-sample approximation to avoid a geometry dependency."
+  },
+  {
+   "id": "function:src/groundstation/tools.py:_resolve_layer",
+   "type": "function",
+   "name": "_resolve_layer",
+   "filePath": "src/groundstation/tools.py",
+   "lineRange": [
+    798,
+    827
+   ],
+   "summary": "Normalizes a render_map layer spec (item vs geojson, expression vs assets) into concrete tile URLs and metadata before map HTML generation.",
+   "tags": [
+    "map-rendering",
+    "normalization",
+    "internal"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:src/groundstation/web.py:_run_job",
+   "type": "function",
+   "name": "_run_job",
+   "filePath": "src/groundstation/web.py",
+   "lineRange": [
+    107,
+    130
+   ],
+   "summary": "Background job runner: spawns the subprocess, streams stdout lines into the job log for UI polling, and always resolves the job status even on exceptions.",
+   "tags": [
+    "job-queue",
+    "subprocess",
+    "background"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:src/groundstation/web.py:api_ask",
+   "type": "function",
+   "name": "api_ask",
+   "filePath": "src/groundstation/web.py",
+   "lineRange": [
+    151,
+    171
+   ],
+   "summary": "Free-text ask endpoint: launches claude -p locked to the groundstation MCP server with a prompt that encodes the band-math/rescale conventions and a MAP: path contract for spatial answers.",
+   "tags": [
+    "api-handler",
+    "agent-invocation",
+    "mcp"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:src/groundstation/web.py:api_scenes",
+   "type": "function",
+   "name": "api_scenes",
+   "filePath": "src/groundstation/web.py",
+   "lineRange": [
+    50,
+    61
+   ],
+   "summary": "Scene search endpoint: Sentinel-2 imagery for a bbox over the last N days, with a tile URL template attached to each item for direct map display.",
+   "tags": [
+    "api-handler",
+    "stac",
+    "tiles"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:scripts/field_test.py:_card",
+   "type": "function",
+   "name": "_card",
+   "filePath": "scripts/field_test.py",
+   "lineRange": [
+    97,
+    111
+   ],
+   "summary": "Renders one numbered test-case card as HTML: tag, prompt, answer, optional live-artifact figure link, learning callout, and shows note.",
+   "tags": [
+    "html-templating",
+    "utility",
+    "rendering"
+   ],
+   "complexity": "simple"
+  },
+  {
+   "id": "function:scripts/field_test.py:build",
+   "type": "function",
+   "name": "build",
+   "filePath": "scripts/field_test.py",
+   "lineRange": [
+    114,
+    141
+   ],
+   "summary": "Main entry: loads the cases JSON spec, assembles rounds of cards, stats tiles, and repro block, substitutes them into the PAGE template, and writes the finished HTML next to the cases file.",
+   "tags": [
+    "entry-point",
+    "report-generator",
+    "serialization"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:src/groundstation/stack.py:parse_stack",
+   "type": "function",
+   "name": "parse_stack",
+   "filePath": "src/groundstation/stack.py",
+   "lineRange": [
+    34,
+    60
+   ],
+   "summary": "Parses docs/stack.md into a list of component dicts by splitting on '## ' headings and '- key: value' bullets, validating kind, ds-role, required fields, and duplicate names with loud ValueErrors.",
+   "tags": [
+    "parser",
+    "validation",
+    "markdown"
+   ],
+   "complexity": "moderate"
+  },
+  {
+   "id": "function:src/groundstation/stack.py:stack_instances",
+   "type": "function",
+   "name": "stack_instances",
+   "filePath": "src/groundstation/stack.py",
+   "lineRange": [
+    63,
+    112
+   ],
+   "summary": "Joins parsed stack components with an artifact's real render facts, activating only the components actually exercised (renderer always, raster pipeline when catalogs exist, terrain/geocoding/events conditionally) and attaching a specific instance line per component, sorted in pipeline GROUP_ORDER.",
+   "tags": [
+    "data-join",
+    "attribution",
+    "business-logic"
+   ],
+   "complexity": "moderate"
+  }
+ ],
+ "edges": [
+  {
+   "source": "pipeline:.github/workflows/ci.yml",
+   "target": "file:evals/unit_checks.py",
+   "type": "triggers",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "pipeline:.github/workflows/ci.yml",
+   "target": "file:src/groundstation/tools.py",
+   "type": "triggers",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "pipeline:.github/workflows/ci.yml",
+   "target": "file:src/groundstation/server.py",
+   "type": "triggers",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "pipeline:.github/workflows/ci.yml",
+   "target": "file:src/groundstation/web.py",
+   "type": "triggers",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "pipeline:.github/workflows/live-evals.yml",
+   "target": "file:evals/run_evals.py",
+   "type": "triggers",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "service:compose.yml",
+   "target": "service:compose.yml:titiler",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "service:compose.yml",
+   "target": "service:compose.yml:selfdoc",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "config:pyproject.toml",
+   "target": "file:src/groundstation/server.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "config:pyproject.toml",
+   "target": "file:src/groundstation/web.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "config:.mcp.json",
+   "target": "file:src/groundstation/server.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "document:README.md",
+   "target": "file:src/groundstation/server.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:README.md",
+   "target": "service:compose.yml",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "service:compose.yml",
+   "target": "document:docs/rfc-modularity.md",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "file:src/groundstation/tools.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "file:src/groundstation/server.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "file:src/groundstation/web.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "file:src/groundstation/static/index.html",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "file:briefing/brief.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "file:evals/unit_checks.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "file:evals/run_evals.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "file:evals/brief_checks.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "document:skills/earth-data/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "document:skills/stac-api/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "document:skills/titiler/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "document:selfdoc/llms.txt",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "document:docs/rfc-modularity.md",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/adr-local-models.md",
+   "target": "file:briefing/brief.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/adr-local-models.md",
+   "target": "file:evals/brief_checks.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/examples.md",
+   "target": "document:skills/earth-data/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/examples.md",
+   "target": "file:docs/field-test.html",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:docs/field-test.html",
+   "target": "document:skills/earth-data/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "config:docs/field-test-2026-07-22.cases.json",
+   "target": "file:docs/field-test-2026-07-22.html",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:docs/field-test-2026-07-22.html",
+   "target": "file:docs/field-test.html",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/rfc-modularity.md",
+   "target": "document:skills/stac-api/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/rfc-modularity.md",
+   "target": "document:skills/titiler/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/rfc-modularity.md",
+   "target": "document:skills/earth-data/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/rfc-modularity.md",
+   "target": "document:selfdoc/llms.txt",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:docs/stack.md",
+   "target": "document:docs/architecture.md",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:evals/modularity-exp/runner.sh",
+   "target": "function:evals/modularity-exp/runner.sh:run_one",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "document:evals/modularity-exp/rubric.md",
+   "target": "file:evals/modularity-exp/runner.sh",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:evals/modularity-exp/collect.sh",
+   "target": "document:evals/modularity-exp/rubric.md",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:evals/modularity-exp/collect.sh",
+   "target": "file:evals/modularity-exp/runner.sh",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "document:evals/modularity-exp/prompts/central-common.txt",
+   "target": "document:evals/modularity-exp/prompts/questions.txt",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:evals/modularity-exp/prompts/modular-common.txt",
+   "target": "document:evals/modularity-exp/prompts/questions.txt",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:evals/modularity-exp/prompts/central-common.txt",
+   "target": "document:evals/modularity-exp/prompts/modular-common.txt",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:evals/modularity-exp/prompts/central-common.txt",
+   "target": "document:skills/earth-data/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:evals/modularity-exp/prompts/modular-common.txt",
+   "target": "document:skills/stac-api/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:evals/modularity-exp/prompts/modular-common.txt",
+   "target": "document:skills/titiler/SKILL.md",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:md_to_html",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:_synthesize_local",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:synthesize",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:_ensure_transition_note",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:ndvi_change",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:build_brief",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:slack_payload",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:deliver_slack",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:build_fleet",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:evals/brief_checks.py",
+   "target": "function:evals/brief_checks.py:check_brief",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:evals/brief_checks.py",
+   "target": "function:evals/brief_checks.py:main",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:evals/run_evals.py",
+   "target": "function:evals/run_evals.py:t_full_coverage_calgary",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:evals/run_evals.py",
+   "target": "function:evals/run_evals.py:t_local_synth_live",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:evals/unit_checks.py",
+   "target": "function:evals/unit_checks.py:_stub_llm",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:evals/unit_checks.py",
+   "target": "function:evals/unit_checks.py:_env",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:geocode",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:reverse_geocode",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:search_datasets",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:describe_collection",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:search_imagery",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:preview_item",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:compute_statistics",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:tile_url_template",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:render_map",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:render_map_3d",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:render_postcard",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:compare_dates",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:active_events",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:weather_summary",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:find_full_coverage_set",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:_resolve_layer",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/web.py",
+   "target": "function:src/groundstation/web.py:_run_job",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/web.py",
+   "target": "function:src/groundstation/web.py:api_ask",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/web.py",
+   "target": "function:src/groundstation/web.py:api_scenes",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:md_to_html",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:synthesize",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:ndvi_change",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:build_brief",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:slack_payload",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:deliver_slack",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "function:briefing/brief.py:build_fleet",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:evals/brief_checks.py",
+   "target": "function:evals/brief_checks.py:check_brief",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:evals/brief_checks.py",
+   "target": "function:evals/brief_checks.py:main",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:geocode",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:reverse_geocode",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:search_datasets",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:describe_collection",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:search_imagery",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:preview_item",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:compute_statistics",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:tile_url_template",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:render_map",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:render_map_3d",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:render_postcard",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:compare_dates",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:active_events",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:weather_summary",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/tools.py",
+   "target": "function:src/groundstation/tools.py:find_full_coverage_set",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/web.py",
+   "target": "function:src/groundstation/web.py:api_ask",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/web.py",
+   "target": "function:src/groundstation/web.py:api_scenes",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:evals/unit_checks.py",
+   "target": "file:evals/brief_checks.py",
+   "type": "imports",
+   "direction": "forward",
+   "weight": 0.7
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "file:src/groundstation/tools.py",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:briefing/brief.py",
+   "target": "file:evals/brief_checks.py",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:briefing/run.sh",
+   "target": "file:briefing/brief.py",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:evals/run_evals.py",
+   "target": "file:src/groundstation/tools.py",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:evals/run_evals.py",
+   "target": "file:briefing/brief.py",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:evals/unit_checks.py",
+   "target": "file:src/groundstation/tools.py",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:evals/unit_checks.py",
+   "target": "file:briefing/brief.py",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:src/groundstation/server.py",
+   "target": "file:src/groundstation/tools.py",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:src/groundstation/web.py",
+   "target": "file:src/groundstation/tools.py",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "file:src/groundstation/web.py",
+   "target": "file:src/groundstation/static/index.html",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "config:briefing/fleet.json",
+   "target": "file:briefing/brief.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "config:.claude-plugin/plugin.json",
+   "target": "file:src/groundstation/server.py",
+   "type": "configures",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "config:.claude-plugin/marketplace.json",
+   "target": "config:.claude-plugin/plugin.json",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:skills/earth-data/SKILL.md",
+   "target": "file:src/groundstation/server.py",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:skills/earth-data/SKILL.md",
+   "target": "file:scripts/doctor.sh",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:skills/titiler/SKILL.md",
+   "target": "file:src/groundstation/tools.py",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:skills/stac-api/SKILL.md",
+   "target": "file:src/groundstation/tools.py",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:selfdoc/llms.txt",
+   "target": "document:skills/titiler/SKILL.md",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "document:selfdoc/llms.txt",
+   "target": "document:skills/stac-api/SKILL.md",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "function:briefing/brief.py:ndvi_change",
+   "target": "function:src/groundstation/tools.py:search_imagery",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:briefing/brief.py:ndvi_change",
+   "target": "function:src/groundstation/tools.py:compute_statistics",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:briefing/brief.py:build_brief",
+   "target": "function:src/groundstation/tools.py:geocode",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:briefing/brief.py:build_brief",
+   "target": "function:src/groundstation/tools.py:active_events",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:briefing/brief.py:build_brief",
+   "target": "function:src/groundstation/tools.py:weather_summary",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:briefing/brief.py:build_brief",
+   "target": "function:src/groundstation/tools.py:search_imagery",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:briefing/brief.py:build_brief",
+   "target": "function:src/groundstation/tools.py:preview_item",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:briefing/brief.py:build_brief",
+   "target": "function:src/groundstation/tools.py:render_map",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:briefing/brief.py:build_fleet",
+   "target": "function:evals/brief_checks.py:check_brief",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:evals/run_evals.py:t_local_synth_live",
+   "target": "function:briefing/brief.py:_synthesize_local",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:evals/run_evals.py:t_local_synth_live",
+   "target": "function:evals/brief_checks.py:check_brief",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:evals/run_evals.py:t_full_coverage_calgary",
+   "target": "function:src/groundstation/tools.py:search_imagery",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:src/groundstation/web.py:api_scenes",
+   "target": "function:src/groundstation/tools.py:search_imagery",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "function:src/groundstation/web.py:api_scenes",
+   "target": "function:src/groundstation/tools.py:tile_url_template",
+   "type": "calls",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:scripts/field_test.py",
+   "target": "function:scripts/field_test.py:_card",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:scripts/field_test.py",
+   "target": "function:scripts/field_test.py:build",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:scripts/field_test.py",
+   "target": "function:scripts/field_test.py:build",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/stack.py",
+   "target": "function:src/groundstation/stack.py:parse_stack",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/stack.py",
+   "target": "function:src/groundstation/stack.py:stack_instances",
+   "type": "contains",
+   "direction": "forward",
+   "weight": 1.0
+  },
+  {
+   "source": "file:src/groundstation/stack.py",
+   "target": "function:src/groundstation/stack.py:parse_stack",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/stack.py",
+   "target": "function:src/groundstation/stack.py:stack_instances",
+   "type": "exports",
+   "direction": "forward",
+   "weight": 0.8
+  },
+  {
+   "source": "file:src/groundstation/stack.py",
+   "target": "document:docs/stack.md",
+   "type": "depends_on",
+   "direction": "forward",
+   "weight": 0.6
+  },
+  {
+   "source": "document:docs/architecture.md",
+   "target": "config:briefing/fleet.json",
+   "type": "documents",
+   "direction": "forward",
+   "weight": 0.5
+  },
+  {
+   "source": "file:scripts/field_test.py",
+   "target": "config:docs/field-test-2026-07-22.cases.json",
+   "type": "related",
+   "direction": "forward",
+   "weight": 0.5
+  }
+ ],
+ "layers": [
+  {
+   "id": "layer:core",
+   "name": "Core Toolbox & Interfaces",
+   "description": "The src/groundstation package: 36 plain geospatial tool functions in tools.py plus the stack attribution parser, exposed through two of the three doors \u2014 the FastMCP stdio server and the FastAPI web console with its single-file MapLibre UI.",
+   "nodeIds": [
+    "file:src/groundstation/tools.py",
+    "file:src/groundstation/stack.py",
+    "file:src/groundstation/server.py",
+    "file:src/groundstation/web.py",
+    "file:src/groundstation/static/index.html"
+   ]
+  },
+  {
+   "id": "layer:briefing",
+   "name": "Briefing Engine",
+   "description": "The third door: scheduled AOI briefing generation built on the core tools \u2014 brief.py synthesizes decision-ready Earth briefs, fleet.json rosters the four AOIs, and run.sh is the locked cron entrypoint.",
+   "nodeIds": [
+    "file:briefing/brief.py",
+    "config:briefing/fleet.json",
+    "file:briefing/run.sh"
+   ]
+  },
+  {
+   "id": "layer:agent-skills",
+   "name": "Agent Skills & Self-Documentation",
+   "description": "The judgment layer agents load at runtime: the primary earth-data skill for the MCP tools, instance-agnostic STAC API and TiTiler usage skills, and the llms.txt entry point for a self-hosted stack.",
+   "nodeIds": [
+    "document:skills/earth-data/SKILL.md",
+    "document:skills/stac-api/SKILL.md",
+    "document:skills/titiler/SKILL.md",
+    "document:selfdoc/llms.txt"
+   ]
+  },
+  {
+   "id": "layer:evals",
+   "name": "Evals & Experiments",
+   "description": "Three-layer reliability model plus research harnesses: offline unit checks run by CI, live integration evals against real geospatial endpoints, brief grounding checks, and the central-vs-modular skills experiment (runner, collector, rubric, prompts).",
+   "nodeIds": [
+    "file:evals/unit_checks.py",
+    "file:evals/run_evals.py",
+    "file:evals/brief_checks.py",
+    "file:evals/modularity-exp/runner.sh",
+    "file:evals/modularity-exp/collect.sh",
+    "document:evals/modularity-exp/rubric.md",
+    "document:evals/modularity-exp/prompts/central-common.txt",
+    "document:evals/modularity-exp/prompts/modular-common.txt",
+    "document:evals/modularity-exp/prompts/questions.txt"
+   ]
+  },
+  {
+   "id": "layer:documentation",
+   "name": "Documentation & Field-Test Reports",
+   "description": "Human-facing project knowledge: README quickstart, architecture and stack guides, the modularity RFC and local-models ADR, the field-test prompt log, and the rendered field-test report pages with their case data.",
+   "nodeIds": [
+    "document:README.md",
+    "document:docs/architecture.md",
+    "document:docs/stack.md",
+    "document:docs/examples.md",
+    "document:docs/rfc-modularity.md",
+    "document:docs/adr-local-models.md",
+    "file:docs/field-test.html",
+    "file:docs/field-test-2026-07-22.html",
+    "config:docs/field-test-2026-07-22.cases.json"
+   ]
+  },
+  {
+   "id": "layer:infrastructure",
+   "name": "Infrastructure & CI",
+   "description": "The optional Docker Compose stack (local TiTiler and the selfdoc prototype) plus the two GitHub Actions workflows: offline CI on push and the Monday live-evals sweep against real endpoints.",
+   "nodeIds": [
+    "service:compose.yml",
+    "service:compose.yml:titiler",
+    "service:compose.yml:selfdoc",
+    "pipeline:.github/workflows/ci.yml",
+    "pipeline:.github/workflows/live-evals.yml"
+   ]
+  },
+  {
+   "id": "layer:config",
+   "name": "Configuration & Packaging",
+   "description": "How groundstation is packaged and installed: the Python package definition, MCP server registration for Claude Code, the plugin and marketplace manifests, and the understand-anything analysis settings.",
+   "nodeIds": [
+    "config:pyproject.toml",
+    "config:.mcp.json",
+    "config:.claude-plugin/plugin.json",
+    "config:.claude-plugin/marketplace.json"
+   ]
+  },
+  {
+   "id": "layer:tooling",
+   "name": "Developer Tooling",
+   "description": "Standalone developer scripts: the doctor.sh first-run preflight that diagnoses the setup chain, and the field_test.py factory that renders field-test report pages from cases JSON.",
+   "nodeIds": [
+    "file:scripts/doctor.sh",
+    "file:scripts/field_test.py"
+   ]
+  }
+ ],
+ "tour": [
+  {
+   "order": 1,
+   "title": "Project Overview",
+   "description": "Start with the README: groundstation is a Development Seed labs prototype that puts Earth observation data in the hands of AI agents. Ask a question about any place on Earth and it finds fresh satellite imagery, active events, and weather, then hands back an interactive map. Everything runs against public, keyless endpoints, so it demos anywhere with nothing to sign up for.",
+   "nodeIds": [
+    "document:README.md"
+   ]
+  },
+  {
+   "order": 2,
+   "title": "Architecture: Three Doors",
+   "description": "The architecture doc explains the central design decision: plain Python tool functions exposed through three doors \u2014 an MCP server for Claude, a web console for browsers, and a scheduled briefing engine. It also records what is deliberately not built, and maps every file in the repo. The rest of this tour walks those doors in order.",
+   "nodeIds": [
+    "document:docs/architecture.md"
+   ]
+  },
+  {
+   "order": 3,
+   "title": "Door One: The MCP Server",
+   "description": "server.py is the code entry point: a FastMCP instance that registers 14 tool functions from tools.py as a fixed TOOLS tuple and runs over stdio. The tool count is asserted by an eval to stay in sync with the agent skill, so the two can never silently drift. .mcp.json is what wires this server into Claude Code, launching it via uv from the plugin root.",
+   "nodeIds": [
+    "file:src/groundstation/server.py",
+    "config:.mcp.json"
+   ],
+   "languageLesson": "MCP (Model Context Protocol) servers expose plain functions as agent-callable tools. FastMCP over stdio means the client launches the server as a subprocess and speaks JSON-RPC over stdin/stdout \u2014 no network port, no auth surface."
+  },
+  {
+   "order": 4,
+   "title": "The Core Toolbox",
+   "description": "tools.py is the highest fan-in module in the graph \u2014 nine other nodes depend on it, and every door routes through it. It holds 36 plain, MCP-ready functions: geocoding, searches across three STAC catalogs (Earth Search, NASA VEDA, Planetary Computer), TiTiler previews and band-math statistics, interactive and 3D map rendering, postcards, date comparisons, and EONET/GDACS/Open-Meteo feeds. Understanding this file is understanding the project.",
+   "nodeIds": [
+    "file:src/groundstation/tools.py"
+   ],
+   "languageLesson": "Keeping tools as plain Python functions (no framework decorators, no MCP imports) is what lets one implementation back three different interfaces. The MCP server, web console, and briefing engine each just import and call them."
+  },
+  {
+   "order": 5,
+   "title": "The Stack Underneath",
+   "description": "Before going further, docs/stack.md explains the cloud-native geospatial stack the tools in Step 4 sit on: STAC catalogs for discovery, TiTiler for tiles and band math, COG range requests, MapLibre GL for rendering, Gazet and Nominatim for geocoding, and the EONET/GDACS/Open-Meteo monitoring feeds. This curated doc is also machine-parsed later in the tour \u2014 remember it.",
+   "nodeIds": [
+    "document:docs/stack.md"
+   ]
+  },
+  {
+   "order": 6,
+   "title": "Door Two: The Web Console",
+   "description": "web.py is a FastAPI backend of thin GET endpoints wrapping the exact same tool functions the MCP server exposes \u2014 no duplicated logic. The single-file MapLibre UI in index.html gives anyone with a browser a map plus a narrator rail of cards. Long operations (brief generation, free-text asks via claude -p) run through a background job system of subprocess plus thread plus polling.",
+   "nodeIds": [
+    "file:src/groundstation/web.py",
+    "file:src/groundstation/static/index.html"
+   ]
+  },
+  {
+   "order": 7,
+   "title": "Door Three: The Briefing Engine",
+   "description": "The third door needs nobody to ask. brief.py gathers events, weather, fresh imagery, and an NDVI delta for an area of interest, has Claude (or a local LLM fallback) synthesize a decision-ready brief, then writes a shareable HTML page and runs grounding checks. fleet.json rosters four AOIs for scheduled sweeps, run.sh is the locked cron entrypoint, and the local-models ADR restricts local LLMs to exactly one job \u2014 brief synthesis \u2014 with a mandatory fall-through chain.",
+   "nodeIds": [
+    "file:briefing/brief.py",
+    "config:briefing/fleet.json",
+    "file:briefing/run.sh",
+    "document:docs/adr-local-models.md"
+   ],
+   "languageLesson": "run.sh uses `mkdir` as an atomic lock \u2014 mkdir either creates the directory or fails, in one filesystem operation, so two cron runs can never both think they hold the lock. Stale locks are reclaimed after 2 hours."
+  },
+  {
+   "order": 8,
+   "title": "The Judgment Layer: Agent Skills",
+   "description": "Tools tell an agent what it can call; skills tell it when and why. The earth-data skill is the primary judgment layer for the MCP tools \u2014 standard flow, catalog choice, recovery steps, convention shortcuts. The stac-api and titiler skills are deliberately instance-agnostic: they teach an agent to use any STAC or TiTiler deployment, not just groundstation's. That split between service adapters and cross-service judgment is a running research theme here.",
+   "nodeIds": [
+    "document:skills/earth-data/SKILL.md",
+    "document:skills/stac-api/SKILL.md",
+    "document:skills/titiler/SKILL.md"
+   ]
+  },
+  {
+   "order": 9,
+   "title": "Three-Layer Reliability Model",
+   "description": "The evals split by failure meaning. unit_checks.py is offline and deterministic \u2014 a failure is a code regression, and it also enforces cross-artifact consistency like the skill tool count matching the server. run_evals.py hits the real public endpoints \u2014 a failure means the live demo is broken right now. brief_checks.py grounds generated briefs against their data snapshots, catching hallucinated event names and inconsistent NDVI deltas.",
+   "nodeIds": [
+    "file:evals/unit_checks.py",
+    "file:evals/run_evals.py",
+    "file:evals/brief_checks.py"
+   ]
+  },
+  {
+   "order": 10,
+   "title": "CI: Two Pipelines, Two Questions",
+   "description": "The two GitHub Actions workflows map directly onto the reliability model from Step 9. ci.yml runs the offline unit checks on every push and PR \u2014 did we break the code? live-evals.yml runs every Monday against the real geospatial endpoints \u2014 did the world break the demo? Separating them keeps flaky external services from blocking merges while still catching real-world drift on a schedule.",
+   "nodeIds": [
+    "pipeline:.github/workflows/ci.yml",
+    "pipeline:.github/workflows/live-evals.yml"
+   ],
+   "languageLesson": "GitHub Actions `on: schedule` uses cron syntax for recurring runs, while `workflow_dispatch` adds a manual trigger button. Scheduled workflows are the standard way to monitor external dependencies without coupling them to the push-triggered CI."
+  },
+  {
+   "order": 11,
+   "title": "Research: Central vs Modular",
+   "description": "The modularity RFC asks whether agents do better with one federated toolset or per-service skills plus raw endpoints \u2014 and the repo contains the actual experiment: runner.sh runs six field-test questions against both configs as parallel headless Claude sessions, graded by a pre-registered rubric. The Compose stack supports the modular arm with a local TiTiler and a selfdoc prototype where llms.txt lets an agent bootstrap its judgment layer from the running service itself.",
+   "nodeIds": [
+    "document:docs/rfc-modularity.md",
+    "file:evals/modularity-exp/runner.sh",
+    "document:evals/modularity-exp/rubric.md",
+    "service:compose.yml",
+    "document:selfdoc/llms.txt"
+   ]
+  },
+  {
+   "order": 12,
+   "title": "Packaging and First Run",
+   "description": "How this all gets into a user's hands: pyproject.toml defines the Python package with console scripts for the server and web doors, while the plugin and marketplace manifests make groundstation installable as a Claude Code plugin in one step. doctor.sh is the first-run preflight \u2014 it walks the setup chain in break order (uv, venv, Claude CLI, plugin wiring, endpoints) and prints the exact fix for the first broken link.",
+   "nodeIds": [
+    "config:pyproject.toml",
+    "config:.claude-plugin/plugin.json",
+    "config:.claude-plugin/marketplace.json",
+    "file:scripts/doctor.sh"
+   ]
+  },
+  {
+   "order": 13,
+   "title": "Field-Test Discipline",
+   "description": "The project's quality bar comes from running real prompts, not just evals. examples.md logs thirty prompts actually run against the tools across three rounds, with the improvements each round shipped. The results become public report pages: field-test.html is the original July 9 showcase, and field_test.py is the newer reusable factory \u2014 each edition is now just a cases JSON file rendered into the standard single-file report.",
+   "nodeIds": [
+    "document:docs/examples.md",
+    "file:docs/field-test.html",
+    "file:scripts/field_test.py",
+    "config:docs/field-test-2026-07-22.cases.json"
+   ]
+  },
+  {
+   "order": 14,
+   "title": "Newest: The Stack Attribution Layer",
+   "description": "The most recent module ties the tour together. stack.py parses the curated docs/stack.md from Step 5 into validated component dicts, then joins them at render time with a map artifact's real facts \u2014 which catalogs, collections, tiler hosts, and feeds actually produced this map \u2014 into a toggleable Stack panel on render_map artifacts. It understates rather than fabricates, keeps attribution role-shaped so no person names enter, and is part of the Development Seed brand pass across the artifact templates.",
+   "nodeIds": [
+    "file:src/groundstation/stack.py"
+   ],
+   "languageLesson": "Parsing a human-curated markdown doc into structured data at runtime keeps one source of truth: humans edit prose, code validates and joins it. The validation step is what makes the doc a contract instead of just documentation."
+  }
+ ]
+}

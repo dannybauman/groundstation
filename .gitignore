@@ -6,3 +6,5 @@ briefing/state/
 evals/modularity-exp/out/
 selfdoc/skills/
 .gstack/
+.ua/.trash-*
+.ua/tmp/
