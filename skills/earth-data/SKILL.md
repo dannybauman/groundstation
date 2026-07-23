@@ -17,7 +17,9 @@ The value here is the groundstation tools. If they aren't visible yet, the serve
   - Check `/mcp` — `groundstation` should be listed and connected. If not, run `/reload-plugins` (or restart the session) to relaunch it.
   - Make sure `uv` is installed (`which uv`) — the server launches via `uv run`.
   - First launch builds the venv; if it seems stuck, warm it once with `uv sync` in the groundstation repo, then reload.
-  - Or hand them one command: `scripts/doctor.sh` in the groundstation repo checks the whole chain (uv, server env, CLI, plugin wiring, endpoints) and prints the exact fix.
+  - Or hand them one command: `scripts/doctor.sh` in the groundstation repo checks the whole chain (uv, server env, CLI, plugin wiring, endpoints, and whether the copy Claude runs is current) and prints the exact fix.
+
+- **Some tools present but one you expected is missing? The install is stale, not broken.** Plugin installs are cached per version, so a copy keeps serving the tool set it was installed with. Tell them: `claude plugin marketplace update groundstation && claude plugin update groundstation@groundstation`, then restart Claude Code. Work with the tools you have in the meantime, and say which one you're missing.
 
   That's the fix. Don't proceed with a hand-built substitute.
 

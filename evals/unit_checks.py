@@ -159,6 +159,26 @@ def t_render_map_compare_override():
         assert "const COMPARE = true" in html
 
 
+def t_skill_tool_count_matches_server():
+    # the skill tells the agent how many tools to wait for on a cold start; a
+    # stale number makes it give up early or wait for tools that aren't coming
+    from groundstation.server import TOOLS
+
+    root = Path(__file__).resolve().parents[1]
+    skill = (root / "skills" / "earth-data" / "SKILL.md").read_text(encoding="utf-8")
+    m = re.search(r"all (\d+) tools", skill)
+    assert m, "SKILL.md no longer states a tool count — update this check or the wording"
+    assert int(m.group(1)) == len(TOOLS), f"SKILL.md says {m.group(1)} tools, server registers {len(TOOLS)}"
+
+
+def t_plugin_version_is_semver():
+    # plugin installs are cached per version, so a bump is what actually
+    # delivers new tools to anyone who installed via /plugin
+    root = Path(__file__).resolve().parents[1]
+    v = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["version"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", v), f"plugin.json version {v!r} is not major.minor.patch"
+
+
 # smallest valid PNG (1x1) — the card only has to embed bytes, not decode them
 CANNED_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="

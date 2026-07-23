@@ -65,6 +65,34 @@ else
   note "earth-search not reachable — imagery search will fail until you're online"
 fi
 
+echo "6. up to date (new tools only reach you after an update)"
+# plugin installs are cached per version under ~/.claude/plugins/cache/<mkt>/<plugin>/<version>,
+# so a copy stays frozen until the plugin version bumps — that's what makes new tools appear
+repo_version=$(python3 -c 'import json,sys;print(json.load(open(".claude-plugin/plugin.json"))["version"])' 2>/dev/null)
+plugin_cache="$HOME/.claude/plugins/cache/groundstation/groundstation"
+if [ -n "$repo_version" ] && [ -d "$plugin_cache" ]; then
+  installed=$(ls -1 "$plugin_cache" 2>/dev/null | tail -1)
+  if [ "$installed" = "$repo_version" ]; then
+    ok "installed plugin is v$installed, same as this checkout"
+  else
+    note "Claude Code is running groundstation v$installed, this checkout is v$repo_version — update: claude plugin marketplace update groundstation && claude plugin update groundstation@groundstation, then restart Claude Code"
+  fi
+elif [ -n "$repo_version" ]; then
+  ok "checkout is v$repo_version (no plugin install found — you're running the server directly)"
+fi
+if [ -d .git ] && command -v git >/dev/null 2>&1; then
+  # ls-remote, not fetch: this script writes nothing, not even to .git
+  head_sha=$(git rev-parse HEAD 2>/dev/null)
+  main_sha=$(git ls-remote origin main 2>/dev/null | awk 'NR==1 {print $1}')
+  if [ -z "$main_sha" ]; then
+    note "couldn't compare with origin/main — you're offline, or this shell has no credentials for the remote. Neither stops the server from running"
+  elif [ "$head_sha" = "$main_sha" ]; then
+    ok "checkout matches origin/main"
+  else
+    note "this checkout differs from origin/main — if you're not developing here: git pull, then restart Claude Code"
+  fi
+fi
+
 echo
 echo "result: $pass ok, $warn to check, $fail broken"
 if [ "$fail" -gt 0 ]; then

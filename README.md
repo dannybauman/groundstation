@@ -68,6 +68,19 @@ uv run briefing/brief.py --place "Chelan County, Washington" --days 10
 uv run briefing/brief.py --fleet briefing/fleet.json                  # + --slack-webhook <url> to deliver
 ```
 
+## Updating
+
+New tools don't reach an existing install on their own. Plugin installs are cached per version, so an installed copy stays exactly as it was until the plugin version changes and you update it.
+
+```bash
+claude plugin marketplace update groundstation
+claude plugin update groundstation@groundstation
+```
+
+Then restart Claude Code. If you installed with `claude mcp add` instead, `git pull` in your clone and restart.
+
+Not sure which copy you're running? `scripts/doctor.sh` says so, and prints the update command when the copy Claude runs is behind this one.
+
 ## Things to ask it
 
 - "Find the clearest Sentinel-2 scene of Lake Chelan from the past two weeks, tell me what's burning nearby, and give me a map I can share."

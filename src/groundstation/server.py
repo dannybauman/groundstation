@@ -24,7 +24,9 @@ mcp = FastMCP(
     ),
 )
 
-for fn in (
+# the earth-data skill tells the agent how many tools to wait for on a cold
+# start, so an eval asserts that number against this tuple — keep them together
+TOOLS = (
     tools.geocode,
     tools.list_catalogs,
     tools.search_datasets,
@@ -39,7 +41,9 @@ for fn in (
     tools.render_postcard,
     tools.active_events,
     tools.weather_summary,
-):
+)
+
+for fn in TOOLS:
     mcp.tool()(fn)
 
 
