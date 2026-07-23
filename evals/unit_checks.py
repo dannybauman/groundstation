@@ -301,7 +301,7 @@ def t_stack_parse_leading_heading_not_dropped():
 
 
 _STACK_FACTS = {"catalogs": ["earth-search"], "collections_by_catalog": {"earth-search": ["sentinel-2-l2a"]},
-                "tiler_hosts": ["titiler.xyz"], "terrain": False, "geocoded": True, "events": False}
+                "tiler_hosts": ["titiler.xyz"], "maplibre": True, "terrain": False, "geocoded": True, "events": False}
 
 
 def t_stack_join_names_the_real_render():
@@ -317,8 +317,10 @@ def t_stack_join_names_the_real_render():
 def t_stack_join_understates_without_rasters():
     # a geojson-only map exercised no catalog, tiler, or bucket — claiming
     # them would fabricate provenance
-    entries = gstack.stack_instances(gstack.parse_stack(), {"catalogs": []})
+    entries = gstack.stack_instances(gstack.parse_stack(), {"catalogs": [], "maplibre": True})
     assert [e["name"] for e in entries] == ["MapLibre GL"]
+    # even the renderer is a fact: a static artifact (postcard) claims no engine
+    assert gstack.stack_instances(gstack.parse_stack(), {"catalogs": []}) == []
 
 
 def t_stack_active_names_exist_in_stack_md():
@@ -395,6 +397,35 @@ def t_stack_layer_missing_stack_md_skips_gracefully():
         assert 'id="stack-toggle"' not in html and "stack.md" in r["note"]
     finally:
         gstack.parse_stack = real
+
+
+# ---- stack layer on the remaining surfaces (G.3) ----
+
+
+def t_stack_3d_claims_terrain():
+    html = _render_3d(stack_layer=True)
+    assert 'id="stack-toggle"' in html and 'id="stack"' in html
+    assert "AWS Terrarium terrain" in html and "sentinel-2-l2a" in html
+    assert 'id="stack-toggle"' not in _render_3d()  # off by default, bytes unchanged
+
+
+def t_stack_postcard_listing_static_and_honest():
+    listing = tools._stack_credit_for("earth-search", "sentinel-2-l2a", "titiler.xyz")
+    html = _postcard(stack_html=listing)
+    assert "the stack behind this card:" in html
+    assert "serving sentinel-2-l2a via titiler.xyz" in html
+    assert "MapLibre" not in html  # a still image runs no map engine
+    assert "https://" not in html  # the no-live-URLs guarantee survives the listing
+    assert "the stack behind this card:" not in _postcard()  # off by default
+
+
+def t_stack_map_honest_extra_facts():
+    # callers that geocoded / fetched events say so; the panel only then claims it
+    html, _ = _render_stack_map(stack_layer=True, stack_facts={"geocoded": True, "events": True})
+    for name in ("Gazet", "Nominatim", "NASA EONET", "GDACS", "Open-Meteo"):
+        assert name in html, f"{name} missing despite honest facts"
+    base, _ = _render_stack_map(stack_layer=True)
+    assert "Gazet" not in base and "NASA EONET" not in base
 
 
 def t_brand_tokens_in_all_templates():

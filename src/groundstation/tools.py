@@ -914,7 +914,11 @@ def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
     return "".join(parts)
 
 
-def _stack_chunk_for(resolved: list[dict[str, Any]], layers: list[dict[str, Any]]) -> str | None:
+def _stack_chunk_for(
+    resolved: list[dict[str, Any]],
+    layers: list[dict[str, Any]],
+    extra_facts: dict[str, Any] | None = None,
+) -> str | None:
     from groundstation import stack as _stack
 
     try:
@@ -938,12 +942,14 @@ def _stack_chunk_for(resolved: list[dict[str, Any]], layers: list[dict[str, Any]
         "catalogs": sorted(by_catalog),
         "collections_by_catalog": by_catalog,
         "tiler_hosts": sorted(hosts),
-        "terrain": False,  # ponytail: render_map is 2D; terrain joins when the 3D artifact gets the layer (G.3)
-        # ponytail: geocoding/events participation is unknowable from here —
-        # claiming them would fabricate provenance, so they stay off until
-        # those facts are plumbed through from the actual calls
+        "maplibre": True,  # both map artifacts render through MapLibre
+        # facts this function can't see default to false — callers that
+        # actually geocoded, fetched events, or draped terrain say so via
+        # extra_facts; the panel understates rather than fabricates
+        "terrain": False,
         "geocoded": False,
         "events": False,
+        **(extra_facts or {}),
     }
     entries = _stack.stack_instances(components, facts)
     if not entries:
@@ -959,6 +965,7 @@ def render_map(
     out_path: str | None = None,
     compare: bool | None = None,
     stack_layer: bool = False,
+    stack_facts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write a self-contained interactive HTML map and return its file path.
 
@@ -981,6 +988,10 @@ def render_map(
     stack_layer: True adds a "Stack" toggle revealing the technologies behind
     the map — the actual collections, tiler, formats, and buckets on screen,
     joined from docs/stack.md. Attribution to projects, never people.
+    stack_facts: honest extras the panel can't see from the layers alone —
+    pass {"geocoded": True} if you resolved the place via geocode, and
+    {"events": True} if an events layer came from active_events. Only claim
+    what actually happened.
     """
     resolved = []
     raster_collections: list[str | None] = []
@@ -999,7 +1010,7 @@ def render_map(
         )
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for(resolved, layers)
+        stack_html = _stack_chunk_for(resolved, layers, stack_facts)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = (
@@ -1055,6 +1066,7 @@ __BRAND__
   <button id="flythrough">Fly through</button><button id="reset">Reset view</button>
 </div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler · terrain: AWS Terrarium (open)</div>
+__STACK__
 <script>
 const STYLE = __STYLE__;
 const BBOX = __BBOX__;
@@ -1105,6 +1117,7 @@ def render_map_3d(
     subtitle: str = "",
     out_path: str | None = None,
     exaggeration: float = 1.5,
+    stack_layer: bool = False,
 ) -> dict[str, Any]:
     """Write a self-contained 3D terrain fly-through with imagery draped over it.
 
@@ -1116,6 +1129,9 @@ def render_map_3d(
     is shareable as-is. exaggeration (1.0-3.0) sets the vertical stretch; the
     artifact carries a live slider, a fly-through orbit, and a reset button.
     Best over relief-rich areas — pick the lowest-cloud recent scene first.
+
+    stack_layer: same "Stack" toggle as render_map, and here the panel also
+    names the Terrarium terrain actually under the imagery.
     """
     # ponytail: one draped layer; add a second when a real ask needs it
     resolved = _resolve_layer(layer)
@@ -1152,6 +1168,11 @@ def render_map_3d(
             },
         ],
     }
+    stack_html, stack_note = "", None
+    if stack_layer:
+        stack_html = _stack_chunk_for([resolved], [layer], {"terrain": True})
+        if stack_html is None:
+            stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = (
         _MAP3D_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
         .replace("__TITLE__", title)
@@ -1159,10 +1180,16 @@ def render_map_3d(
         .replace("__STYLE__", json.dumps(style))
         .replace("__BBOX__", json.dumps(bbox))
         .replace("__EXAGGERATION__", json.dumps(round(float(exaggeration), 2)))
+        # __STACK__ last, same trust boundary as render_map: entries carry
+        # caller-supplied collection ids that must never be macro-expanded
+        .replace("__STACK__", stack_html)
     )
     out_path = _artifact_path(out_path, "map3d", title)
     Path(out_path).write_text(html, encoding="utf-8")
-    return {"path": out_path, "title": title}
+    out = {"path": out_path, "title": title}
+    if stack_note:
+        out["note"] = stack_note
+    return out
 
 
 # ---------------------------------------------------------------- postcards
@@ -1184,6 +1211,8 @@ __BRAND__
   .caption { margin: 0 0 16px; }
   .credit { border-top: 1px solid var(--rule); padding-top: 12px; font: 12px/1.6 "Roboto Mono", monospace; color: var(--mid); }
   .credit div { margin: 2px 0; }
+  .stack-list { margin-top: 8px; font-size: 11px; }
+  .stack-list b { color: var(--ink); font-weight: 600; }
 </style></head><body>
 <div class="card">
   <img src="data:image/png;base64,__IMAGE__" alt="__PLACE__, __DATE__">
@@ -1194,6 +1223,7 @@ __BRAND__
     <div class="credit">
       <div>Development Seed labs · STAC · TiTiler · __SOURCE__</div>
       __LICENSE__
+      __STACK__
     </div>
   </div>
 </div>
@@ -1205,6 +1235,34 @@ def _catalog_source(catalog: str, collection_id: str) -> str:
     # the notes string already leads with the catalog's real name
     name = CATALOGS[catalog]["notes"].split(":")[0]
     return f"{collection_id} via {name}"
+
+
+def _stack_credit_for(catalog: str, collection_id: str, tiler_host: str | None) -> str | None:
+    """The back-of-postcard stack listing: static credit lines, no links, no toggle.
+
+    A postcard is a still — no MapLibre, no live tiles — so the join only
+    claims the pipeline that produced the embedded pixels. Links stay out on
+    purpose: the card's no-live-URLs guarantee covers the credit block too.
+    """
+    from html import escape
+
+    from groundstation import stack as _stack
+
+    try:
+        components = _stack.parse_stack()
+    except (FileNotFoundError, ValueError):
+        return None
+    entries = _stack.stack_instances(components, {
+        "catalogs": [catalog],
+        "collections_by_catalog": {catalog: [collection_id]},
+        "tiler_hosts": [tiler_host] if tiler_host else [],
+    })
+    if not entries:
+        return None
+    lines = "".join(
+        f"<div><b>{escape(e['name'])}</b> — {escape(e['instance'])}</div>" for e in entries
+    )
+    return f'<div class="stack-list"><div>the stack behind this card:</div>{lines}</div>'
 
 
 def _shareable_license(license_: str | None) -> str | None:
@@ -1223,6 +1281,7 @@ def _postcard_html(
     source: str,
     caption: str = "",
     license_: str | None = None,
+    stack_html: str | None = None,
 ) -> str:
     import base64
 
@@ -1235,6 +1294,8 @@ def _postcard_html(
         .replace("__SOURCE__", source)
         .replace("__CAPTION__", f'<p class="caption">{caption}</p>' if caption else "")
         .replace("__LICENSE__", f"<div>license: {license_}</div>" if license_ else "")
+        # __STACK__ last: its lines carry the caller-supplied collection id
+        .replace("__STACK__", stack_html or "")
     )
 
 
@@ -1250,6 +1311,7 @@ def render_postcard(
     expression: str | None = None,
     caption: str = "",
     out_path: str | None = None,
+    stack_layer: bool = False,
 ) -> dict[str, Any]:
     """Write a share-ready card for one scene: pixels embedded, attribution baked in.
 
@@ -1261,6 +1323,10 @@ def render_postcard(
     date is what you want printed (usually the scene date, "2026-07-10").
     assets/rescale/colormap_name/expression take the same shapes as
     tile_url_template, so an NDVI card is expression + colormap_name.
+
+    stack_layer: True prints a compact stack listing in the credit block —
+    the static back-of-postcard form of the map artifacts' Stack panel, with
+    no links, so the card stays free of live URLs.
     """
     p = preview_item(
         catalog, collection_id, item_id, assets, rescale,
@@ -1276,16 +1342,26 @@ def render_postcard(
         license_ = _shareable_license(describe_collection(catalog, collection_id).get("license"))
     except Exception:
         license_ = None
+    stack_html, stack_note = None, None
+    if stack_layer:
+        from urllib.parse import urlsplit
+
+        stack_html = _stack_credit_for(catalog, collection_id, urlsplit(p["preview_url"]).netloc)
+        if stack_html is None:
+            stack_note = "stack listing skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = _postcard_html(
         r.content, place, date, collection_id,
-        _catalog_source(catalog, collection_id), caption, license_,
+        _catalog_source(catalog, collection_id), caption, license_, stack_html,
     )
     if out_path is None:
         out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = str(out_dir / f"postcard-{slugify(place)}-{slugify(date)}.html")
     Path(out_path).write_text(html, encoding="utf-8")
-    return {"path": out_path}
+    out = {"path": out_path}
+    if stack_note:
+        out["note"] = stack_note
+    return out
 
 
 def compare_dates(
@@ -1296,6 +1372,7 @@ def compare_dates(
     expression: str = "(nir-red)/(nir+red)",
     max_cloud_cover: float = 40,
     label: str | None = None,
+    stack_layer: bool = False,
 ) -> dict[str, Any]:
     """Compare two time windows over a place: matched scenes, index delta, swipe map.
 
@@ -1305,7 +1382,10 @@ def compare_dates(
     earlier. Picks Sentinel-2 scenes from the SAME MGRS tile (best AOI coverage,
     lowest cloud), computes the expression's stats for both dates, and writes a
     side-by-side swipe map. Returns scenes, means, delta, and map_path.
+    stack_layer passes through to the swipe map, and since this tool geocodes
+    the place itself, the panel truthfully claims Gazet/Nominatim.
     """
+    geocoded = bbox is None and bool(place)
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
         return bbox
@@ -1359,6 +1439,8 @@ def compare_dates(
         subtitle=f"{expression} · drag the divider · tile {best_tile}",
         bbox=bbox,
         layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
+        stack_layer=stack_layer,
+        stack_facts={"geocoded": geocoded},
     )
     delta = round(mean_after - mean_before, 4) if mean_after is not None and mean_before is not None else None
     return {
