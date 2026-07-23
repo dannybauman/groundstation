@@ -503,6 +503,7 @@ def preview_item(
     max_size: int = 512,
     colormap_name: str | None = None,
     expression: str | None = None,
+    bbox: list[float] | None = None,
 ) -> dict[str, Any]:
     """Get a browser-openable PNG preview URL for a STAC item.
 
@@ -511,7 +512,13 @@ def preview_item(
     data API. Optional rescale like "0,3000" for non-visual assets, and
     expression + colormap_name for index previews (NDVI etc., same shapes
     tile_url_template takes).
+
+    bbox [w, s, e, n] crops the preview to that area (the tiler's part
+    endpoint) instead of rendering the whole scene — pass the AOI so the
+    subject fills the frame and scene-edge nodata stays out. Ignored on
+    Planetary Computer, whose previews are pre-rendered whole-scene PNGs.
     """
+    part = ",".join(str(round(v, 6)) for v in bbox) if bbox else ""
     assets = assets or ([] if expression else _default_assets(collection_id))
     if expression and not rescale:
         rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
@@ -532,8 +539,9 @@ def preview_item(
             params.append(("colormap_name", colormap_name))
         params.append(("max_size", str(max_size)))
         q = str(httpx.QueryParams(params))
+        path = f"bbox/{part}.png" if part else "preview.png"
         return {
-            "preview_url": f"https://openveda.cloud/api/raster/collections/{collection_id}/items/{item_id}/preview.png?{q}",
+            "preview_url": f"https://openveda.cloud/api/raster/collections/{collection_id}/items/{item_id}/{path}?{q}",
             "backend": "veda-raster-api",
         }
     # earth-search and any catalog with public item URLs -> titiler.xyz
@@ -549,7 +557,8 @@ def preview_item(
         params.append(("colormap_name", colormap_name))
     params.append(("max_size", str(max_size)))
     q = str(httpx.QueryParams(params))
-    return {"preview_url": f"{TITILER}/stac/preview.png?{q}", "backend": "titiler-xyz"}
+    path = f"bbox/{part}.png" if part else "preview.png"
+    return {"preview_url": f"{TITILER}/stac/{path}?{q}", "backend": "titiler-xyz"}
 
 
 def compute_statistics(
@@ -1336,6 +1345,11 @@ def _stack_credit_for(catalog: str, collection_id: str, tiler_host: str | None) 
     return f'<div class="stack-list"><div>the stack behind this card:</div>{lines}</div>'
 
 
+def _intersect_bbox(a: list[float], b: list[float]) -> list[float] | None:
+    w, s, e, n = max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])
+    return [w, s, e, n] if w < e and s < n else None
+
+
 def _shareable_license(license_: str | None) -> str | None:
     # STAC uses "proprietary"/"various" as its not-an-SPDX-id placeholder, not as
     # a claim about terms — printing it on a share card misinforms, so omit it
@@ -1383,6 +1397,7 @@ def render_postcard(
     caption: str = "",
     out_path: str | None = None,
     stack_layer: bool = False,
+    bbox: list[float] | None = None,
 ) -> dict[str, Any]:
     """Write a share-ready card for one scene: pixels embedded, attribution baked in.
 
@@ -1398,10 +1413,25 @@ def render_postcard(
     stack_layer: True prints a compact stack listing in the credit block —
     the static back-of-postcard form of the map artifacts' Stack panel, with
     no links, so the card stays free of live URLs.
+
+    bbox [w, s, e, n]: frame the card to this area instead of the whole
+    scene. Pass the AOI — the subject fills the frame and scene-edge nodata
+    stays off the card. Pick a scene that covers the bbox first.
     """
+    if bbox is not None:
+        # clamp to the scene's own bbox so an AOI hanging off the tile can't
+        # print a nodata band. ponytail: bbox math only — a diagonal swath
+        # edge (footprint != bbox) can still clip a corner; footprint
+        # clipping when a real ask needs it
+        try:
+            item = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}")
+            clamped = _intersect_bbox(bbox, item.get("bbox") or bbox)
+            bbox = clamped or bbox
+        except Exception:
+            pass
     p = preview_item(
         catalog, collection_id, item_id, assets, rescale,
-        max_size=1024, colormap_name=colormap_name, expression=expression,
+        max_size=1024, colormap_name=colormap_name, expression=expression, bbox=bbox,
     )
     if "preview_url" not in p:
         return p
