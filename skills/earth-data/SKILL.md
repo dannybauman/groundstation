@@ -31,6 +31,10 @@ The value here is the groundstation tools. If they aren't visible yet, the serve
 4. **Always end spatial answers with `render_map`** and give the user the file path. A map they can open and share beats prose.
 5. Pass `stack_layer=True` to `render_map` when the user asks how it works, what's behind it, or the map is for showing DS/open-source capability — it adds a toggleable panel naming the actual tools, formats, and catalogs on screen. Same flag on `render_map_3d` (the panel then also names the terrain), `render_postcard` (a static credit-block listing), and `compare_dates`. If you geocoded the place or put an `active_events` layer on the map, tell the panel via `stack_facts={"geocoded": True, "events": True}` — only claim what you actually did.
 
+## Say once, early: the demo tiler
+
+Tiling, previews, and statistics ride titiler.xyz — a free, shared, community demo deployment. The first time a session renders something real for a user, say so in one line: this runs on the shared demo tiler, fine for trying things out, not for production or heavy use. If they want more — sustained use, their own data, private catalogs — point them two ways: talk to Development Seed about setting up a deployment for them, or you can walk them through self-hosting right now (`compose.yml` in this repo runs one container; set `GROUNDSTATION_TITILER` to point at it — the README's "Be a good neighbor" section has the steps). Say it once, not every render.
+
 ## Which catalog for what
 
 - **earth-search** — fresh raw imagery. Sentinel-2 (`sentinel-2-l2a`), Sentinel-1 (`sentinel-1-grd`), NAIP, Copernicus DEM. First stop for "recent imagery of X". **Requester-pays exception**: earth-search's Landsat (`landsat-c2-l2`) and NAIP (`naip`) assets live in requester-pays buckets the tiler cannot read — for Landsat and NAIP, search and render on planetary-computer instead.
@@ -71,6 +75,16 @@ Triggers: "postcard", "share card", "something I can post", "can I put this on L
 - Index cards work the same way as index map layers: pass `expression` and `colormap_name`.
 - The license line only appears when the collection declares a real one. Earth Search says `proprietary` for Sentinel-2, which is STAC's placeholder rather than the actual terms, so the card leaves it off instead of printing something misleading.
 - Where and whether to post is the user's decision, never yours. Hand them the file and say what's in it.
+
+## Field tests (only when asked)
+
+A field test is a showcase page: a set of prompts run live, each with its output, its artifact linked, and any learnings — the repeatable "watch it actually work" format. Users normally don't want this; they want their specific question answered directly. Build one only when someone explicitly asks for a field test, a test report, or a page showing off a series of use cases.
+
+- run every case for real first — live searches, real artifacts written to `demo/`. A field test with made-up outputs is worthless.
+- write a cases JSON next to the existing ones in `docs/` (copy the shape of `docs/field-test-2026-07-22.cases.json`: rounds of cases, each with tag / who / prompt / answer / artifact / optional image + learning + shows).
+- build the page: `uv run scripts/field_test.py docs/<name>.cases.json` — the script owns the design, you own the cases.
+- include what went wrong as `learning` lines. Honest stumbles are the most credible part of the format.
+- screenshots are optional; artifact links are not.
 
 ## Monitoring and briefings
 
