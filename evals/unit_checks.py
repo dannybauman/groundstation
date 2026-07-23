@@ -230,6 +230,112 @@ def t_brief_checks_catch_missing_section():
     assert any("missing section" in p for p in problems)
 
 
+# ---- local synthesis routing (stubbed endpoint on loopback, deterministic) ----
+
+import contextlib  # noqa: E402
+import os  # noqa: E402
+
+
+@contextlib.contextmanager
+def _env(**kv):
+    old = {k: os.environ.get(k) for k in kv}
+    os.environ.update({k: v for k, v in kv.items() if v is not None})
+    for k, v in kv.items():
+        if v is None:
+            os.environ.pop(k, None)
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+
+def _stub_llm(content: str):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+
+    class H(BaseHTTPRequestHandler):
+        def _send(self, obj):
+            body = json.dumps(obj).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            self._send({"data": []})
+
+        def do_POST(self):
+            self._send({"choices": [{"message": {"content": content}}]})
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def t_local_synth_declines_without_model():
+    with _env(GROUNDSTATION_LOCAL_MODEL=None):
+        assert brief._synthesize_local("p") is None
+
+
+def t_local_synth_declines_oversize_prompt():
+    with _env(GROUNDSTATION_LOCAL_MODEL="m"):
+        assert brief._synthesize_local("x" * (brief.LOCAL_PROMPT_BUDGET_CHARS + 1)) is None
+
+
+def t_local_synth_declines_unreachable_endpoint():
+    with _env(GROUNDSTATION_LOCAL_MODEL="m", GROUNDSTATION_LOCAL_URL="http://127.0.0.1:9/v1"):
+        assert brief._synthesize_local("p") is None
+
+
+def t_local_synth_uses_local_and_strips_think():
+    srv = _stub_llm("<think>internal</think>## TL;DR\nCALM, quiet day.")
+    try:
+        url = f"http://127.0.0.1:{srv.server_address[1]}"
+        with _env(GROUNDSTATION_LLM="local", GROUNDSTATION_LOCAL_MODEL="m", GROUNDSTATION_LOCAL_URL=url):
+            out = brief.synthesize({"place": "t", "events": {"eonet": []}, "imagery": {"items": []}})
+        assert out.startswith("## TL;DR") and "<think>" not in out
+    finally:
+        srv.shutdown()
+
+
+def t_local_synth_everything_down_still_briefs():
+    # bogus local endpoint AND no claude CLI -> deterministic data-only brief
+    real_run = brief.subprocess.run
+
+    def no_cli(*a, **k):
+        raise FileNotFoundError("claude")
+
+    brief.subprocess.run = no_cli
+    try:
+        with _env(GROUNDSTATION_LLM="local", GROUNDSTATION_LOCAL_MODEL="m",
+                  GROUNDSTATION_LOCAL_URL="http://127.0.0.1:9/v1"):
+            out = brief.synthesize({"place": "t", "events": {"eonet": []}, "imagery": {"items": []}})
+        assert "## TL;DR" in out  # the floor holds
+    finally:
+        brief.subprocess.run = real_run
+
+
+def t_local_synth_claude_default_never_touches_local():
+    # default engine must not even look at local env; claude stubbed to succeed
+    real_run = brief.subprocess.run
+
+    class R:
+        returncode, stdout, stderr = 0, "## TL;DR\nvia claude", ""
+
+    brief.subprocess.run = lambda *a, **k: R()
+    try:
+        with _env(GROUNDSTATION_LLM=None, GROUNDSTATION_LOCAL_MODEL=None):
+            out = brief.synthesize({"place": "t", "events": {"eonet": []}, "imagery": {"items": []}})
+        assert out == "## TL;DR\nvia claude"
+    finally:
+        brief.subprocess.run = real_run
+
+
 if __name__ == "__main__":
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("t_")):
         check(name, fn)
