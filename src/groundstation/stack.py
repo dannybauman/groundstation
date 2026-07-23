@@ -66,18 +66,20 @@ def stack_instances(
     """Join components with an artifact's real render facts.
 
     facts: {"catalogs": [...], "collections_by_catalog": {catalog: [...]},
-            "tiler_hosts": [...], "terrain": bool, "geocoded": bool, "events": bool}
+            "tiler_hosts": [...], "maplibre": bool, "terrain": bool,
+            "geocoded": bool, "events": bool}
     Returns only the components this artifact actually exercised, in
     GROUP_ORDER, each with an `instance` line — specific when facts allow,
     the generic integration line otherwise. A fact that isn't known is
-    treated as false: the panel understates rather than fabricates.
+    treated as false: the panel understates rather than fabricates. Even
+    the renderer is a fact — a static postcard runs no map engine.
     """
     catalogs = facts.get("catalogs") or []
     by_catalog: dict[str, list[str]] = facts.get("collections_by_catalog") or {}
     collections = ", ".join(sorted({c for cols in by_catalog.values() for c in cols}))
     hosts = ", ".join(facts.get("tiler_hosts") or [])
 
-    active_names = {"MapLibre GL"}  # the renderer is always on screen
+    active_names = {"MapLibre GL"} if facts.get("maplibre") else set()
     if catalogs:  # raster pixels on screen -> the whole raster pipeline is live
         active_names |= {_CATALOG_COMPONENT[c] for c in catalogs if c in _CATALOG_COMPONENT}
         active_names |= {"STAC", "COG + HTTP range requests", "TiTiler", "Cloud object storage"}

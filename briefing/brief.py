@@ -328,6 +328,10 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         bbox=ev_bbox,
         layers=layers,
         out_path=str(map_path),
+        # the brief map is the artifact we hand people — the stack layer is on,
+        # and the facts are true: this pipeline geocoded and fetched events itself
+        stack_layer=True,
+        stack_facts={"geocoded": True, "events": bool(fc["features"])},
     )
 
     print("[5/5] synthesizing brief with Claude...")
