@@ -215,6 +215,14 @@ def t_postcard_license_placeholder_omitted():
     assert tools._shareable_license("CC-BY-4.0") == "CC-BY-4.0"
 
 
+def t_postcard_spread_fits_viewport():
+    # a tall card must never overflow the browser: image capped to the
+    # viewport, info beside it when there's room (flex-wrap, no media query)
+    html = _postcard()
+    assert "max-height: 86vh" in html and "flex-wrap: wrap" in html
+    assert '<div class="fig">' in html and "object-fit: contain" in html
+
+
 def t_postcard_no_local_paths_and_small():
     with tempfile.TemporaryDirectory() as d:
         out = Path(d) / "card.html"
