@@ -1056,6 +1056,11 @@ _EXTRA_CHUNK = """<button id="loadmore">Load full coverage (__N__ more)</button>
 <script>
   const EXTRAS = __EXTRAS__;
   document.getElementById("loadmore").addEventListener("click", (ev) => {
+    // the button is the progress indicator: tiles can arrive slowly from a
+    // busy tiler, and a silently vanishing button reads as "nothing happened"
+    const btn = ev.target;
+    btn.disabled = true;
+    btn.textContent = "Loading " + EXTRAS.length + " scene" + (EXTRAS.length > 1 ? "s" : "") + "…";
     EXTRAS.forEach((e, i) => {
       const id = "extra" + i;
       map.addSource(id, { type: "raster", tiles: [e.tiles], tileSize: 256,
@@ -1063,8 +1068,21 @@ _EXTRA_CHUNK = """<button id="loadmore">Load full coverage (__N__ more)</button>
       // beneath the main drape: gap fillers must never cover the best scene
       map.addLayer({ id, type: "raster", source: id,
         paint: { "raster-opacity": e.opacity } }, "imagery");
+      if (e.bounds) {
+        // dashed outline = where pixels are about to land; cleared on idle
+        const [w, s, x, n] = e.bounds;
+        map.addLayer({ id: id + "-pending", type: "line",
+          source: { type: "geojson", data: { type: "Feature", properties: {}, geometry: {
+            type: "Polygon", coordinates: [[[w, s], [x, s], [x, n], [w, n], [w, s]]] } } },
+          paint: { "line-color": "#CF3F02", "line-width": 1.5, "line-dasharray": [2, 2] } });
+      }
     });
-    ev.target.remove();
+    map.once("idle", () => {
+      EXTRAS.forEach((e, i) => {
+        if (map.getLayer("extra" + i + "-pending")) map.removeLayer("extra" + i + "-pending");
+      });
+      btn.remove();
+    });
   });
 </script>
 """
@@ -1088,6 +1106,7 @@ __BRAND__
   #panel button { font: 13px "Roboto", system-ui, sans-serif; background: var(--accent); color: #fff; border: 0;
     border-radius: 6px; padding: 6px 12px; margin: 6px 6px 0 0; cursor: pointer; }
   #panel button:hover { background: var(--ink); }
+  #panel button:disabled { background: var(--mid); cursor: default; }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
     color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
 </style></head><body>

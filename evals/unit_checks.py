@@ -265,6 +265,9 @@ def t_render_map_3d_lazy_extra_coverage():
         style_json = html.split("const STYLE = ")[1].split("\nconst BBOX")[0]
         assert "GAPFILL" not in style_json and "GAPFILL" in html
         assert '"imagery"' in html.split("const EXTRAS = ")[1]  # fillers insert beneath the main drape
+        # slow tiles need visible progress: button shows loading, footprint
+        # outlines mark where pixels will land, both clear on map idle
+        assert "Loading " in html and "-pending" in html and 'once("idle"' in html
     assert 'id="loadmore"' not in _render_3d()  # no extras, no button, zero extra bytes
 
 
