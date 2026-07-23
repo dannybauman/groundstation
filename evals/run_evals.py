@@ -121,8 +121,46 @@ def t_pc():
     assert "preview_url" in p
 
 
+@check("local synth brief passes brief_checks (loud SKIP without an endpoint)")
+def t_local_synth_live():
+    import os
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "briefing"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import httpx
+
+    import brief
+    import brief_checks
+
+    url = os.environ.get("GROUNDSTATION_LOCAL_URL", "http://localhost:11434/v1").rstrip("/")
+    model = os.environ.get("GROUNDSTATION_LOCAL_MODEL")
+    try:
+        httpx.get(f"{url}/models", timeout=2)
+    except Exception:
+        print(f"      SKIP local-synth: no endpoint at {url}")
+        return
+    if not model:
+        print("      SKIP local-synth: GROUNDSTATION_LOCAL_MODEL not set")
+        return
+    fixtures = sorted(Path(__file__).resolve().parents[1].glob("demo/*.data.json"))
+    assert fixtures, "no demo/*.data.json fixture to synthesize from"
+    data = json.loads(fixtures[0].read_text(encoding="utf-8"))
+    os.environ["GROUNDSTATION_LLM"] = "local"
+    try:
+        md = brief._synthesize_local(brief.SYNTH_PROMPT + json.dumps(data, default=str))
+    finally:
+        os.environ.pop("GROUNDSTATION_LLM", None)
+    assert md, "local endpoint up but synthesis declined or failed"
+    with tempfile.TemporaryDirectory() as d:
+        mp, dp = Path(d) / "b.md", Path(d) / "b.data.json"
+        mp.write_text(md, encoding="utf-8")
+        dp.write_text(json.dumps(data), encoding="utf-8")
+        problems = brief_checks.check_brief(mp, dp)
+    assert problems == [], f"local brief failed checks: {problems}"
+
+
 if __name__ == "__main__":
-    checks = [t_geocode, t_datasets, t_search, t_preview, t_stats, t_map, t_events, t_weather, t_veda, t_pc]
+    checks = [t_geocode, t_datasets, t_search, t_preview, t_stats, t_map, t_events, t_weather, t_veda, t_pc, t_local_synth_live]
     for fn in checks:
         fn()
     print(f"\n{len(checks) - len(FAILURES)}/{len(checks)} passed")
