@@ -58,6 +58,52 @@ def t_coverage_degenerate_inputs():
     aoi = [-114.3, 50.8, -113.8, 51.2]
     assert _bbox_coverage_pct(aoi, None) is None
     assert _bbox_coverage_pct(aoi, [-115.0]) is None
+
+
+def _fcs_item(id_, day, bbox, collection="sentinel-2-l2a"):
+    return {"id": id_, "datetime": f"{day}T18:30:00Z", "bbox": bbox, "collection": collection}
+
+
+def t_full_coverage_set_two_halves():
+    aoi = [-114.3, 50.8, -113.8, 51.2]
+    west = _fcs_item("west", "2026-07-19", [-115.0, 50.0, -114.0, 52.0])
+    east = _fcs_item("east", "2026-07-19", [-114.1, 50.0, -113.0, 52.0])  # overlaps west
+    got = tools.find_full_coverage_set([west, east], aoi)
+    assert got and {i["id"] for i in got["items"]} == {"west", "east"}
+    assert got["date"] == "2026-07-19" and got["union_covers_aoi_pct"] >= 99.0
+
+
+def t_full_coverage_set_single_covering_item():
+    aoi = [-114.3, 50.8, -113.8, 51.2]
+    full = _fcs_item("full", "2026-07-19", [-115.0, 50.0, -113.0, 52.0])
+    part = _fcs_item("part", "2026-07-19", [-115.0, 50.0, -114.0, 52.0])
+    got = tools.find_full_coverage_set([full, part], aoi)
+    assert got and [i["id"] for i in got["items"]] == ["full"]  # no free riders
+
+
+def t_full_coverage_set_never_mixes_days():
+    aoi = [-114.3, 50.8, -113.8, 51.2]
+    west = _fcs_item("west", "2026-07-19", [-115.0, 50.0, -114.0, 52.0])
+    east = _fcs_item("east", "2026-07-21", [-114.1, 50.0, -113.0, 52.0])
+    assert tools.find_full_coverage_set([west, east], aoi) is None
+
+
+def t_full_coverage_set_prefers_newest_full_day():
+    aoi = [-114.3, 50.8, -113.8, 51.2]
+    old = [
+        _fcs_item("ow", "2026-07-19", [-115.0, 50.0, -114.0, 52.0]),
+        _fcs_item("oe", "2026-07-19", [-114.1, 50.0, -113.0, 52.0]),
+    ]
+    newer_partial = _fcs_item("np", "2026-07-21", [-115.0, 50.0, -114.0, 52.0])
+    got = tools.find_full_coverage_set(old + [newer_partial], aoi)
+    assert got and got["date"] == "2026-07-19"  # completeness beats freshness
+
+
+def t_union_coverage_no_double_count():
+    aoi = [0.0, 0.0, 10.0, 10.0]
+    # two identical half-boxes: union is 50, not 100
+    half = [0.0, 0.0, 5.0, 10.0]
+    assert tools._union_coverage_pct(aoi, [half, half]) == 50.0
     assert _bbox_coverage_pct([-114.0, 51.0, -114.0, 51.0], [-115.0, 50.0, -113.0, 52.0]) is None
 
 
