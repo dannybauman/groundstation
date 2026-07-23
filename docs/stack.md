@@ -2,7 +2,7 @@
 
 What is actually behind a groundstation artifact, told as components. This file is curated, not generated: it says what matters, not what happens to be installed. Artifacts join these entries with their real render parameters, so a panel describes the specific collection, tiler, and buckets on screen.
 
-Fields per component: `kind` (data / access / tiling / viz / standard / infra), `what` (one plain line), `ds-role` (created / maintains / contributes / uses — projects, never people), `integration` (what it does in this system), `speaks-to` (edges of the web), `link`.
+Fields per component: `kind` (data / access / tiling / viz / standard / infra), `what` (one plain line), `ds-role` (created / maintains / contributes / uses — projects, never people), `integration` (what it does in this system), `speaks-to` (edges of the web), `link`. `created` and `maintains` mark Development Seed's own components — artifact panels show those two with a filled badge, everything else stays muted. Quiet, but visible.
 
 Heads-up for editors: component *names* are joined by code (`src/groundstation/stack.py` — the catalog map and active-name sets). Renaming a `## ` heading needs a matching edit there, and an eval checks the two stay in sync.
 
@@ -45,6 +45,14 @@ Heads-up for editors: component *names* are joined by code (`src/groundstation/s
 - integration: every raster layer's tile URL; expressions like NDVI run server-side
 - speaks-to: STAC, COG + HTTP range requests
 - link: https://github.com/developmentseed/titiler
+
+## rio-tiler
+- kind: tiling
+- what: the Python raster engine that reads COGs and renders them — the core TiTiler is built on
+- ds-role: created
+- integration: bakes mosaic postcards straight from the COGs, no tiler in the path
+- speaks-to: COG + HTTP range requests, TiTiler
+- link: https://github.com/cogeotiff/rio-tiler
 
 ## COG + HTTP range requests
 - kind: access

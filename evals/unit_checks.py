@@ -347,9 +347,9 @@ def t_stack_active_names_exist_in_stack_md():
     # the join string-matches component names; a stack.md heading rename must
     # fail here instead of silently vanishing from every panel
     names = {c["name"] for c in gstack.parse_stack()}
-    wired = {"MapLibre GL", "STAC", "COG + HTTP range requests", "TiTiler", "Cloud object storage",
-             "AWS Terrarium terrain", "Gazet", "Nominatim", "NASA EONET", "GDACS", "Open-Meteo",
-             *gstack._CATALOG_COMPONENT.values()}
+    wired = {"MapLibre GL", "STAC", "COG + HTTP range requests", "TiTiler", "rio-tiler",
+             "Cloud object storage", "AWS Terrarium terrain", "Gazet", "Nominatim",
+             "NASA EONET", "GDACS", "Open-Meteo", *gstack._CATALOG_COMPONENT.values()}
     assert wired <= names, f"wired names missing from stack.md: {sorted(wired - names)}"
 
 
@@ -468,6 +468,28 @@ def t_stack_panel_depth_on_demand():
     html = tools._stack_panel_html(entries)
     assert html.count("<details") == len(entries) and "<summary>" in html
     assert "speaks to " in html and 'class="spk"' in html
+
+
+def t_stack_mosaic_card_honesty_and_ds_marks():
+    # a mosaic card credits rio-tiler and NOT TiTiler — no tiler served it
+    comps = gstack.parse_stack()
+    entries = gstack.stack_instances(comps, {
+        "catalogs": ["earth-search"],
+        "collections_by_catalog": {"earth-search": ["sentinel-2-l2a"]},
+        "mosaic_scenes": 2,
+    })
+    names = [e["name"] for e in entries]
+    assert "rio-tiler" in names and "TiTiler" not in names
+    rt = next(e for e in entries if e["name"] == "rio-tiler")
+    assert rt["instance"] == "mosaicked 2 scenes into one frame, first valid pixel wins"
+    listing = tools._stack_credit_for("earth-search", "sentinel-2-l2a", None, mosaic_scenes=2)
+    assert "rio-tiler" in listing and "TiTiler" not in listing
+    # DS-built marks: filled badge in the panel, tinted name on the card —
+    # created/maintains only, everything else stays muted
+    html = tools._stack_panel_html(entries)
+    assert 'class="role ds">created</span>' in html
+    assert 'class="role">uses</span>' in html
+    assert '<b class="ds">rio-tiler</b>' in listing
 
 
 def t_brand_tokens_in_all_templates():

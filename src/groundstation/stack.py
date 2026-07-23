@@ -16,6 +16,9 @@ KINDS = ("data", "access", "tiling", "viz", "standard", "infra")
 # ds-role is a closed enum — attribution stays role-shaped, so a person's
 # name can never ride in through this field
 DS_ROLES = ("created", "maintains", "contributes", "uses")
+# the two roles that mean "this is Development Seed's own" — panels mark
+# these visibly (quietly: a filled badge, nothing louder)
+DS_OWN = ("created", "maintains")
 # pipeline order the panel groups by; standard/infra trail as context
 GROUP_ORDER = ("data", "access", "tiling", "viz", "standard", "infra")
 
@@ -75,7 +78,7 @@ def stack_instances(
 
     facts: {"catalogs": [...], "collections_by_catalog": {catalog: [...]},
             "tiler_hosts": [...], "maplibre": bool, "terrain": bool,
-            "geocoded": bool, "events": bool}
+            "geocoded": bool, "events": bool, "mosaic_scenes": int}
     Returns only the components this artifact actually exercised, in
     GROUP_ORDER, each with an `instance` line — specific when facts allow,
     the generic integration line otherwise. A fact that isn't known is
@@ -88,9 +91,13 @@ def stack_instances(
     hosts = ", ".join(facts.get("tiler_hosts") or [])
 
     active_names = {"MapLibre GL"} if facts.get("maplibre") else set()
-    if catalogs:  # raster pixels on screen -> the whole raster pipeline is live
+    if catalogs:  # raster pixels on screen -> the raster pipeline is live
         active_names |= {_CATALOG_COMPONENT[c] for c in catalogs if c in _CATALOG_COMPONENT}
-        active_names |= {"STAC", "COG + HTTP range requests", "TiTiler", "Cloud object storage"}
+        active_names |= {"STAC", "COG + HTTP range requests", "Cloud object storage"}
+    if facts.get("tiler_hosts"):  # a tiler only served this artifact if a host did
+        active_names.add("TiTiler")
+    if facts.get("mosaic_scenes"):  # rio-tiler baked the pixels client-side
+        active_names.add("rio-tiler")
     if facts.get("terrain"):
         # terrain tiles bottom out in a bucket too, even on a raster-only 3D map
         active_names |= {"AWS Terrarium terrain", "Cloud object storage"}
@@ -104,6 +111,9 @@ def stack_instances(
         "STAC": f"found {collections}" if collections else None,
         "COG + HTTP range requests": "streaming only the bytes each tile needs",
     }
+    if facts.get("mosaic_scenes"):
+        n = facts["mosaic_scenes"]
+        instance_bits["rio-tiler"] = f"mosaicked {n} scenes into one frame, first valid pixel wins"
     buckets: dict[str, list[str]] = {}
     for c in catalogs:
         if c in _CATALOG_BUCKET:
