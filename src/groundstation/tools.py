@@ -985,13 +985,20 @@ def _snapshot_artifact(
             page.goto(Path(html_path).resolve().as_uri() + "#clean")
             loaded = "window.gsMaps && window.gsMaps.every(m => m.loaded())"
             page.wait_for_function(loaded, timeout=90000)
-            # re-fit to the card's bbox, zero padding, keeping any pitch —
-            # the load-time fit pads 40px and leaks area beyond the data
+            # re-fit to the card's bbox, keeping any pitch. Flat maps get zero
+            # padding (the load-time fit pads 40px and leaks area beyond the
+            # data); pitched maps reserve top headroom, because fitBounds fits
+            # the GROUND footprint and relief rises above it — without the
+            # reserve a peak crops out the top of the frame.
+            # ponytail: fixed 28% headroom — terrain-aware framing (sample
+            # queryTerrainElevation, project the summit) if a case defeats it
             bb = json.dumps(fit_bbox) if fit_bbox else "BBOX"
             page.evaluate(
-                "window.gsMaps.forEach(m => { try { const B = " + bb + "; m.fitBounds("
-                "[[B[0], B[1]], [B[2], B[3]]],"
-                "{ padding: 0, duration: 0, pitch: m.getPitch(), bearing: m.getBearing() }"
+                "window.gsMaps.forEach(m => { try { const B = " + bb + "; "
+                "const head = m.getPitch() > 0 ? Math.round(m.getContainer().clientHeight * 0.28) : 0; "
+                "m.fitBounds([[B[0], B[1]], [B[2], B[3]]],"
+                "{ padding: { top: head, left: 0, right: 0, bottom: 0 },"
+                "  duration: 0, pitch: m.getPitch(), bearing: m.getBearing() }"
                 ") } catch (e) {} })"
             )
             page.wait_for_function(loaded, timeout=90000)
