@@ -1050,6 +1050,25 @@ def render_map(
 
 TERRAIN_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 
+# click-to-load gap fillers — injected only when extra_layers exist, so the
+# default 3D artifact carries zero extra bytes and requests zero extra tiles
+_EXTRA_CHUNK = """<button id="loadmore">Load full coverage (__N__ more)</button>
+<script>
+  const EXTRAS = __EXTRAS__;
+  document.getElementById("loadmore").addEventListener("click", (ev) => {
+    EXTRAS.forEach((e, i) => {
+      const id = "extra" + i;
+      map.addSource(id, { type: "raster", tiles: [e.tiles], tileSize: 256,
+        ...(e.bounds ? { bounds: e.bounds } : {}) });
+      // beneath the main drape: gap fillers must never cover the best scene
+      map.addLayer({ id, type: "raster", source: id,
+        paint: { "raster-opacity": e.opacity } }, "imagery");
+    });
+    ev.target.remove();
+  });
+</script>
+"""
+
 _MAP3D_TEMPLATE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>__TITLE__</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1077,6 +1096,7 @@ __BRAND__
   <label>Terrain exaggeration: <span id="exagValue">__EXAGGERATION__</span>&times;</label>
   <input id="exaggeration" type="range" min="1" max="3" step="0.1" value="__EXAGGERATION__">
   <button id="flythrough">Fly through</button><button id="reset">Reset view</button>
+__EXTRA__
 </div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler · terrain: AWS Terrarium (open)</div>
 __STACK__
@@ -1131,6 +1151,7 @@ def render_map_3d(
     out_path: str | None = None,
     exaggeration: float = 1.5,
     stack_layer: bool = False,
+    extra_layers: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Write a self-contained 3D terrain fly-through with imagery draped over it.
 
@@ -1145,6 +1166,12 @@ def render_map_3d(
 
     stack_layer: same "Stack" toggle as render_map, and here the panel also
     names the Terrarium terrain actually under the imagery.
+
+    extra_layers: more layers in the same shape, embedded but not requested
+    until the viewer clicks "Load full coverage". Pass the REST of a same-day
+    full_coverage_set when the best scene clips the AOI (covers_aoi_pct
+    below ~95) — the gaps become one click away without loading tiles nobody
+    asked for. They drape beneath the main scene, so it always wins.
     """
     # ponytail: one draped layer; add a second when a real ask needs it
     resolved = _resolve_layer(layer)
@@ -1181,9 +1208,20 @@ def render_map_3d(
             },
         ],
     }
+    extras = [_resolve_layer(l) for l in (extra_layers or [])]
+    extra_html = ""
+    if extras:
+        extra_html = _EXTRA_CHUNK.replace("__N__", str(len(extras))).replace(
+            "__EXTRAS__",
+            json.dumps([
+                {"tiles": e["tiles"], "opacity": e.get("opacity", 1),
+                 **({"bounds": e["bounds"]} if e.get("bounds") else {})}
+                for e in extras
+            ]),
+        )
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for([resolved], [layer], {"terrain": True})
+        stack_html = _stack_chunk_for([resolved, *extras], [layer, *(extra_layers or [])], {"terrain": True})
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = (
@@ -1193,6 +1231,7 @@ def render_map_3d(
         .replace("__STYLE__", json.dumps(style))
         .replace("__BBOX__", json.dumps(bbox))
         .replace("__EXAGGERATION__", json.dumps(round(float(exaggeration), 2)))
+        .replace("__EXTRA__", extra_html)
         # __STACK__ last, same trust boundary as render_map: entries carry
         # caller-supplied collection ids that must never be macro-expanded
         .replace("__STACK__", stack_html)

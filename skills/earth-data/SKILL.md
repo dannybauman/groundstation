@@ -56,6 +56,7 @@ The value here is the groundstation tools. If they aren't visible yet, the serve
 Triggers: "3D", "fly-through", "terrain", "what does this valley actually look like", anywhere relief is the story (mountains, canyons, coastlines, volcanoes, glaciers).
 
 - Run the normal flow first — `geocode`, then `search_imagery` — and pick the lowest-cloud recent scene that covers the area. Terrain is only as good as the imagery draped on it.
+- When the best scene clips the AOI (`covers_aoi_pct` below ~95), pass the other scenes of the same-day `full_coverage_set` as `extra_layers` — they embed as a "Load full coverage" button, so the gaps are one click away without loading tiles upfront. Say so in your answer ("the west edge loads on click").
 - Then `render_map_3d(title, bbox, layer, exaggeration=1.5)` with that one scene as the layer (same shape as a `render_map` layer). The artifact carries an exaggeration slider, a fly-through orbit, and a reset button.
 - Elevation is the keyless AWS Terrarium tileset, so the page shares as-is. It's global at ~10m-ish over land, sea floor included, and flat terrain looks flat — pick relief-rich AOIs or the 3D adds nothing.
 - Exaggeration 1.5 reads well for mountains; push to 2-3 for gentle terrain, drop to 1 when the shape should stay honest.

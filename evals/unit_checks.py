@@ -251,6 +251,23 @@ def t_render_map_3d_no_local_paths():
     assert "/Users/" not in html and "file://" not in html
 
 
+def t_render_map_3d_lazy_extra_coverage():
+    # extras embed but must not load upfront: sources live in EXTRAS, not STYLE
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m3d.html")
+        layer = {"type": "item", "name": "s2", "catalog": "earth-search",
+                 "collection_id": "sentinel-2-l2a", "item_id": "MAIN", "bbox": [0, 0, 1, 1]}
+        extra = {"type": "item", "catalog": "earth-search", "collection_id": "sentinel-2-l2a",
+                 "item_id": "GAPFILL", "bbox": [1, 0, 2, 1]}
+        tools.render_map_3d("t", [0, 0, 2, 1], layer, out_path=out, extra_layers=[extra])
+        html = Path(out).read_text(encoding="utf-8")
+        assert 'id="loadmore"' in html and "Load full coverage (1 more)" in html
+        style_json = html.split("const STYLE = ")[1].split("\nconst BBOX")[0]
+        assert "GAPFILL" not in style_json and "GAPFILL" in html
+        assert '"imagery"' in html.split("const EXTRAS = ")[1]  # fillers insert beneath the main drape
+    assert 'id="loadmore"' not in _render_3d()  # no extras, no button, zero extra bytes
+
+
 def t_render_map_3d_controls():
     html = _render_3d(exaggeration=2.5)
     assert 'id="exaggeration"' in html and 'id="flythrough"' in html and 'id="reset"' in html
