@@ -9,7 +9,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 ## First: use the tools, never route around them
 
-The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 12 tools in about a second.
+The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 14 tools in about a second.
 
 - **Wait and retry discovery** a few times over ~10-15 seconds before doing anything else. The tools almost always appear.
 - **Never fall back to raw STAC / TiTiler / FIRMS / `httpx` calls to work around missing tools.** Hand-rolling the pipeline gives a worse answer and hides a fixable setup problem. Missing tools are a thing to fix, not to route around.
@@ -40,6 +40,7 @@ The value here is the groundstation tools. If they aren't visible yet, the serve
 
 - Cloud filtering: pass `max_cloud_cover=20` for optical searches by default; relax only if nothing comes back.
 - **State coverage next to every scene claim.** Search results carry `covers_aoi_pct` — 100 means the scene covers the whole asked-for area, 48 means it clips half of it. STAC returns anything that *intersects*, so a "here's Calgary" answer built on a 50%-coverage scene silently shows half the city. Below ~90: say which part is covered ("the western half"), prefer a fuller scene if one is in the results, or render the two best-covering scenes together (same collection auto-swipes). This is also the data behind the whole-area-vs-any-scene clarify case in the judgment rules — you often don't need to ask, the number answers it.
+- **When no single scene covers the AOI, use `full_coverage_set`.** Some places straddle tile-grid boundaries (Calgary spans two Sentinel-2 UTM zones), so every single scene crops an edge forever. When the best scene is partial, the search response includes `full_coverage_set` — the newest same-day set whose union covers the whole AOI. Render its items as layers in ONE `render_map` call (`compare=False`, one toggleable layer per scene) and present that as the answer. If a newer partial scene exists, say so plainly: "newest full-coverage pass is Jul 19; a newer Jul 21 scene exists but misses the west edge." Completeness beats freshness for whole-area questions.
 - Sentinel-2 true color: `assets=["visual"]` — one COG, no rescale needed. Landsat (planetary-computer, per the requester-pays exception): `["red","green","blue"]` are unscaled uint16 DN, not reflectance — a fixed `rescale="0,0.3"` renders blank; run `compute_statistics` first and stretch to ~p2–p98 (typically ≈`"7300,12400"`), and put the C2 scale/offset (`*0.0000275 - 0.2`) inside any index expression, since the offset doesn't cancel in normalized differences.
 - NDVI on Sentinel-2 (earth-search): `expression="(nir-red)/(nir+red)"`. NDWI: `"(green-nir)/(green+nir)"`. NBR (burn severity): `"(nir-swir22)/(nir+swir22)"` — compare pre/post fire. NDSI (snow): `"(green-swir16)/(green+swir16)"`, snow-covered where > 0.4. Asset names, not band numbers — translation to TiTiler band indices happens for you.
 - **Index layers on maps**: pass the same `expression` on the `render_map` item layer with `rescale="-1,1"` and `colormap_name="rdylgn"` (never bare `assets=[nir, red]` — that renders raw reflectance, which shows as blank).
@@ -48,6 +49,25 @@ The value here is the groundstation tools. If they aren't visible yet, the serve
 - **Region-scale place names** (a coffee zone, a floodplain, a corridor): geocoding may return a tiny point-feature bbox. Sanity-check the bbox size against the question's scale and widen it yourself before searching, or geocode a better-known containing name.
 - Comparing two dates: search with two `datetime_range` windows, then `render_map` with both items as layers (newest on top) so the user can toggle. Name layers with their dates.
 - VEDA layers usually want `assets=["cog_default"]` plus a `rescale`/`colormap_name`; check the collection's `renders` metadata via `describe_collection` when unsure.
+
+## 3D fly-throughs
+
+Triggers: "3D", "fly-through", "terrain", "what does this valley actually look like", anywhere relief is the story (mountains, canyons, coastlines, volcanoes, glaciers).
+
+- Run the normal flow first — `geocode`, then `search_imagery` — and pick the lowest-cloud recent scene that covers the area. Terrain is only as good as the imagery draped on it.
+- Then `render_map_3d(title, bbox, layer, exaggeration=1.5)` with that one scene as the layer (same shape as a `render_map` layer). The artifact carries an exaggeration slider, a fly-through orbit, and a reset button.
+- Elevation is the keyless AWS Terrarium tileset, so the page shares as-is. It's global at ~10m-ish over land, sea floor included, and flat terrain looks flat — pick relief-rich AOIs or the 3D adds nothing.
+- Exaggeration 1.5 reads well for mountains; push to 2-3 for gentle terrain, drop to 1 when the shape should stay honest.
+
+## Postcards
+
+Triggers: "postcard", "share card", "something I can post", "can I put this on LinkedIn", any result the user is visibly proud of.
+
+- `render_postcard(catalog, collection_id, item_id, place, date, ...)` writes one card: the scene as embedded pixels, the place and date, an optional caption, and the attribution block (Development Seed labs, STAC, TiTiler, the data source, the collection license).
+- Pixels are embedded rather than linked on purpose. A map artifact points at live tiles, and a Planetary Computer URL carries a signed token that dies within the hour, so a shared page goes blank. A postcard keeps working.
+- Index cards work the same way as index map layers: pass `expression` and `colormap_name`.
+- The license line only appears when the collection declares a real one. Earth Search says `proprietary` for Sentinel-2, which is STAC's placeholder rather than the actual terms, so the card leaves it off instead of printing something misleading.
+- Where and whether to post is the user's decision, never yours. Hand them the file and say what's in it.
 
 ## Monitoring and briefings
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -108,8 +109,63 @@ def md_to_html(md: str) -> str:
     return html
 
 
+# ponytail: Ollama silently truncates prompts past its default context and the
+# model never sees the instructions at the front — stay well under, route to
+# cloud when over. Chars, not tokens: a rough 3:1 margin is the point.
+LOCAL_PROMPT_BUDGET_CHARS = 24000
+
+
+def _synthesize_local(prompt: str) -> str | None:
+    """Rung-2 completion on a local OpenAI-compatible endpoint (Ollama / LM
+    Studio). Preflight then dispatch; any failure returns None so the caller
+    falls through to claude then the deterministic brief. Synthesis is the
+    only local task by design — see docs/adr-local-models.md."""
+    import httpx
+
+    url = os.environ.get("GROUNDSTATION_LOCAL_URL", "http://localhost:11434/v1").rstrip("/")
+    model = os.environ.get("GROUNDSTATION_LOCAL_MODEL")
+    if not model:
+        print("local synth skipped: GROUNDSTATION_LOCAL_MODEL not set", file=sys.stderr)
+        return None
+    if len(prompt) > LOCAL_PROMPT_BUDGET_CHARS:
+        print(
+            f"local synth skipped: prompt {len(prompt)} chars over {LOCAL_PROMPT_BUDGET_CHARS} budget",
+            file=sys.stderr,
+        )
+        return None
+    try:
+        # never start the host ourselves; a dead endpoint must fail in 2s, not hang
+        httpx.get(f"{url}/models", timeout=2)
+    except Exception as e:
+        print(f"local synth skipped: {url} unreachable ({e.__class__.__name__})", file=sys.stderr)
+        return None
+    try:
+        r = httpx.post(
+            f"{url}/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            },
+            timeout=120,
+        )
+        r.raise_for_status()
+        text = r.json()["choices"][0]["message"]["content"] or ""
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        if text:
+            return text
+        print("local synth returned empty text; falling through", file=sys.stderr)
+    except Exception as e:
+        print(f"local synth failed ({e.__class__.__name__}); falling through", file=sys.stderr)
+    return None
+
+
 def synthesize(data: dict) -> str:
     prompt = SYNTH_PROMPT + json.dumps(data, default=str)
+    if os.environ.get("GROUNDSTATION_LLM", "claude") in ("local", "auto"):
+        out = _synthesize_local(prompt)
+        if out:
+            return out
     try:
         r = subprocess.run(
             ["claude", "-p", "--model", "sonnet"],
@@ -136,6 +192,23 @@ def synthesize(data: dict) -> str:
         for i in data["imagery"].get("items", [])[:5]
     ]
     return "\n".join(lines)
+
+
+def _ensure_transition_note(md: str, prev_alert: str | None) -> str:
+    """Deterministic day-over-day honesty: a CALM brief after a WATCH/ACT run
+    must say so even when the model forgot. The synth prompt asks for it; this
+    guarantees it."""
+    if prev_alert not in ("WATCH", "ACT"):
+        return md
+    m = re.search(r"\b(CALM|WATCH|ACT)\b", md)
+    if not m or m.group(1) != "CALM":
+        return md
+    lowered = md.lower()
+    if any(t in lowered for t in ("stand", "stood down", "de-escalat", "calmer than", "yesterday", "last run")):
+        return md
+    return md.replace(
+        "## TL;DR\n", f"## TL;DR\nCALM — stood down from the last run's {prev_alert}. ", 1
+    )
 
 
 def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
@@ -276,6 +349,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         except Exception:
             pass
     md = synthesize(data)
+    md = _ensure_transition_note(md, (data.get("previous_run") or {}).get("alert"))
 
     html = (
         PAGE.replace("__PLACE__", place)
@@ -345,8 +419,13 @@ INDEX = """<!doctype html>
 ALERT_EMOJI = {"ACT": "🔴", "WATCH": "🟠", "CALM": "🟢"}
 
 
-def slack_payload(results: list[dict], today: dt.date) -> dict:
-    lines = [f"🌍 *Morning sweep — {today.strftime('%A, %B %d')}* ({len(results)} areas)"]
+def slack_payload(results: list[dict], today: dt.date, total: int | None = None, withheld: int = 0) -> dict:
+    scope = (
+        f"{len(results)} of {total} areas, {withheld} withheld by checks"
+        if withheld
+        else f"{len(results)} areas"
+    )
+    lines = [f"🌍 *Morning sweep — {today.strftime('%A, %B %d')}* ({scope})"]
     for r in results:
         first_sentence = (r["tldr"].split(". ")[0].rstrip(".") + ".").replace("**", "*")
         lines.append(f"{ALERT_EMOJI.get(r['alert'], '⚪')} *{r['alert']}* — {r['place']}: {first_sentence}")
@@ -395,7 +474,26 @@ def build_fleet(config_path: Path, out_dir: Path, slack_webhook: str | None = No
     index_path = out_dir / f"morning-sweep-{today.isoformat()}.html"
     index_path.write_text(html, encoding="utf-8")
     print(f"\nindex: {index_path}")
-    deliver_slack(slack_payload(results, today), slack_webhook, slack_dry_run)
+    # quality gate: a generative product can't post garbage. Failing briefs stay
+    # on disk and in the HTML index, but are withheld from the Slack post — and
+    # the post says so instead of pretending.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "evals"))
+    import brief_checks
+
+    passed, withheld = [], 0
+    for r in results:
+        stem = r["brief"][:-5]  # drop .html
+        problems = brief_checks.check_brief(out_dir / f"{stem}.md", out_dir / f"{stem}.data.json")
+        if problems:
+            withheld += 1
+            print(f"withheld from Slack ({r['place']}): {problems}", file=sys.stderr)
+        else:
+            passed.append(r)
+    deliver_slack(
+        slack_payload(passed, today, total=len(results), withheld=withheld),
+        slack_webhook,
+        slack_dry_run,
+    )
     return index_path
 
 
