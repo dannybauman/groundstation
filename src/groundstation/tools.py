@@ -89,6 +89,83 @@ def _mgrs_tile(item_id: str) -> str:
     return parts[1] if len(parts) > 1 else item_id
 
 
+# ponytail: "covers the AOI" threshold — bbox math is approximate, 99 avoids
+# float-edge false negatives on genuinely-covering scenes
+FULL_COVERAGE_PCT = 99.0
+
+
+def _union_coverage_pct(aoi: list[float], boxes: list[list[float]]) -> float:
+    """Union coverage of the AOI by several bboxes — exact for axis-aligned
+    rectangles (coordinate-sweep grid), so overlapping tiles never double-count."""
+    aw, as_, ae, an = aoi
+    aoi_area = (ae - aw) * (an - as_)
+    if aoi_area <= 0:
+        return 0.0
+    clipped = []
+    for b in boxes:
+        if not b or len(b) < 4:
+            continue
+        w, s, e, n = max(aw, b[0]), max(as_, b[1]), min(ae, b[2]), min(an, b[3])
+        if e > w and n > s:
+            clipped.append((w, s, e, n))
+    if not clipped:
+        return 0.0
+    xs = sorted({v for r in clipped for v in (r[0], r[2])})
+    ys = sorted({v for r in clipped for v in (r[1], r[3])})
+    covered = 0.0
+    for i in range(len(xs) - 1):
+        for j in range(len(ys) - 1):
+            cx, cy = (xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2
+            if any(r[0] <= cx <= r[2] and r[1] <= cy <= r[3] for r in clipped):
+                covered += (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j])
+    return round(100.0 * covered / aoi_area, 1)
+
+
+def find_full_coverage_set(
+    items: list[dict[str, Any]],
+    aoi_bbox: list[float],
+    threshold: float = FULL_COVERAGE_PCT,
+) -> dict[str, Any] | None:
+    """Newest same-collection, same-day scene set whose union covers the AOI.
+
+    The Calgary case: a city straddling two UTM zones has NO single scene that
+    covers it, so the freshest scene silently crops an edge. Same acquisition
+    date is the practical proxy for "same pass" — adjacent granules share it.
+    Greedy by marginal coverage gain; duplicate same-tile items add zero gain
+    and drop out naturally. Returns None when no day in the results reaches
+    the threshold.
+    """
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for it in items:
+        day = (it.get("datetime") or "")[:10]
+        if day and it.get("bbox") and it.get("collection"):
+            groups.setdefault((it["collection"], day), []).append(it)
+    for coll, day in sorted(groups, key=lambda k: k[1], reverse=True):
+        remaining = list(groups[(coll, day)])
+        chosen: list[dict[str, Any]] = []
+        boxes: list[list[float]] = []
+        covered = 0.0
+        while remaining:
+            best, best_gain = None, 0.05  # require a real gain, not float noise
+            for it in remaining:
+                gain = _union_coverage_pct(aoi_bbox, boxes + [it["bbox"]]) - covered
+                if gain > best_gain:
+                    best, best_gain = it, gain
+            if best is None:
+                break
+            chosen.append(best)
+            boxes.append(best["bbox"])
+            covered = _union_coverage_pct(aoi_bbox, boxes)
+            remaining.remove(best)
+            if covered >= threshold:
+                return {
+                    "date": day,
+                    "union_covers_aoi_pct": covered,
+                    "items": chosen,
+                }
+    return None
+
+
 _pc_mosaic_cache: dict[str, str] = {}
 
 
@@ -348,7 +425,10 @@ def search_imagery(
     preview_item, compute_statistics, or render_map. Each item carries
     covers_aoi_pct — how much of the searched area its bbox covers (100 =
     full coverage; a low value means the scene only clips the area, so say
-    so or pick a fuller scene).
+    so or pick a fuller scene). When no single scene covers the AOI, the
+    response also carries full_coverage_set: the newest same-day scene set
+    whose union does — render its items as toggleable layers in one
+    render_map call instead of answering with a cropped scene.
     """
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
@@ -373,7 +453,13 @@ def search_imagery(
     items = [_compact_item(catalog, f) for f in feats]
     for it in items:
         it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
-    return {"bbox": bbox, "count": len(feats), "items": items}
+    result = {"bbox": bbox, "count": len(feats), "items": items}
+    best_single = max((it.get("covers_aoi_pct") or 0.0) for it in items) if items else 0.0
+    if items and best_single < FULL_COVERAGE_PCT:
+        full = find_full_coverage_set(items, bbox)
+        if full and len(full["items"]) > 1:
+            result["full_coverage_set"] = full
+    return result
 
 
 # ---------------------------------------------------------------- rasters
