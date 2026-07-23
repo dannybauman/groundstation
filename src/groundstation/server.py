@@ -35,6 +35,7 @@ for fn in (
     tools.compare_dates,
     tools.tile_url_template,
     tools.render_map,
+    tools.render_map_3d,
     tools.active_events,
     tools.weather_summary,
 ):

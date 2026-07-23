@@ -781,6 +781,46 @@ if (COMPARE && rasters.length === 2) {
 """
 
 
+def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
+    """An {"type": "item"} layer becomes a raster layer with tiles + scene bounds."""
+    if l.get("type") != "item":
+        return l
+    item_bounds = l.get("bbox")
+    if item_bounds is None:
+        # scene footprint bounds stop the map requesting (and the tiler
+        # serving 404s for) every out-of-footprint tile in the viewport
+        try:
+            item = _get_json(
+                f"{CATALOGS[l['catalog']]['stac']}/collections/{l['collection_id']}/items/{l['item_id']}"
+            )
+            item_bounds = item.get("bbox")
+        except Exception:
+            item_bounds = None
+    return {
+        "type": "raster",
+        "name": l.get("name") or l["item_id"],
+        "tiles": tile_url_template(
+            l["catalog"],
+            l["collection_id"],
+            l["item_id"],
+            l.get("assets"),
+            l.get("rescale"),
+            l.get("colormap_name"),
+            l.get("expression"),
+        ),
+        "opacity": l.get("opacity", 1),
+        **({"bounds": item_bounds} if item_bounds else {}),
+    }
+
+
+def _artifact_path(out_path: str | None, prefix: str, title: str) -> str:
+    if out_path:
+        return out_path
+    out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return str(out_dir / f"{prefix}-{slugify(title)}.html")
+
+
 def render_map(
     title: str,
     bbox: list[float],
@@ -812,38 +852,9 @@ def render_map(
     for l in layers:
         if l.get("type") == "item":
             raster_collections.append(l.get("collection_id"))
-            item_bounds = l.get("bbox")
-            if item_bounds is None:
-                # scene footprint bounds stop the map requesting (and the tiler
-                # serving 404s for) every out-of-footprint tile in the viewport
-                try:
-                    item = _get_json(
-                        f"{CATALOGS[l['catalog']]['stac']}/collections/{l['collection_id']}/items/{l['item_id']}"
-                    )
-                    item_bounds = item.get("bbox")
-                except Exception:
-                    item_bounds = None
-            resolved.append(
-                {
-                    "type": "raster",
-                    "name": l.get("name") or l["item_id"],
-                    "tiles": tile_url_template(
-                        l["catalog"],
-                        l["collection_id"],
-                        l["item_id"],
-                        l.get("assets"),
-                        l.get("rescale"),
-                        l.get("colormap_name"),
-                        l.get("expression"),
-                    ),
-                    "opacity": l.get("opacity", 1),
-                    **({"bounds": item_bounds} if item_bounds else {}),
-                }
-            )
-        else:
-            if l.get("type") == "raster":
-                raster_collections.append(None)
-            resolved.append(l)
+        elif l.get("type") == "raster":
+            raster_collections.append(None)
+        resolved.append(_resolve_layer(l))
     if compare is None:
         # swipe only for a true comparison: two rasters of the same collection
         compare = (
@@ -858,13 +869,148 @@ def render_map(
         .replace("__BBOX__", json.dumps(bbox))
         .replace("__COMPARE__", json.dumps(compare))
     )
-    if out_path is None:
-        safe = slugify(title)
-        out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = str(out_dir / f"map-{safe}.html")
+    out_path = _artifact_path(out_path, "map", title)
     Path(out_path).write_text(html, encoding="utf-8")
     return {"map_path": out_path, "layers": [l["name"] for l in resolved]}
+
+
+# ---------------------------------------------------------------- 3D artifact
+
+TERRAIN_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+
+_MAP3D_TEMPLATE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>__TITLE__</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
+<style>
+  html, body, #map { margin: 0; height: 100%; }
+  #panel { position: absolute; top: 12px; left: 12px; z-index: 2; background: rgba(255,255,255,.94);
+    padding: 12px 16px; border-radius: 10px; font: 14px/1.45 system-ui, sans-serif; max-width: 340px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+  #panel h1 { font-size: 15px; margin: 0 0 4px; }
+  #panel p { margin: 4px 0 8px; color: #444; }
+  #panel label { display: block; margin: 6px 0 2px; color: #333; }
+  #exaggeration { width: 100%; }
+  #panel button { font: 13px system-ui, sans-serif; background: #10222e; color: #fff; border: 0;
+    border-radius: 6px; padding: 6px 12px; margin: 6px 6px 0 0; cursor: pointer; }
+  #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px system-ui, sans-serif;
+    color: #333; background: rgba(255,255,255,.8); padding: 2px 8px; border-radius: 6px; }
+</style></head><body>
+<div id="map"></div>
+<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p>
+  <label>Terrain exaggeration: <span id="exagValue">__EXAGGERATION__</span>&times;</label>
+  <input id="exaggeration" type="range" min="1" max="3" step="0.1" value="__EXAGGERATION__">
+  <button id="flythrough">Fly through</button><button id="reset">Reset view</button>
+</div>
+<div id="credit">groundstation · Development Seed labs · STAC + TiTiler · terrain: AWS Terrarium (open)</div>
+<script>
+const STYLE = __STYLE__;
+const BBOX = __BBOX__;
+const CENTER = [(BBOX[0] + BBOX[2]) / 2, (BBOX[1] + BBOX[3]) / 2];
+const BOUNDS = [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]];
+let exaggeration = __EXAGGERATION__;
+
+const map = new maplibregl.Map({ container: "map", style: STYLE, bounds: BOUNDS,
+  fitBoundsOptions: { padding: 40 }, maxPitch: 85 });
+window.gsMaps = [map];  // exposed for scripted screenshots and checks
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
+map.on("load", () => {
+  map.setTerrain({ source: "dem", exaggeration });
+  map.easeTo({ center: CENTER, pitch: 60, duration: 0 });
+});
+
+const slider = document.getElementById("exaggeration");
+slider.addEventListener("input", () => {
+  exaggeration = parseFloat(slider.value);
+  document.getElementById("exagValue").textContent = exaggeration.toFixed(1);
+  map.setTerrain({ source: "dem", exaggeration });
+});
+
+// orbit by nudging bearing each frame — easeTo/flyTo per step fights the
+// user's own camera input and stutters on tile loads
+const btn = document.getElementById("flythrough");
+let frame = null;
+const step = () => { map.setBearing(map.getBearing() + 0.08); frame = requestAnimationFrame(step); };
+const stop = () => { if (frame) cancelAnimationFrame(frame); frame = null; btn.textContent = "Fly through"; };
+btn.addEventListener("click", () => {
+  if (frame) return stop();
+  map.easeTo({ center: CENTER, pitch: 60, duration: 1500 });
+  btn.textContent = "Stop";
+  frame = requestAnimationFrame(step);
+});
+document.getElementById("reset").addEventListener("click", () => {
+  stop();
+  map.fitBounds(BOUNDS, { padding: 40, pitch: 60, bearing: 0 });
+});
+</script></body></html>
+"""
+
+
+def render_map_3d(
+    title: str,
+    bbox: list[float],
+    layer: dict[str, Any],
+    subtitle: str = "",
+    out_path: str | None = None,
+    exaggeration: float = 1.5,
+) -> dict[str, Any]:
+    """Write a self-contained 3D terrain fly-through with imagery draped over it.
+
+    layer is ONE layer in render_map's shape — either
+      {"type": "item", "catalog": ..., "collection_id": ..., "item_id": ...,
+       "assets": [...], "bbox": [w, s, e, n]}
+    or {"type": "raster", "tiles": "https://..{z}/{x}/{y}.."}.
+    Terrain comes from the keyless AWS Terrarium elevation tiles, so the HTML
+    is shareable as-is. exaggeration (1.0-3.0) sets the vertical stretch; the
+    artifact carries a live slider, a fly-through orbit, and a reset button.
+    Best over relief-rich areas — pick the lowest-cloud recent scene first.
+    """
+    # ponytail: one draped layer; add a second when a real ask needs it
+    resolved = _resolve_layer(layer)
+    style = {
+        "version": 8,
+        "sources": {
+            "basemap": {
+                "type": "raster",
+                "tiles": ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"],
+                "tileSize": 256,
+                "attribution": "&copy; OpenStreetMap &copy; CARTO",
+            },
+            "imagery": {
+                "type": "raster",
+                "tiles": [resolved["tiles"]],
+                "tileSize": 256,
+                **({"bounds": resolved["bounds"]} if resolved.get("bounds") else {}),
+            },
+            "dem": {
+                "type": "raster-dem",
+                "tiles": [TERRAIN_TILES],
+                "tileSize": 256,
+                "encoding": "terrarium",
+                "maxzoom": 15,
+            },
+        },
+        "layers": [
+            {"id": "basemap", "type": "raster", "source": "basemap"},
+            {
+                "id": "imagery",
+                "type": "raster",
+                "source": "imagery",
+                "paint": {"raster-opacity": resolved.get("opacity", 1)},
+            },
+        ],
+    }
+    html = (
+        _MAP3D_TEMPLATE.replace("__TITLE__", title)
+        .replace("__SUBTITLE__", subtitle)
+        .replace("__STYLE__", json.dumps(style))
+        .replace("__BBOX__", json.dumps(bbox))
+        .replace("__EXAGGERATION__", json.dumps(round(float(exaggeration), 2)))
+    )
+    out_path = _artifact_path(out_path, "map3d", title)
+    Path(out_path).write_text(html, encoding="utf-8")
+    return {"path": out_path, "title": title}
 
 
 def compare_dates(
