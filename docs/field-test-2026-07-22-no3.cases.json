@@ -1,0 +1,51 @@
+{
+  "title": "groundstation field test №3 — the stack layer, everywhere",
+  "heading": "THE FIELD TEST №3",
+  "sub": "groundstation · 3 prompts · the stack layer on every artifact surface · July 22, 2026 · Development Seed labs",
+  "lede": "Epic G put the stack layer on interactive maps. G.3 finishes the job: the 3D fly-through and the postcard get it too, and every claim in the panel is now a fact the artifact actually knows — terrain only when terrain is under the pixels, geocoders only when the pipeline geocoded, no map engine on a still card. Each example below ran for real on July 22.",
+  "stats": [
+    {"value": "3/3", "label": "artifact surfaces carrying the stack layer"},
+    {"value": "0", "label": "claims a panel makes without the fact behind it"},
+    {"value": "63", "label": "offline checks passing, 3 new for G.3"}
+  ],
+  "rounds": [
+    {
+      "name": "Round 1 — one prompt per surface",
+      "cases": [
+        {
+          "tag": "3d + stack",
+          "who": "the roadshow",
+          "prompt": "Mount Rainier in 3D, and show me what's behind the rendering.",
+          "answer": "A <b>0.0002%-cloud July 13 scene</b> draped on Terrarium terrain, panel open: Earth Search, <b>AWS Terrarium terrain</b>, COG range requests, TiTiler, MapLibre. The terrain entry only appears here — a 2D map never claims it.",
+          "artifact": "../demo/map3d-rainier-stack.html",
+          "artifact_label": "live 3D ↗",
+          "image": "img/w3-map3d-rainier-stack.jpg",
+          "shows": "render_map_3d stack_layer=True, new in G.3: the terrain fact goes live"
+        },
+        {
+          "tag": "postcard + stack",
+          "who": "the share card",
+          "prompt": "Postcard of that Rainier scene, with the stack printed on the back.",
+          "answer": "The listing prints as static credit lines: <b>Earth Search, COG range requests, TiTiler, STAC, cloud object storage</b> — and no MapLibre, because a still card runs no map engine. No links either, so the card keeps its no-live-URLs guarantee.",
+          "artifact": "../demo/postcard-rainier-stack.html",
+          "artifact_label": "live postcard ↗",
+          "image": "img/w3-postcard-rainier-stack.jpg",
+          "learning": "the postcard previews the full scene, so the mountain sits small in a big tile — framing to the asked-for AOI is the natural next postcard improvement.",
+          "shows": "render_postcard stack_layer=True: the back-of-postcard form from the design doc"
+        },
+        {
+          "tag": "honest facts",
+          "who": "the harvest",
+          "prompt": "How did the Palouse change over the last month?",
+          "answer": "compare_dates geocoded the place itself, so its swipe map's panel truthfully claims <b>Gazet and Nominatim</b> alongside the raster pipeline. The answer is wheat harvest: <b>NDVI 0.485 → 0.388, down 19.8%</b> between June 22 and July 19.",
+          "artifact": "../demo/map-palouse--washington---2026-07-19-vs-2026-06-22.html",
+          "artifact_label": "live swipe map ↗",
+          "image": "img/w3-map-palouse-stack.jpg",
+          "shows": "stack_facts plumbing: panels only claim what the pipeline actually did"
+        }
+      ]
+    }
+  ],
+  "repro": "git clone https://github.com/dannybauman/groundstation && cd groundstation\nuv run evals/unit_checks.py               # 63 offline checks, 3 new for G.3\nuv run scripts/field_test.py docs/field-test-2026-07-22-no3.cases.json   # rebuild this page",
+  "footer": "groundstation · Development Seed labs · field test №3, July 22 2026"
+}
