@@ -506,6 +506,11 @@ def t_snapshot_card_templates_and_facts():
     assert "MapLibre GL" in listing and "NASA EONET" in listing
     single = tools._stack_credit_for("earth-search", "sentinel-2-l2a", "titiler.xyz")
     assert "MapLibre" not in single and "EONET" not in single
+    # viewport matches the bbox shape, so the frame IS the asked-for area
+    w, h = tools._card_viewport([0, 45, 2, 45.7])  # wide box at 45N
+    assert w == 1200 and 550 <= h < 700
+    assert tools._card_viewport([0, 0, 1, 3])[1] == int(1200 * 1.6)  # tall boxes clamp
+    assert tools._card_viewport(None) == (1200, 900)
 
 
 def t_brand_tokens_in_all_templates():

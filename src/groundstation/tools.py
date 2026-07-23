@@ -916,6 +916,19 @@ def _artifact_path(out_path: str | None, prefix: str, title: str) -> str:
     return str(out_dir / f"{prefix}-{slugify(title)}.html")
 
 
+def _card_viewport(bbox: list[float] | None, width: int = 1200) -> tuple[int, int]:
+    """Viewport aspect-matched to the bbox (lat-corrected), so the frame IS
+    the asked-for area instead of a fixed 4:3 window showing extra."""
+    import math
+
+    if not bbox:
+        return width, 900
+    dlon = max(bbox[2] - bbox[0], 1e-6)
+    dlat = max(bbox[3] - bbox[1], 1e-6)
+    aspect = dlat / (dlon * math.cos(math.radians((bbox[1] + bbox[3]) / 2)))
+    return width, int(width * min(1.6, max(0.55, aspect)))
+
+
 def _snapshot_artifact(html_path: str, width: int = 1200, height: int = 900) -> bytes:
     """Rasterize an artifact for a postcard: headless Chromium, chrome hidden.
 
@@ -940,6 +953,15 @@ def _snapshot_artifact(html_path: str, width: int = 1200, height: int = 900) -> 
             page = browser.new_page(viewport={"width": width, "height": height})
             page.goto(Path(html_path).resolve().as_uri() + "#clean")
             loaded = "window.gsMaps && window.gsMaps.every(m => m.loaded())"
+            page.wait_for_function(loaded, timeout=90000)
+            # re-fit to the exact bbox, zero padding, keeping any pitch —
+            # the load-time fit pads 40px and leaks area beyond the data
+            page.evaluate(
+                "window.gsMaps.forEach(m => { try { m.fitBounds("
+                "[[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],"
+                "{ padding: 0, duration: 0, pitch: m.getPitch(), bearing: m.getBearing() }"
+                ") } catch (e) {} })"
+            )
             page.wait_for_function(loaded, timeout=90000)
             if page.evaluate("!!document.getElementById('loadmore')"):
                 page.evaluate("document.getElementById('loadmore').click()")
@@ -1037,6 +1059,7 @@ def _artifact_postcard(
     facts: dict[str, Any],
     layers: list[dict[str, Any]],
     stack_layer: bool,
+    bbox: list[float] | None = None,
 ) -> tuple[str | None, str | None]:
     """Snapshot a rendered artifact into a share card. Returns (card_path, note).
 
@@ -1047,7 +1070,8 @@ def _artifact_postcard(
     import datetime as dt
 
     try:
-        png = _snapshot_artifact(artifact_path)
+        w, h = _card_viewport(bbox)
+        png = _snapshot_artifact(artifact_path, w, h)
     except RuntimeError as e:
         return None, str(e)
     except Exception as e:
@@ -1155,7 +1179,7 @@ def render_map(
         out["note"] = stack_note
     if postcard:
         card_path, card_note = _artifact_postcard(
-            out_path, postcard, _map_stack_facts(resolved, layers, stack_facts), layers, stack_layer
+            out_path, postcard, _map_stack_facts(resolved, layers, stack_facts), layers, stack_layer, bbox
         )
         if card_path:
             out["postcard_path"] = card_path
@@ -1393,7 +1417,7 @@ def render_map_3d(
         card_path, card_note = _artifact_postcard(
             out_path, postcard,
             _map_stack_facts([resolved, *extras], all_layers, {"terrain": True}),
-            all_layers, stack_layer,
+            all_layers, stack_layer, bbox,
         )
         if card_path:
             out["postcard_path"] = card_path
