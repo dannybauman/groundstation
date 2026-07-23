@@ -1,0 +1,126 @@
+{
+  "title": "groundstation field test №2 — the wave edition, actually run",
+  "heading": "THE FIELD TEST №2",
+  "sub": "groundstation · 10 prompts · one day of new features · July 22, 2026 · Development Seed labs",
+  "lede": "Every example below ran for real against live data on July 22: real STAC searches, real event feeds, real weather, real artifacts you can open. The focus is everything that shipped in the last day — 3D fly-throughs, auto-mosaics, postcards, the stack layer, local-model synthesis, scheduled sweeps — pointed at what is actually happening on Earth this week.",
+  "stats": [
+    {"value": "10/10", "label": "prompts answered with working artifacts"},
+    {"value": "7", "label": "features shipped today, all exercised"},
+    {"value": "11", "label": "live wildfires on one Oregon map"},
+    {"value": "0", "label": "API keys needed for any of it"}
+  ],
+  "rounds": [
+    {
+      "name": "Round 1 — the new artifacts, pointed at this week's Earth",
+      "cases": [
+        {
+          "tag": "3d fly-through",
+          "who": "fire country",
+          "prompt": "Show me the terrain around the BROOK fire in Shasta County in 3D — I want to understand what the crews are working in.",
+          "answer": "Found the live EONET fire, picked a <b>0.01%-cloud July 7 scene at 98.2% coverage</b>, and draped it over real terrain at 1.8× exaggeration. The canyon country east of the Sacramento Valley reads instantly — this is steep ground.",
+          "artifact": "../demo/map3d-brook-fire-shasta.html",
+          "artifact_label": "live 3D ↗",
+          "image": "img/w2-map3d-brook-fire-shasta.jpg",
+          "shows": "render_map_3d, new today: live event → terrain answer in one call"
+        },
+        {
+          "tag": "3d fly-through",
+          "who": "the reference case",
+          "prompt": "Give me a 3D fly-through of Torres del Paine.",
+          "answer": "Southern-hemisphere winter light on the towers: <b>1.6% cloud, 96.5% coverage, July 10</b>. Exaggeration slider, orbiting fly-through, reset view — all in a self-contained page with keyless terrain tiles that shares as-is.",
+          "artifact": "../demo/map3d-torres-del-paine.html",
+          "artifact_label": "live 3D ↗",
+          "image": "img/w2-map3d-torres-del-paine.jpg",
+          "shows": "the page that used to be hand-written per request is now one tool call"
+        },
+        {
+          "tag": "auto-mosaic + stack",
+          "who": "the regression case",
+          "prompt": "Show me Calgary. All of it. And show me what's behind the map.",
+          "answer": "Calgary spans two UTM zones, so no single scene covers it. The search returned a <b>same-day two-tile set at 100% union coverage</b> without being asked twice, and the Stack toggle reveals the pipeline: Earth Search → COG range requests → TiTiler serving sentinel-2-l2a via titiler.xyz → MapLibre, each with a role badge and a kind-colored dot.",
+          "artifact": "../demo/map-calgary-full-coverage-stack.html",
+          "artifact_label": "live map + stack ↗",
+          "image": "img/w2-map-calgary-full-coverage-stack.jpg",
+          "shows": "full_coverage_set and stack_layer, both new today, on one artifact"
+        },
+        {
+          "tag": "live events",
+          "who": "wildfire season",
+          "prompt": "What's burning in north-central Oregon right now? Map every active fire over current imagery.",
+          "answer": "<b>Eleven live EONET fires</b> — the Hay Creek Complex, Rowe Creek Complex, and nine more across Gilliam, Sherman, Wasco, and Wheeler counties — as clickable markers over a <b>four-tile same-day mosaic (July 17, 100% union coverage)</b>. Weather context: 0.4mm of rain in the past week, 34.5°C ahead.",
+          "artifact": "../demo/map-hay-creek-complex.html",
+          "artifact_label": "live map ↗",
+          "image": "img/w2-map-hay-creek-complex.jpg",
+          "learning": "the first pass used the single best scene — 63.8% coverage. The auto-mosaic turned that into a four-tile 100% answer, which is exactly the reprompt it was built to remove.",
+          "shows": "auto-mosaic scaling past two tiles on a real fire complex"
+        },
+        {
+          "tag": "postcard",
+          "who": "share-ready",
+          "prompt": "Make me a postcard of the country the BROOK fire is burning in.",
+          "answer": "One card: the July 7 scene as <b>embedded pixels (nothing expires, nothing links out)</b>, place, date, caption, and the attribution block — Development Seed labs · STAC · TiTiler · sentinel-2-l2a via Element 84 Earth Search. Posting it anywhere stays a human call.",
+          "artifact": "../demo/postcard-shasta-brook-fire.html",
+          "artifact_label": "live postcard ↗",
+          "image": "img/w2-postcard-shasta-brook-fire.jpg",
+          "learning": "an iceberg postcard (A76C, South Atlantic) came back empty — Sentinel-2 doesn't acquire open ocean. The honest zero beat a wrong artifact.",
+          "shows": "render_postcard, new today: durable, attributed, safe to share"
+        }
+      ]
+    },
+    {
+      "name": "Round 2 — analysis, synthesis, and the machinery that runs alone",
+      "cases": [
+        {
+          "tag": "index postcard",
+          "who": "agriculture",
+          "prompt": "NDVI postcard of the Salinas Valley at the height of the growing season.",
+          "answer": "The valley floor glows green against the dry July hills: <b>NDVI mean 0.331, July 17, 3.3% cloud</b>, rendered with the rdylgn colormap and captioned so the colors explain themselves. Index cards take the same expression machinery as index map layers.",
+          "artifact": "../demo/postcard-salinas-ndvi.html",
+          "artifact_label": "live postcard ↗",
+          "image": "img/w2-postcard-salinas-ndvi.jpg",
+          "learning": "geocoding 'Salinas Valley' returned Salinas Valley State Prison — a 1km box. The region-scale sanity check in the skill caught it, and the AOI was widened to the actual valley.",
+          "shows": "band math + colormap on a shareable card"
+        },
+        {
+          "tag": "storm watch",
+          "who": "gulf coast",
+          "prompt": "Where is Tropical Storm Bertha, and what does the week look like for the Florida Panhandle coast?",
+          "answer": "Bertha's EONET position (July 21) mapped against the newest coastal scene, with the forward signal read honestly: <b>winds already easing (51 → 18 km/h) and under 7mm of rain across the whole week ahead</b> — this system is not the panhandle's problem this week. The best coastal scene covers 49.8% and the answer says so.",
+          "artifact": "../demo/map-tropical-storm-bertha.html",
+          "artifact_label": "live map ↗",
+          "image": "img/w2-map-tropical-storm-bertha.jpg",
+          "shows": "events + forward weather + coverage honesty in one read"
+        },
+        {
+          "tag": "local model",
+          "who": "runs on this laptop",
+          "prompt": "Brief me on Chelan County — but synthesize it on the local model, not the cloud.",
+          "answer": "Ollama's qwen2.5-coder:7b wrote a coherent brief on this laptop: the two named wildfires, the NDVI slip, the heat. Then <b>the eval gate failed it — dates and the NDVI number weren't cited to spec</b> — which is the design working: local output gets the same quality bar as cloud output, and a sweep would have withheld it from Slack rather than posting it.",
+          "learning": "the gate is what makes 'run it locally when possible' safe rather than aspirational. A failing local brief degrades to the claude path, then to the deterministic brief — the chain never returns nothing.",
+          "shows": "local synthesis + preflight + eval gate, all new today"
+        },
+        {
+          "tag": "scheduled sweep",
+          "who": "nobody at the keyboard",
+          "prompt": "Run the morning fleet sweep, dry-run the Slack post.",
+          "answer": "Four areas triaged in one run: <b>Chelan WATCH</b> (same two uncontained fires, NDVI 0.626 → 0.609 under record heat), <b>Laredo WATCH</b> (day seven of a 42.4°C heat wave, NDVI down 19.6%), <b>Efate CALM</b>. Chelan's brief opened with 'steady state since the last run today' — it remembers yesterday. The payload printed instead of posting.",
+          "artifact": "../demo/morning-sweep-2026-07-22.html",
+          "artifact_label": "sweep index ↗",
+          "image": "img/w2-morning-sweep.jpg",
+          "learning": "Barotse's Slack line read like an all-clear under a WATCH tag: the payload quoted the TL;DR's first sentence and the reason lived in sentence two. Fixed the same night (the line now prefers the sentence naming the alert level), which is the field test doing its job.",
+          "shows": "lockfile, log, eval-gated posting, day-over-day memory"
+        },
+        {
+          "tag": "first run",
+          "who": "the next machine",
+          "prompt": "bash scripts/doctor.sh — on a machine that just cloned this.",
+          "answer": "The preflight walks the chain in the order it breaks — uv, server env, CLI, plugin wiring, endpoints, and <b>new today: whether the copy Claude runs is current</b>, printing the exact update command when it's behind. On a TTY it wears the new masthead and status colors; piped, it stays byte-clean plain text.",
+          "learning": "plugin installs are cached per version, so six merged PRs deliver nothing until the version bumps and the user updates — the doctor now says which copy is running and how to move.",
+          "shows": "the whole first-run and upgrade path, hardened today"
+        }
+      ]
+    }
+  ],
+  "repro": "git clone https://github.com/dannybauman/groundstation && cd groundstation\nbash scripts/doctor.sh                    # walks the setup chain, prints the fix\nuv run evals/unit_checks.py               # 59 offline checks\nuv run evals/run_evals.py                 # live checks against real endpoints\nuv run scripts/field_test.py docs/field-test-2026-07-22.cases.json   # rebuild this page",
+  "footer": "field test №2 · July 22, 2026 · built with the field-test factory (scripts/field_test.py) · groundstation · Development Seed labs"
+}
