@@ -92,6 +92,17 @@ def t_map():
     assert "titiler.xyz/stac/tiles" in html and "maplibre" in html
 
 
+@check("postcard preview fetch returns an embeddable PNG")
+def t_postcard():
+    it = t_search.item
+    p = tools.preview_item("earth-search", it["collection"], it["id"], max_size=1024)
+    r = tools._client.get(p["preview_url"], timeout=90)
+    assert r.status_code == 200 and r.headers.get("content-type", "").startswith("image/png")
+    card = tools._postcard_html(r.content, "eval place", it["datetime"][:10], it["collection"],
+                                tools._catalog_source("earth-search", it["collection"]))
+    assert "data:image/png;base64," in card and len(card) < 5 * 1024 * 1024
+
+
 @check("active_events returns EONET and GDACS data")
 def t_events():
     ev = tools.active_events(days=30)
@@ -122,7 +133,7 @@ def t_pc():
 
 
 if __name__ == "__main__":
-    checks = [t_geocode, t_datasets, t_search, t_preview, t_stats, t_map, t_events, t_weather, t_veda, t_pc]
+    checks = [t_geocode, t_datasets, t_search, t_preview, t_stats, t_map, t_postcard, t_events, t_weather, t_veda, t_pc]
     for fn in checks:
         fn()
     print(f"\n{len(checks) - len(FAILURES)}/{len(checks)} passed")

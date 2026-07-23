@@ -9,7 +9,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 ## First: use the tools, never route around them
 
-The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 12 tools in about a second.
+The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 13 tools in about a second.
 
 - **Wait and retry discovery** a few times over ~10-15 seconds before doing anything else. The tools almost always appear.
 - **Never fall back to raw STAC / TiTiler / FIRMS / `httpx` calls to work around missing tools.** Hand-rolling the pipeline gives a worse answer and hides a fixable setup problem. Missing tools are a thing to fix, not to route around.
@@ -46,6 +46,16 @@ The value here is the groundstation tools. If they aren't visible yet, the serve
 - **Region-scale place names** (a coffee zone, a floodplain, a corridor): geocoding may return a tiny point-feature bbox. Sanity-check the bbox size against the question's scale and widen it yourself before searching, or geocode a better-known containing name.
 - Comparing two dates: search with two `datetime_range` windows, then `render_map` with both items as layers (newest on top) so the user can toggle. Name layers with their dates.
 - VEDA layers usually want `assets=["cog_default"]` plus a `rescale`/`colormap_name`; check the collection's `renders` metadata via `describe_collection` when unsure.
+
+## Postcards
+
+Triggers: "postcard", "share card", "something I can post", "can I put this on LinkedIn", any result the user is visibly proud of.
+
+- `render_postcard(catalog, collection_id, item_id, place, date, ...)` writes one card: the scene as embedded pixels, the place and date, an optional caption, and the attribution block (Development Seed labs, STAC, TiTiler, the data source, the collection license).
+- Pixels are embedded rather than linked on purpose. A map artifact points at live tiles, and a Planetary Computer URL carries a signed token that dies within the hour, so a shared page goes blank. A postcard keeps working.
+- Index cards work the same way as index map layers: pass `expression` and `colormap_name`.
+- The license line only appears when the collection declares a real one. Earth Search says `proprietary` for Sentinel-2, which is STAC's placeholder rather than the actual terms, so the card leaves it off instead of printing something misleading.
+- Where and whether to post is the user's decision, never yours. Hand them the file and say what's in it.
 
 ## Monitoring and briefings
 

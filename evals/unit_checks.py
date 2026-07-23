@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import sys
@@ -110,6 +111,52 @@ def t_render_map_compare_override():
         tools.render_map("t", [0, 0, 1, 1], layers, out_path=out, compare=True)
         html = Path(out).read_text(encoding="utf-8")
         assert "const COMPARE = true" in html
+
+
+# smallest valid PNG (1x1) — the card only has to embed bytes, not decode them
+CANNED_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def _postcard(**kw) -> str:
+    return tools._postcard_html(
+        CANNED_PNG, "Torres del Paine", "2026-07-10", "sentinel-2-l2a",
+        tools._catalog_source("earth-search", "sentinel-2-l2a"), **kw
+    )
+
+
+def t_postcard_embeds_pixels_not_urls():
+    html = _postcard()
+    assert "data:image/png;base64,iVBOR" in html
+    # no live imagery URLs at all: nothing to expire, nothing to 404
+    assert "token=" not in html and "sas=" not in html and "https://" not in html
+
+
+def t_postcard_attribution_block():
+    html = _postcard(license_="proprietary")
+    assert "Development Seed" in html and "STAC" in html and "TiTiler" in html
+    assert "sentinel-2-l2a via Element 84 Earth Search" in html
+    assert "license: proprietary" in html
+    assert "license:" not in _postcard()  # omitted, not left blank
+
+
+def t_postcard_license_placeholder_omitted():
+    # STAC's "proprietary" is a missing-SPDX-id marker, not a terms claim
+    assert tools._shareable_license("proprietary") is None
+    assert tools._shareable_license("various") is None
+    assert tools._shareable_license(None) is None
+    assert tools._shareable_license("CC-BY-4.0") == "CC-BY-4.0"
+
+
+def t_postcard_no_local_paths_and_small():
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "card.html"
+        out.write_text(_postcard(caption="First light after the storm."), encoding="utf-8")
+        html = out.read_text(encoding="utf-8")
+        assert "/Users/" not in html and "file://" not in html
+        assert "First light after the storm." in html
+        assert out.stat().st_size < 5 * 1024 * 1024
 
 
 def t_pick_best_scene_prefers_coverage():
