@@ -1433,13 +1433,20 @@ _POSTCARD_TEMPLATE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 __BRAND__
-  body { margin: 0; padding: 32px 16px; background: var(--paper);
-    font: 15px/1.5 "Roboto", system-ui, sans-serif; color: var(--ink); }
-  .card { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 12px;
-    border-top: 3px solid var(--accent);
+  body { margin: 0; padding: 28px 16px; background: var(--paper); box-sizing: border-box;
+    font: 15px/1.5 "Roboto", system-ui, sans-serif; color: var(--ink);
+    min-height: 100vh; display: grid; place-items: center; }
+  /* the card is a postcard spread: picture beside the writing when the
+     viewport allows, wrapped above it when narrow — and the picture always
+     fits the screen (86vh cap; the ink mat letterboxes odd aspects) */
+  .card { display: flex; flex-wrap: wrap; max-width: min(1180px, 96vw); background: #fff;
+    border-radius: 12px; border-top: 3px solid var(--accent);
     overflow: hidden; box-shadow: 0 2px 14px rgba(0,0,0,.15); }
-  .card img { display: block; width: 100%; background: var(--ink); }
-  .body { padding: 18px 22px 22px; }
+  .fig { flex: 1 1 420px; min-width: min(420px, 100%); background: var(--ink); display: flex; }
+  .card img { display: block; width: 100%; height: auto; max-height: 86vh;
+    object-fit: contain; margin: auto; }
+  .body { flex: 1 1 300px; padding: 20px 24px 22px; display: flex; flex-direction: column; }
+  .credit { margin-top: auto; }
   h1 { font: 700 22px/1.2 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 4px; }
   .meta { color: var(--mid); font-size: 14px; margin: 0 0 12px; }
   .caption { margin: 0 0 16px; }
@@ -1450,7 +1457,7 @@ __BRAND__
   .stack-list b.ds { color: var(--accent); }
 </style></head><body>
 <div class="card">
-  <img src="data:image/png;base64,__IMAGE__" alt="__PLACE__, __DATE__">
+  <div class="fig"><img src="data:image/png;base64,__IMAGE__" alt="__PLACE__, __DATE__"></div>
   <div class="body">
     <h1>__PLACE__</h1>
     <p class="meta">__DATE__ · __COLLECTION__</p>
