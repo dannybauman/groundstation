@@ -99,6 +99,39 @@ The paired skill in `skills/earth-data/` carries the judgment layer: which catal
 
 The briefing engine inverts the interaction — instead of you asking the right question, Earth reports in: fresh scenes, events, weather, an NDVI change signal against last month, a CALM/WATCH/ACT alert level, and suggested next steps, as a shareable HTML page. It keeps per-AOI memory so "what changed" means changed *since the last run*, fleet mode writes a triaged morning-sweep index, and `--slack-webhook` delivers the summary where people already look. Cron it and it runs while nobody's watching.
 
+### Scheduled sweeps
+
+`briefing/run.sh` is the unattended entrypoint (unix only): it takes a lock so overlapping runs skip cleanly, appends everything to `briefing/state/run.log`, and runs the fleet. Every brief is checked by `evals/brief_checks.py` before posting — failing briefs are withheld from the Slack message and the post says "N of M areas, K withheld by checks" rather than pretending. A CALM day after a WATCH day says so in the brief, guaranteed, not just prompted.
+
+Dry-run first, then schedule:
+
+```bash
+SLACK_WEBHOOK_URL=https://hooks.slack.com/... bash briefing/run.sh --slack-dry-run
+```
+
+cron (every morning at 7):
+
+```
+0 7 * * * SLACK_WEBHOOK_URL=https://hooks.slack.com/... /path/to/groundstation/briefing/run.sh
+```
+
+launchd (macOS): save as `~/Library/LaunchAgents/org.groundstation.sweep.plist`, then `launchctl load` it.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist SYSTEM "file://localhost/System/Library/DTDs/PropertyList.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>org.groundstation.sweep</string>
+  <key>ProgramArguments</key><array>
+    <string>/bin/bash</string><string>/path/to/groundstation/briefing/run.sh</string>
+  </array>
+  <key>EnvironmentVariables</key><dict>
+    <key>SLACK_WEBHOOK_URL</key><string>https://hooks.slack.com/...</string>
+  </dict>
+  <key>StartCalendarInterval</key><dict><key>Hour</key><integer>7</integer><key>Minute</key><integer>0</integer></dict>
+</dict></plist>
+```
+
 ## Be a good neighbor: titiler.xyz
 
 All tiling, previews, and pixel math ride **titiler.xyz** by default — a free, shared community endpoint that Development Seed runs as a demo. It rate-limits (HTTP 429) under heavy use, and a day of agent runs or a room full of people scanning places can hit that. Built-in mitigations: map artifacts carry scene footprint `bounds` so browsers never request out-of-footprint tiles, and statistics use small `max_size` reads.
