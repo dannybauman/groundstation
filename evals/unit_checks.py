@@ -478,6 +478,19 @@ def t_brand_tokens_in_all_templates():
     assert "--accent: #CF3F02" in _postcard()
 
 
+def t_preview_bbox_crops_to_aoi():
+    # the weird-postcard fix: bbox routes to the tiler's part endpoint so the
+    # card frames the subject, not the whole scene with its nodata edge
+    p = tools.preview_item("earth-search", "sentinel-2-l2a", "X", bbox=[-121.88, 46.73, -121.64, 46.97])
+    assert "/stac/bbox/-121.88,46.73,-121.64,46.97.png" in p["preview_url"]
+    assert "assets=visual" in p["preview_url"]
+    v = tools.preview_item("veda", "c", "i", assets=["cog_default"], bbox=[1, 2, 3, 4])
+    assert "/items/i/bbox/1,2,3,4.png" in v["preview_url"]
+    assert "/stac/preview.png" in tools.preview_item("earth-search", "sentinel-2-l2a", "X")["preview_url"]
+    assert tools._intersect_bbox([0, 0, 2, 2], [1, 1, 3, 3]) == [1, 1, 2, 2]
+    assert tools._intersect_bbox([0, 0, 1, 1], [2, 2, 3, 3]) is None
+
+
 def t_pick_best_scene_prefers_coverage():
     items = [
         {"id": "full", "bbox": [0, 0, 1, 1], "cloud_cover": 5.0},
