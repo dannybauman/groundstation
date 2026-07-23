@@ -6,12 +6,23 @@
 set -u
 cd "$(dirname "$0")/.."
 
-pass=0; warn=0; fail=0
-ok()   { echo "  [ok] $1"; pass=$((pass+1)); }
-bad()  { echo "  [XX] $1"; echo "       fix: $2"; fail=$((fail+1)); }
-note() { echo "  [!!] $1"; warn=$((warn+1)); }
+# color only on a TTY (and never under NO_COLOR) — piped output stays plain.
+# Status colors: green ok, red broken, yellow check; the orange accent is the
+# one hue shared with the artifact brand palette.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_OK=$'\033[32m'; C_BAD=$'\033[31m'; C_NOTE=$'\033[33m'; C_ACC=$'\033[38;5;166m'; C_DIM=$'\033[2m'; C_R=$'\033[0m'
+else
+  C_OK=""; C_BAD=""; C_NOTE=""; C_ACC=""; C_DIM=""; C_R=""
+fi
 
-echo "groundstation doctor"
+pass=0; warn=0; fail=0
+ok()   { echo "  ${C_OK}[ok]${C_R} $1"; pass=$((pass+1)); }
+bad()  { echo "  ${C_BAD}[XX]${C_R} $1"; echo "       ${C_BAD}fix:${C_R} $2"; fail=$((fail+1)); }
+note() { echo "  ${C_NOTE}[!!]${C_R} $1"; warn=$((warn+1)); }
+
+echo "     .  *      ${C_ACC}groundstation${C_R}"
+echo "  --=${C_ACC}<o>${C_R}=--   ${C_DIM}Development Seed labs · preflight${C_R}"
+echo "     '"
 echo
 
 echo "1. uv (the server launches via 'uv run')"

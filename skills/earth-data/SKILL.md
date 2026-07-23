@@ -29,6 +29,7 @@ The value here is the groundstation tools. If they aren't visible yet, the serve
 2. Pick data: `search_datasets` / `describe_collection` if you're not sure what exists, otherwise go straight to `search_imagery`.
 3. Analyze: `preview_item` for eyes-on, `compute_statistics` for numbers.
 4. **Always end spatial answers with `render_map`** and give the user the file path. A map they can open and share beats prose.
+5. Pass `stack_layer=True` to `render_map` when the user asks how it works, what's behind it, or the map is for showing DS/open-source capability — it adds a toggleable panel naming the actual tools, formats, and catalogs on screen.
 
 ## Which catalog for what
 
