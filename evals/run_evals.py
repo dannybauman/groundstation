@@ -59,6 +59,26 @@ def t_search():
     t_search.item = r["items"][0]
 
 
+@check("search_imagery assembles a full-coverage set for Calgary (two UTM zones)")
+def t_full_coverage_calgary():
+    # the Kevin regression: no single S2 tile covers Calgary, ever — the
+    # answer must be a same-pass set, not the freshest cropped scene.
+    # Geometry/coverage assertions only; cloud values are weather, not a test.
+    r = tools.search_imagery(
+        "earth-search", ["sentinel-2-l2a"],
+        bbox=[-114.32, 50.84, -113.86, 51.21],
+        datetime_range=tools.last_days_window(30), limit=20,
+    )
+    assert r["count"] > 0
+    assert all((it.get("covers_aoi_pct") or 0) < 99 for it in r["items"])
+    full = r.get("full_coverage_set")
+    assert full, "expected a full_coverage_set for a two-zone city"
+    assert len(full["items"]) >= 2
+    assert len({i["collection"] for i in full["items"]}) == 1
+    assert len({i["datetime"][:10] for i in full["items"]}) == 1
+    assert full["union_covers_aoi_pct"] >= 99.0
+
+
 @check("preview_item URL returns a PNG")
 def t_preview():
     import httpx
@@ -121,8 +141,46 @@ def t_pc():
     assert "preview_url" in p
 
 
+@check("local synth brief passes brief_checks (loud SKIP without an endpoint)")
+def t_local_synth_live():
+    import os
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "briefing"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import httpx
+
+    import brief
+    import brief_checks
+
+    url = os.environ.get("GROUNDSTATION_LOCAL_URL", "http://localhost:11434/v1").rstrip("/")
+    model = os.environ.get("GROUNDSTATION_LOCAL_MODEL")
+    try:
+        httpx.get(f"{url}/models", timeout=2)
+    except Exception:
+        print(f"      SKIP local-synth: no endpoint at {url}")
+        return
+    if not model:
+        print("      SKIP local-synth: GROUNDSTATION_LOCAL_MODEL not set")
+        return
+    fixtures = sorted(Path(__file__).resolve().parents[1].glob("demo/*.data.json"))
+    assert fixtures, "no demo/*.data.json fixture to synthesize from"
+    data = json.loads(fixtures[0].read_text(encoding="utf-8"))
+    os.environ["GROUNDSTATION_LLM"] = "local"
+    try:
+        md = brief._synthesize_local(brief.SYNTH_PROMPT + json.dumps(data, default=str))
+    finally:
+        os.environ.pop("GROUNDSTATION_LLM", None)
+    assert md, "local endpoint up but synthesis declined or failed"
+    with tempfile.TemporaryDirectory() as d:
+        mp, dp = Path(d) / "b.md", Path(d) / "b.data.json"
+        mp.write_text(md, encoding="utf-8")
+        dp.write_text(json.dumps(data), encoding="utf-8")
+        problems = brief_checks.check_brief(mp, dp)
+    assert problems == [], f"local brief failed checks: {problems}"
+
+
 if __name__ == "__main__":
-    checks = [t_geocode, t_datasets, t_search, t_preview, t_stats, t_map, t_events, t_weather, t_veda, t_pc]
+    checks = [t_geocode, t_datasets, t_search, t_full_coverage_calgary, t_preview, t_stats, t_map, t_events, t_weather, t_veda, t_pc, t_local_synth_live]
     for fn in checks:
         fn()
     print(f"\n{len(checks) - len(FAILURES)}/{len(checks)} passed")

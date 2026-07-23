@@ -58,6 +58,52 @@ def t_coverage_degenerate_inputs():
     aoi = [-114.3, 50.8, -113.8, 51.2]
     assert _bbox_coverage_pct(aoi, None) is None
     assert _bbox_coverage_pct(aoi, [-115.0]) is None
+
+
+def _fcs_item(id_, day, bbox, collection="sentinel-2-l2a"):
+    return {"id": id_, "datetime": f"{day}T18:30:00Z", "bbox": bbox, "collection": collection}
+
+
+def t_full_coverage_set_two_halves():
+    aoi = [-114.3, 50.8, -113.8, 51.2]
+    west = _fcs_item("west", "2026-07-19", [-115.0, 50.0, -114.0, 52.0])
+    east = _fcs_item("east", "2026-07-19", [-114.1, 50.0, -113.0, 52.0])  # overlaps west
+    got = tools.find_full_coverage_set([west, east], aoi)
+    assert got and {i["id"] for i in got["items"]} == {"west", "east"}
+    assert got["date"] == "2026-07-19" and got["union_covers_aoi_pct"] >= 99.0
+
+
+def t_full_coverage_set_single_covering_item():
+    aoi = [-114.3, 50.8, -113.8, 51.2]
+    full = _fcs_item("full", "2026-07-19", [-115.0, 50.0, -113.0, 52.0])
+    part = _fcs_item("part", "2026-07-19", [-115.0, 50.0, -114.0, 52.0])
+    got = tools.find_full_coverage_set([full, part], aoi)
+    assert got and [i["id"] for i in got["items"]] == ["full"]  # no free riders
+
+
+def t_full_coverage_set_never_mixes_days():
+    aoi = [-114.3, 50.8, -113.8, 51.2]
+    west = _fcs_item("west", "2026-07-19", [-115.0, 50.0, -114.0, 52.0])
+    east = _fcs_item("east", "2026-07-21", [-114.1, 50.0, -113.0, 52.0])
+    assert tools.find_full_coverage_set([west, east], aoi) is None
+
+
+def t_full_coverage_set_prefers_newest_full_day():
+    aoi = [-114.3, 50.8, -113.8, 51.2]
+    old = [
+        _fcs_item("ow", "2026-07-19", [-115.0, 50.0, -114.0, 52.0]),
+        _fcs_item("oe", "2026-07-19", [-114.1, 50.0, -113.0, 52.0]),
+    ]
+    newer_partial = _fcs_item("np", "2026-07-21", [-115.0, 50.0, -114.0, 52.0])
+    got = tools.find_full_coverage_set(old + [newer_partial], aoi)
+    assert got and got["date"] == "2026-07-19"  # completeness beats freshness
+
+
+def t_union_coverage_no_double_count():
+    aoi = [0.0, 0.0, 10.0, 10.0]
+    # two identical half-boxes: union is 50, not 100
+    half = [0.0, 0.0, 5.0, 10.0]
+    assert tools._union_coverage_pct(aoi, [half, half]) == 50.0
     assert _bbox_coverage_pct([-114.0, 51.0, -114.0, 51.0], [-115.0, 50.0, -113.0, 52.0]) is None
 
 
@@ -234,6 +280,112 @@ def t_run_sh_skips_when_lock_held():
         assert r.returncode == 0 and "already running" in r.stdout
     finally:
         lock.rmdir()
+
+
+# ---- local synthesis routing (stubbed endpoint on loopback, deterministic) ----
+
+import contextlib  # noqa: E402
+import os  # noqa: E402
+
+
+@contextlib.contextmanager
+def _env(**kv):
+    old = {k: os.environ.get(k) for k in kv}
+    os.environ.update({k: v for k, v in kv.items() if v is not None})
+    for k, v in kv.items():
+        if v is None:
+            os.environ.pop(k, None)
+    try:
+        yield
+    finally:
+        for k, v in old.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+
+def _stub_llm(content: str):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+
+    class H(BaseHTTPRequestHandler):
+        def _send(self, obj):
+            body = json.dumps(obj).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            self._send({"data": []})
+
+        def do_POST(self):
+            self._send({"choices": [{"message": {"content": content}}]})
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def t_local_synth_declines_without_model():
+    with _env(GROUNDSTATION_LOCAL_MODEL=None):
+        assert brief._synthesize_local("p") is None
+
+
+def t_local_synth_declines_oversize_prompt():
+    with _env(GROUNDSTATION_LOCAL_MODEL="m"):
+        assert brief._synthesize_local("x" * (brief.LOCAL_PROMPT_BUDGET_CHARS + 1)) is None
+
+
+def t_local_synth_declines_unreachable_endpoint():
+    with _env(GROUNDSTATION_LOCAL_MODEL="m", GROUNDSTATION_LOCAL_URL="http://127.0.0.1:9/v1"):
+        assert brief._synthesize_local("p") is None
+
+
+def t_local_synth_uses_local_and_strips_think():
+    srv = _stub_llm("<think>internal</think>## TL;DR\nCALM, quiet day.")
+    try:
+        url = f"http://127.0.0.1:{srv.server_address[1]}"
+        with _env(GROUNDSTATION_LLM="local", GROUNDSTATION_LOCAL_MODEL="m", GROUNDSTATION_LOCAL_URL=url):
+            out = brief.synthesize({"place": "t", "events": {"eonet": []}, "imagery": {"items": []}})
+        assert out.startswith("## TL;DR") and "<think>" not in out
+    finally:
+        srv.shutdown()
+
+
+def t_local_synth_everything_down_still_briefs():
+    # bogus local endpoint AND no claude CLI -> deterministic data-only brief
+    real_run = brief.subprocess.run
+
+    def no_cli(*a, **k):
+        raise FileNotFoundError("claude")
+
+    brief.subprocess.run = no_cli
+    try:
+        with _env(GROUNDSTATION_LLM="local", GROUNDSTATION_LOCAL_MODEL="m",
+                  GROUNDSTATION_LOCAL_URL="http://127.0.0.1:9/v1"):
+            out = brief.synthesize({"place": "t", "events": {"eonet": []}, "imagery": {"items": []}})
+        assert "## TL;DR" in out  # the floor holds
+    finally:
+        brief.subprocess.run = real_run
+
+
+def t_local_synth_claude_default_never_touches_local():
+    # default engine must not even look at local env; claude stubbed to succeed
+    real_run = brief.subprocess.run
+
+    class R:
+        returncode, stdout, stderr = 0, "## TL;DR\nvia claude", ""
+
+    brief.subprocess.run = lambda *a, **k: R()
+    try:
+        with _env(GROUNDSTATION_LLM=None, GROUNDSTATION_LOCAL_MODEL=None):
+            out = brief.synthesize({"place": "t", "events": {"eonet": []}, "imagery": {"items": []}})
+        assert out == "## TL;DR\nvia claude"
+    finally:
+        brief.subprocess.run = real_run
 
 
 if __name__ == "__main__":

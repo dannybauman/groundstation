@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -108,8 +109,63 @@ def md_to_html(md: str) -> str:
     return html
 
 
+# ponytail: Ollama silently truncates prompts past its default context and the
+# model never sees the instructions at the front — stay well under, route to
+# cloud when over. Chars, not tokens: a rough 3:1 margin is the point.
+LOCAL_PROMPT_BUDGET_CHARS = 24000
+
+
+def _synthesize_local(prompt: str) -> str | None:
+    """Rung-2 completion on a local OpenAI-compatible endpoint (Ollama / LM
+    Studio). Preflight then dispatch; any failure returns None so the caller
+    falls through to claude then the deterministic brief. Synthesis is the
+    only local task by design — see docs/adr-local-models.md."""
+    import httpx
+
+    url = os.environ.get("GROUNDSTATION_LOCAL_URL", "http://localhost:11434/v1").rstrip("/")
+    model = os.environ.get("GROUNDSTATION_LOCAL_MODEL")
+    if not model:
+        print("local synth skipped: GROUNDSTATION_LOCAL_MODEL not set", file=sys.stderr)
+        return None
+    if len(prompt) > LOCAL_PROMPT_BUDGET_CHARS:
+        print(
+            f"local synth skipped: prompt {len(prompt)} chars over {LOCAL_PROMPT_BUDGET_CHARS} budget",
+            file=sys.stderr,
+        )
+        return None
+    try:
+        # never start the host ourselves; a dead endpoint must fail in 2s, not hang
+        httpx.get(f"{url}/models", timeout=2)
+    except Exception as e:
+        print(f"local synth skipped: {url} unreachable ({e.__class__.__name__})", file=sys.stderr)
+        return None
+    try:
+        r = httpx.post(
+            f"{url}/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            },
+            timeout=120,
+        )
+        r.raise_for_status()
+        text = r.json()["choices"][0]["message"]["content"] or ""
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+        if text:
+            return text
+        print("local synth returned empty text; falling through", file=sys.stderr)
+    except Exception as e:
+        print(f"local synth failed ({e.__class__.__name__}); falling through", file=sys.stderr)
+    return None
+
+
 def synthesize(data: dict) -> str:
     prompt = SYNTH_PROMPT + json.dumps(data, default=str)
+    if os.environ.get("GROUNDSTATION_LLM", "claude") in ("local", "auto"):
+        out = _synthesize_local(prompt)
+        if out:
+            return out
     try:
         r = subprocess.run(
             ["claude", "-p", "--model", "sonnet"],
