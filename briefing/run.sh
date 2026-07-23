@@ -6,6 +6,10 @@
 set -u
 cd "$(dirname "$0")/.."
 
+# color only on a TTY (and never under NO_COLOR); cron/launchd and the log see plain text
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then C_ACC=$'\033[38;5;166m'; C_NOTE=$'\033[33m'; C_R=$'\033[0m'; else C_ACC=""; C_NOTE=""; C_R=""; fi
+[ -t 1 ] && echo "  --=${C_ACC}<o>${C_R}=--  groundstation sweep"
+
 LOCK="briefing/state/.run.lock"
 LOG="briefing/state/run.log"
 mkdir -p briefing/state
@@ -15,9 +19,9 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +120 2>/dev/null)" ]; then
     echo "reclaiming stale lock (>2h old)" >>"$LOG"
     rmdir "$LOCK" 2>/dev/null || true
-    mkdir "$LOCK" 2>/dev/null || { echo "already running; skipping"; exit 0; }
+    mkdir "$LOCK" 2>/dev/null || { echo "${C_NOTE}already running; skipping${C_R}"; exit 0; }
   else
-    echo "already running; skipping"
+    echo "${C_NOTE}already running; skipping${C_R}"
     exit 0
   fi
 fi

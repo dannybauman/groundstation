@@ -668,33 +668,90 @@ def tile_url_template(
 
 # ---------------------------------------------------------------- map artifact
 
+# DS brand tokens (devseed-poster system), shared by every artifact template.
+# Kind colors carry meaning: data blue, access ochre, tiling DS orange,
+# viz forest green, standard violet, infra gray — same semantics as the
+# terminal colors in scripts/doctor.sh.
+_BRAND_CSS = """  :root { --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --rule: #dedad4; --paper: #f7f4ef;
+    --k-data: #1d4e8f; --k-access: #7a5c2e; --k-tiling: #CF3F02; --k-viz: #2a5c45;
+    --k-standard: #6b4c8f; --k-infra: #4a4440; }"""
+
+# the stack layer chunk — injected into _MAP_TEMPLATE only when stack_layer=True,
+# so default artifacts carry zero extra bytes
+_STACK_CHUNK = """<button id="stack-toggle" aria-expanded="false">Stack</button>
+<aside id="stack" aria-label="Technology stack">
+  <h2>The stack behind this map</h2>
+  <p class="stack-sub">what is actually on screen, and the projects it flows through</p>
+  __ENTRIES__
+</aside>
+<style>
+  #stack-toggle { position: absolute; top: 12px; right: 52px; z-index: 4; font: 12px/1 "Roboto", system-ui, sans-serif;
+    letter-spacing: .08em; text-transform: uppercase; background: var(--paper); color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+  #stack-toggle:hover, #stack-toggle[aria-expanded="true"] { background: var(--accent); color: #fff; }
+  #stack { position: absolute; top: 0; right: 0; bottom: 40px; width: 330px; max-width: 88vw; z-index: 3;
+    background: var(--paper); color: var(--ink); font: 13px/1.5 "Roboto", system-ui, sans-serif;
+    border-left: 3px solid var(--accent); padding: 46px 16px 16px; overflow-y: auto;
+    transform: translateX(105%); transition: transform .22s ease; box-shadow: -2px 0 12px rgba(0,0,0,.12); }
+  #stack.open { transform: none; }
+  @media (prefers-reduced-motion: reduce) { #stack { transition: none; } }
+  #stack h2 { font: 700 15px/1.2 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 2px; }
+  #stack .stack-sub { margin: 0 0 12px; color: var(--mid); font-size: 11.5px; font-style: italic; }
+  .stack-group { font: 700 10px/1 "Roboto Mono", monospace; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--mid); border-bottom: 1px solid var(--rule); padding-bottom: 4px; margin: 14px 0 8px; }
+  .stack-entry { display: flex; gap: 8px; margin: 0 0 10px; }
+  .stack-entry .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
+  .dot.k-data { background: var(--k-data); } .dot.k-access { background: var(--k-access); }
+  .dot.k-tiling { background: var(--k-tiling); } .dot.k-viz { background: var(--k-viz); }
+  .dot.k-standard { background: var(--k-standard); } .dot.k-infra { background: var(--k-infra); }
+  .stack-name { font-weight: 600; }
+  .stack-name .role { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--accent); border: 1px solid currentColor; border-radius: 3px; padding: 2px 4px; margin-left: 6px;
+    vertical-align: 1px; }
+  .stack-entry p { margin: 2px 0; color: var(--ink); }
+  .stack-entry .inst { font: 11px/1.5 "Roboto Mono", monospace; color: var(--mid); }
+  .stack-entry a { color: var(--mid); font-size: 10.5px; text-decoration: none; border-bottom: 1px solid var(--rule); }
+  .stack-entry a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+</style>
+<script>
+  const _sb = document.getElementById("stack-toggle"), _sp = document.getElementById("stack");
+  _sb.addEventListener("click", () => {
+    const open = _sp.classList.toggle("open");
+    _sb.setAttribute("aria-expanded", String(open));
+  });
+</script>
+"""
+
 _MAP_TEMPLATE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>__TITLE__</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
 <style>
+__BRAND__
   html, body, #map { margin: 0; height: 100%; }
-  #panel { position: absolute; top: 12px; left: 12px; z-index: 2; background: rgba(255,255,255,.94);
-    padding: 12px 16px; border-radius: 10px; font: 14px/1.45 system-ui, sans-serif; max-width: 340px;
+  #panel { position: absolute; top: 12px; left: 12px; z-index: 2; background: rgba(247,244,239,.96);
+    color: var(--ink); border-top: 3px solid var(--accent);
+    padding: 12px 16px; border-radius: 0 0 10px 10px; font: 14px/1.45 "Roboto", system-ui, sans-serif; max-width: 340px;
     box-shadow: 0 2px 10px rgba(0,0,0,.18); }
-  #panel h1 { font-size: 15px; margin: 0 0 4px; }
-  #panel p { margin: 4px 0 8px; color: #444; }
+  #panel h1 { font: 700 15px/1.25 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 4px; }
+  #panel p { margin: 4px 0 8px; color: var(--mid); }
   #panel label { display: block; margin: 2px 0; cursor: pointer; }
-  #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px system-ui, sans-serif;
-    color: #333; background: rgba(255,255,255,.8); padding: 2px 8px; border-radius: 6px; }
+  #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
+    color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
   #mapL { position: absolute; inset: 0; z-index: 1; }
-  #divider { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: #10222e;
+  #divider { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: var(--ink);
     z-index: 3; cursor: ew-resize; touch-action: none; }
   #divider .knob { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 34px; height: 34px; border-radius: 50%; background: #10222e; color: #fff;
+    width: 34px; height: 34px; border-radius: 50%; background: var(--ink); color: #fff;
     display: flex; align-items: center; justify-content: center; font: 13px system-ui; }
-  .side-label { position: absolute; bottom: 52px; z-index: 2; background: rgba(255,255,255,.94);
-    padding: 4px 11px; border-radius: 6px; font: 12px system-ui, sans-serif; box-shadow: 0 1px 5px rgba(0,0,0,.15); }
+  .side-label { position: absolute; bottom: 52px; z-index: 2; background: rgba(247,244,239,.96); color: var(--ink);
+    padding: 4px 11px; border-radius: 6px; font: 12px "Roboto", system-ui, sans-serif; box-shadow: 0 1px 5px rgba(0,0,0,.15); }
 </style></head><body>
 <div id="map"></div>
 <div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div></div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
+__STACK__
 <script>
 const LAYERS = __LAYERS__;
 const BBOX = __BBOX__;
@@ -835,6 +892,65 @@ def _artifact_path(out_path: str | None, prefix: str, title: str) -> str:
     return str(out_dir / f"{prefix}-{slugify(title)}.html")
 
 
+def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
+    from html import escape
+
+    labels = {"data": "data", "access": "access", "tiling": "tiling", "viz": "visualization",
+              "standard": "standards", "infra": "infrastructure"}
+    parts, last = [], None
+    for e in entries:
+        if e["kind"] != last:
+            parts.append(f'<div class="stack-group">{labels[e["kind"]]}</div>')
+            last = e["kind"]
+        # escape everything — instance lines carry caller-supplied collection
+        # ids, and even curated stack.md text shouldn't be able to break markup
+        parts.append(
+            f'<div class="stack-entry"><span class="dot k-{e["kind"]}"></span><div>'
+            f'<div class="stack-name">{escape(e["name"])}<span class="role">{escape(e["ds-role"])}</span></div>'
+            f'<p>{escape(e["what"])}</p><div class="inst">{escape(e["instance"])}</div>'
+            f'<a href="{escape(e["link"], quote=True)}" target="_blank" rel="noopener">{escape(e["link"].split("//")[-1])}</a>'
+            f"</div></div>"
+        )
+    return "".join(parts)
+
+
+def _stack_chunk_for(resolved: list[dict[str, Any]], layers: list[dict[str, Any]]) -> str | None:
+    from groundstation import stack as _stack
+
+    try:
+        components = _stack.parse_stack()
+    except (FileNotFoundError, ValueError):
+        # a malformed curated file must not take the map down with it — the
+        # parser stays loud (evals hit it directly), the artifact stays alive
+        return None
+    items = [l for l in layers if l.get("type") == "item" and l.get("catalog") and l.get("collection_id")]
+    by_catalog: dict[str, list[str]] = {}
+    for l in items:
+        cols = by_catalog.setdefault(l["catalog"], [])
+        if l["collection_id"] not in cols:
+            cols.append(l["collection_id"])
+    hosts = set()
+    for r in resolved:
+        parts = r.get("tiles", "").split("/") if r.get("type") == "raster" else []
+        if len(parts) > 2 and parts[0] in ("http:", "https:") and parts[2]:
+            hosts.add(parts[2])
+    facts = {
+        "catalogs": sorted(by_catalog),
+        "collections_by_catalog": by_catalog,
+        "tiler_hosts": sorted(hosts),
+        "terrain": False,  # ponytail: render_map is 2D; terrain joins when the 3D artifact gets the layer (G.3)
+        # ponytail: geocoding/events participation is unknowable from here —
+        # claiming them would fabricate provenance, so they stay off until
+        # those facts are plumbed through from the actual calls
+        "geocoded": False,
+        "events": False,
+    }
+    entries = _stack.stack_instances(components, facts)
+    if not entries:
+        return None
+    return _STACK_CHUNK.replace("__ENTRIES__", _stack_panel_html(entries))
+
+
 def render_map(
     title: str,
     bbox: list[float],
@@ -842,6 +958,7 @@ def render_map(
     subtitle: str = "",
     out_path: str | None = None,
     compare: bool | None = None,
+    stack_layer: bool = False,
 ) -> dict[str, Any]:
     """Write a self-contained interactive HTML map and return its file path.
 
@@ -860,6 +977,10 @@ def render_map(
     False stacks them as toggleable overlays. Default None auto-decides: swipe
     only when both rasters come from the SAME collection (a comparison), overlay
     when they differ (e.g. burn severity over imagery — pass opacity ~0.75).
+
+    stack_layer: True adds a "Stack" toggle revealing the technologies behind
+    the map — the actual collections, tiler, formats, and buckets on screen,
+    joined from docs/stack.md. Attribution to projects, never people.
     """
     resolved = []
     raster_collections: list[str | None] = []
@@ -876,16 +997,29 @@ def render_map(
             and raster_collections[0] is not None
             and raster_collections[0] == raster_collections[1]
         )
+    stack_html, stack_note = "", None
+    if stack_layer:
+        stack_html = _stack_chunk_for(resolved, layers)
+        if stack_html is None:
+            stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = (
-        _MAP_TEMPLATE.replace("__TITLE__", title)
+        _MAP_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
+        .replace("__TITLE__", title)
         .replace("__SUBTITLE__", subtitle)
         .replace("__LAYERS__", json.dumps(resolved))
         .replace("__BBOX__", json.dumps(bbox))
         .replace("__COMPARE__", json.dumps(compare))
+        # __STACK__ goes last: its entries carry caller-supplied strings, and
+        # replacing it earlier would let a literal "__LAYERS__" inside them be
+        # macro-expanded by the later template substitutions
+        .replace("__STACK__", stack_html)
     )
     out_path = _artifact_path(out_path, "map", title)
     Path(out_path).write_text(html, encoding="utf-8")
-    return {"map_path": out_path, "layers": [l["name"] for l in resolved]}
+    out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
+    if stack_note:
+        out["note"] = stack_note
+    return out
 
 
 # ---------------------------------------------------------------- 3D artifact
@@ -898,18 +1032,21 @@ _MAP3D_TEMPLATE = """<!doctype html>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
 <style>
+__BRAND__
   html, body, #map { margin: 0; height: 100%; }
-  #panel { position: absolute; top: 12px; left: 12px; z-index: 2; background: rgba(255,255,255,.94);
-    padding: 12px 16px; border-radius: 10px; font: 14px/1.45 system-ui, sans-serif; max-width: 340px;
+  #panel { position: absolute; top: 12px; left: 12px; z-index: 2; background: rgba(247,244,239,.96);
+    color: var(--ink); border-top: 3px solid var(--accent);
+    padding: 12px 16px; border-radius: 0 0 10px 10px; font: 14px/1.45 "Roboto", system-ui, sans-serif; max-width: 340px;
     box-shadow: 0 2px 10px rgba(0,0,0,.18); }
-  #panel h1 { font-size: 15px; margin: 0 0 4px; }
-  #panel p { margin: 4px 0 8px; color: #444; }
-  #panel label { display: block; margin: 6px 0 2px; color: #333; }
-  #exaggeration { width: 100%; }
-  #panel button { font: 13px system-ui, sans-serif; background: #10222e; color: #fff; border: 0;
+  #panel h1 { font: 700 15px/1.25 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 4px; }
+  #panel p { margin: 4px 0 8px; color: var(--mid); }
+  #panel label { display: block; margin: 6px 0 2px; color: var(--mid); }
+  #exaggeration { width: 100%; accent-color: var(--accent); }
+  #panel button { font: 13px "Roboto", system-ui, sans-serif; background: var(--accent); color: #fff; border: 0;
     border-radius: 6px; padding: 6px 12px; margin: 6px 6px 0 0; cursor: pointer; }
-  #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px system-ui, sans-serif;
-    color: #333; background: rgba(255,255,255,.8); padding: 2px 8px; border-radius: 6px; }
+  #panel button:hover { background: var(--ink); }
+  #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
+    color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
 </style></head><body>
 <div id="map"></div>
 <div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p>
@@ -1016,7 +1153,8 @@ def render_map_3d(
         ],
     }
     html = (
-        _MAP3D_TEMPLATE.replace("__TITLE__", title)
+        _MAP3D_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
+        .replace("__TITLE__", title)
         .replace("__SUBTITLE__", subtitle)
         .replace("__STYLE__", json.dumps(style))
         .replace("__BBOX__", json.dumps(bbox))
@@ -1033,16 +1171,18 @@ _POSTCARD_TEMPLATE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>__PLACE__ · __DATE__</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  body { margin: 0; padding: 32px 16px; background: #eef1f3;
-    font: 15px/1.5 system-ui, sans-serif; color: #10222e; }
+__BRAND__
+  body { margin: 0; padding: 32px 16px; background: var(--paper);
+    font: 15px/1.5 "Roboto", system-ui, sans-serif; color: var(--ink); }
   .card { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 12px;
+    border-top: 3px solid var(--accent);
     overflow: hidden; box-shadow: 0 2px 14px rgba(0,0,0,.15); }
-  .card img { display: block; width: 100%; background: #10222e; }
+  .card img { display: block; width: 100%; background: var(--ink); }
   .body { padding: 18px 22px 22px; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  .meta { color: #4a5a63; font-size: 14px; margin: 0 0 12px; }
+  h1 { font: 700 22px/1.2 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 4px; }
+  .meta { color: var(--mid); font-size: 14px; margin: 0 0 12px; }
   .caption { margin: 0 0 16px; }
-  .credit { border-top: 1px solid #dde3e6; padding-top: 12px; font-size: 12px; color: #4a5a63; }
+  .credit { border-top: 1px solid var(--rule); padding-top: 12px; font: 12px/1.6 "Roboto Mono", monospace; color: var(--mid); }
   .credit div { margin: 2px 0; }
 </style></head><body>
 <div class="card">
@@ -1087,7 +1227,8 @@ def _postcard_html(
     import base64
 
     return (
-        _POSTCARD_TEMPLATE.replace("__IMAGE__", base64.b64encode(png).decode())
+        _POSTCARD_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
+        .replace("__IMAGE__", base64.b64encode(png).decode())
         .replace("__PLACE__", place)
         .replace("__DATE__", date)
         .replace("__COLLECTION__", collection_id)

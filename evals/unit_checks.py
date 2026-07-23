@@ -257,6 +257,154 @@ def t_render_map_3d_controls():
     assert 'value="2.5"' in html and "let exaggeration = 2.5" in html
 
 
+# ---- stack layer (epic G) ----
+
+from groundstation import stack as gstack  # noqa: E402
+
+
+def t_stack_parse_all_fields():
+    comps = gstack.parse_stack()
+    assert len(comps) >= 12
+    for c in comps:
+        for field in ("name", "kind", "what", "ds-role", "integration", "speaks-to", "link"):
+            assert c.get(field), f"{c.get('name')} missing {field}"
+        assert c["ds-role"] in gstack.DS_ROLES
+
+
+def _bad_stack(body: str) -> str:
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "stack.md"
+        p.write_text(body, encoding="utf-8")
+        try:
+            gstack.parse_stack(p)
+            return ""
+        except ValueError as e:
+            return str(e)
+
+
+_OK_BLOCK = "- kind: data\n- what: x\n- ds-role: uses\n- integration: x\n- speaks-to: x\n- link: https://x\n"
+
+
+def t_stack_parse_curation_mistakes_fail_loudly():
+    err = _bad_stack("## Quantum\n" + _OK_BLOCK.replace("kind: data", "kind: quantum"))
+    assert "Quantum" in err and "quantum" in err
+    assert "missing" in _bad_stack("## Thin\n- kind: data\n- ds-role: uses\n")
+    assert "duplicate" in _bad_stack(f"## Twin\n{_OK_BLOCK}\n## Twin\n{_OK_BLOCK}")
+    assert "empty" in _bad_stack("## \n" + _OK_BLOCK)
+
+
+def t_stack_parse_leading_heading_not_dropped():
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "stack.md"
+        p.write_text("## First\n" + _OK_BLOCK, encoding="utf-8")  # no preamble at all
+        assert [c["name"] for c in gstack.parse_stack(p)] == ["First"]
+
+
+_STACK_FACTS = {"catalogs": ["earth-search"], "collections_by_catalog": {"earth-search": ["sentinel-2-l2a"]},
+                "tiler_hosts": ["titiler.xyz"], "terrain": False, "geocoded": True, "events": False}
+
+
+def t_stack_join_names_the_real_render():
+    entries = gstack.stack_instances(gstack.parse_stack(), _STACK_FACTS)
+    tiler = next(e for e in entries if e["name"] == "TiTiler")
+    assert tiler["instance"] == "serving sentinel-2-l2a via titiler.xyz"
+    es = next(e for e in entries if e["name"] == "Earth Search")
+    assert es["instance"] == "source of sentinel-2-l2a"
+    assert not any(e["name"] == "AWS Terrarium terrain" for e in entries)  # no terrain on a 2D map
+    assert not any(e["name"] == "NASA EONET" for e in entries)  # no events layer
+
+
+def t_stack_join_understates_without_rasters():
+    # a geojson-only map exercised no catalog, tiler, or bucket — claiming
+    # them would fabricate provenance
+    entries = gstack.stack_instances(gstack.parse_stack(), {"catalogs": []})
+    assert [e["name"] for e in entries] == ["MapLibre GL"]
+
+
+def t_stack_active_names_exist_in_stack_md():
+    # the join string-matches component names; a stack.md heading rename must
+    # fail here instead of silently vanishing from every panel
+    names = {c["name"] for c in gstack.parse_stack()}
+    wired = {"MapLibre GL", "STAC", "COG + HTTP range requests", "TiTiler", "Cloud object storage",
+             "AWS Terrarium terrain", "Gazet", "Nominatim", "NASA EONET", "GDACS", "Open-Meteo",
+             *gstack._CATALOG_COMPONENT.values()}
+    assert wired <= names, f"wired names missing from stack.md: {sorted(wired - names)}"
+
+
+def t_stack_group_order_and_attribution_shape():
+    entries = gstack.stack_instances(gstack.parse_stack(), _STACK_FACTS)
+    # literal expected pipeline order for this fixture (geocoded=True adds the
+    # two access-kind geocoders), not a re-derivation
+    assert [e["kind"] for e in entries] == ["data", "access", "access", "access", "tiling", "viz", "standard", "infra"]
+    html = tools._stack_panel_html(entries)
+    assert 'class="stack-group"' in html and "TiTiler" in html
+    for role in {e["ds-role"] for e in entries}:
+        assert role in gstack.DS_ROLES  # attribution is role-shaped by construction
+    # and the rendered panel carries no person-shaped attribution
+    assert not re.search(r"\b(?:by|from)\s+[A-Z][a-z]+\s+[A-Z][a-z]+\b", html)
+
+
+def t_stack_panel_escapes_untrusted_values():
+    entries = [{"name": "x", "kind": "data", "what": "<script>alert(1)</script>",
+                "ds-role": "uses", "instance": 'onerror="x" <img>', "link": 'https://x/"><script>'}]
+    html = tools._stack_panel_html(entries)
+    assert "<script>" not in html and "<img>" not in html
+    assert 'href="https://x/&quot;&gt;&lt;script&gt;"' in html
+
+
+def t_stack_no_ansi_when_piped_static():
+    # unit checks stay offline, so this is the static form of the piped-output
+    # rule: no literal escape bytes, and every color assignment sits behind
+    # the TTY guard
+    for script in ("scripts/doctor.sh", "briefing/run.sh"):
+        text = (Path(__file__).resolve().parents[1] / script).read_text(encoding="utf-8")
+        assert "\x1b" not in text, f"{script} has a literal ESC byte"
+        assert "[ -t 1 ]" in text and "NO_COLOR" in text, f"{script} missing the TTY/NO_COLOR guard"
+
+
+def _render_stack_map(**kw) -> tuple[str, dict]:
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        layers = [{"type": "item", "name": "s2", "catalog": "earth-search",
+                   "collection_id": "sentinel-2-l2a", "item_id": "X", "bbox": [0, 0, 1, 1]}]
+        r = tools.render_map("t", [0, 0, 1, 1], layers, out_path=out, **kw)
+        return Path(out).read_text(encoding="utf-8"), r
+
+
+def t_stack_layer_toggle_present_when_on():
+    html, _ = _render_stack_map(stack_layer=True)
+    assert 'id="stack-toggle"' in html and 'id="stack"' in html
+    assert "sentinel-2-l2a" in html and "prefers-reduced-motion" in html
+
+
+def t_stack_layer_absent_by_default():
+    html, r = _render_stack_map()
+    assert 'id="stack-toggle"' not in html and 'class="stack-entry"' not in html
+    assert "note" not in r
+
+
+def t_stack_layer_missing_stack_md_skips_gracefully():
+    real = gstack.parse_stack
+
+    def gone(path=None):
+        raise FileNotFoundError("stack.md")
+
+    gstack.parse_stack = gone
+    try:
+        html, r = _render_stack_map(stack_layer=True)
+        assert 'id="stack-toggle"' not in html and "stack.md" in r["note"]
+    finally:
+        gstack.parse_stack = real
+
+
+def t_brand_tokens_in_all_templates():
+    # one shared token set: DS orange accent present in map, 3D, and postcard output
+    html, _ = _render_stack_map()
+    assert "--accent: #CF3F02" in html
+    assert "--accent: #CF3F02" in _render_3d()
+    assert "--accent: #CF3F02" in _postcard()
+
+
 def t_pick_best_scene_prefers_coverage():
     items = [
         {"id": "full", "bbox": [0, 0, 1, 1], "cloud_cover": 5.0},
