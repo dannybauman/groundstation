@@ -9,7 +9,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 ## First: use the tools, never route around them
 
-The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 13 tools in about a second.
+The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 14 tools in about a second.
 
 - **Wait and retry discovery** a few times over ~10-15 seconds before doing anything else. The tools almost always appear.
 - **Never fall back to raw STAC / TiTiler / FIRMS / `httpx` calls to work around missing tools.** Hand-rolling the pipeline gives a worse answer and hides a fixable setup problem. Missing tools are a thing to fix, not to route around.
@@ -56,6 +56,16 @@ Triggers: "3D", "fly-through", "terrain", "what does this valley actually look l
 - Then `render_map_3d(title, bbox, layer, exaggeration=1.5)` with that one scene as the layer (same shape as a `render_map` layer). The artifact carries an exaggeration slider, a fly-through orbit, and a reset button.
 - Elevation is the keyless AWS Terrarium tileset, so the page shares as-is. It's global at ~10m-ish over land, sea floor included, and flat terrain looks flat — pick relief-rich AOIs or the 3D adds nothing.
 - Exaggeration 1.5 reads well for mountains; push to 2-3 for gentle terrain, drop to 1 when the shape should stay honest.
+
+## Postcards
+
+Triggers: "postcard", "share card", "something I can post", "can I put this on LinkedIn", any result the user is visibly proud of.
+
+- `render_postcard(catalog, collection_id, item_id, place, date, ...)` writes one card: the scene as embedded pixels, the place and date, an optional caption, and the attribution block (Development Seed labs, STAC, TiTiler, the data source, the collection license).
+- Pixels are embedded rather than linked on purpose. A map artifact points at live tiles, and a Planetary Computer URL carries a signed token that dies within the hour, so a shared page goes blank. A postcard keeps working.
+- Index cards work the same way as index map layers: pass `expression` and `colormap_name`.
+- The license line only appears when the collection declares a real one. Earth Search says `proprietary` for Sentinel-2, which is STAC's placeholder rather than the actual terms, so the card leaves it off instead of printing something misleading.
+- Where and whether to post is the user's decision, never yours. Hand them the file and say what's in it.
 
 ## Monitoring and briefings
 

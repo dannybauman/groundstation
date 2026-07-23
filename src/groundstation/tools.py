@@ -501,14 +501,20 @@ def preview_item(
     assets: list[str] | None = None,
     rescale: str | None = None,
     max_size: int = 512,
+    colormap_name: str | None = None,
+    expression: str | None = None,
 ) -> dict[str, Any]:
     """Get a browser-openable PNG preview URL for a STAC item.
 
     Routes to the right raster backend per catalog: titiler.xyz for
     Earth Search, NASA VEDA's raster API, or Planetary Computer's signing
-    data API. Optional rescale like "0,3000" for non-visual assets.
+    data API. Optional rescale like "0,3000" for non-visual assets, and
+    expression + colormap_name for index previews (NDVI etc., same shapes
+    tile_url_template takes).
     """
-    assets = assets or _default_assets(collection_id)
+    assets = assets or ([] if expression else _default_assets(collection_id))
+    if expression and not rescale:
+        rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
     backend = CATALOGS[catalog]["raster"]
     if backend == "pc":
         item = _get_json(
@@ -522,6 +528,8 @@ def preview_item(
         params = [("assets", a) for a in assets or ["cog_default"]]
         if rescale:
             params.append(("rescale", rescale))
+        if colormap_name:
+            params.append(("colormap_name", colormap_name))
         params.append(("max_size", str(max_size)))
         q = str(httpx.QueryParams(params))
         return {
@@ -530,9 +538,15 @@ def preview_item(
         }
     # earth-search and any catalog with public item URLs -> titiler.xyz
     self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
-    params = [("url", self_url)] + [("assets", a) for a in assets]
+    params = [("url", self_url)]
+    if expression:
+        expression, assets = _expression_to_bands(expression, assets or None)
+        params.append(("expression", expression))
+    params += [("assets", a) for a in assets]
     if rescale:
         params.append(("rescale", rescale))
+    if colormap_name:
+        params.append(("colormap_name", colormap_name))
     params.append(("max_size", str(max_size)))
     q = str(httpx.QueryParams(params))
     return {"preview_url": f"{TITILER}/stac/preview.png?{q}", "backend": "titiler-xyz"}
@@ -1011,6 +1025,126 @@ def render_map_3d(
     out_path = _artifact_path(out_path, "map3d", title)
     Path(out_path).write_text(html, encoding="utf-8")
     return {"path": out_path, "title": title}
+
+
+# ---------------------------------------------------------------- postcards
+
+_POSTCARD_TEMPLATE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>__PLACE__ · __DATE__</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { margin: 0; padding: 32px 16px; background: #eef1f3;
+    font: 15px/1.5 system-ui, sans-serif; color: #10222e; }
+  .card { max-width: 720px; margin: 0 auto; background: #fff; border-radius: 12px;
+    overflow: hidden; box-shadow: 0 2px 14px rgba(0,0,0,.15); }
+  .card img { display: block; width: 100%; background: #10222e; }
+  .body { padding: 18px 22px 22px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .meta { color: #4a5a63; font-size: 14px; margin: 0 0 12px; }
+  .caption { margin: 0 0 16px; }
+  .credit { border-top: 1px solid #dde3e6; padding-top: 12px; font-size: 12px; color: #4a5a63; }
+  .credit div { margin: 2px 0; }
+</style></head><body>
+<div class="card">
+  <img src="data:image/png;base64,__IMAGE__" alt="__PLACE__, __DATE__">
+  <div class="body">
+    <h1>__PLACE__</h1>
+    <p class="meta">__DATE__ · __COLLECTION__</p>
+    __CAPTION__
+    <div class="credit">
+      <div>Development Seed labs · STAC · TiTiler · __SOURCE__</div>
+      __LICENSE__
+    </div>
+  </div>
+</div>
+</body></html>
+"""
+
+
+def _catalog_source(catalog: str, collection_id: str) -> str:
+    # the notes string already leads with the catalog's real name
+    name = CATALOGS[catalog]["notes"].split(":")[0]
+    return f"{collection_id} via {name}"
+
+
+def _shareable_license(license_: str | None) -> str | None:
+    # STAC uses "proprietary"/"various" as its not-an-SPDX-id placeholder, not as
+    # a claim about terms — printing it on a share card misinforms, so omit it
+    if not license_ or license_.lower() in ("proprietary", "various", "other"):
+        return None
+    return license_
+
+
+def _postcard_html(
+    png: bytes,
+    place: str,
+    date: str,
+    collection_id: str,
+    source: str,
+    caption: str = "",
+    license_: str | None = None,
+) -> str:
+    import base64
+
+    return (
+        _POSTCARD_TEMPLATE.replace("__IMAGE__", base64.b64encode(png).decode())
+        .replace("__PLACE__", place)
+        .replace("__DATE__", date)
+        .replace("__COLLECTION__", collection_id)
+        .replace("__SOURCE__", source)
+        .replace("__CAPTION__", f'<p class="caption">{caption}</p>' if caption else "")
+        .replace("__LICENSE__", f"<div>license: {license_}</div>" if license_ else "")
+    )
+
+
+def render_postcard(
+    catalog: str,
+    collection_id: str,
+    item_id: str,
+    place: str,
+    date: str,
+    assets: list[str] | None = None,
+    rescale: str | None = None,
+    colormap_name: str | None = None,
+    expression: str | None = None,
+    caption: str = "",
+    out_path: str | None = None,
+) -> dict[str, Any]:
+    """Write a share-ready card for one scene: pixels embedded, attribution baked in.
+
+    Unlike a map artifact, a postcard has no live dependencies — the image is
+    embedded as a data URI, so it never goes blank when a signed tile URL
+    expires, and it carries no local paths. Use it when someone wants
+    something they could post. Where and whether to post stays their call.
+
+    date is what you want printed (usually the scene date, "2026-07-10").
+    assets/rescale/colormap_name/expression take the same shapes as
+    tile_url_template, so an NDVI card is expression + colormap_name.
+    """
+    p = preview_item(
+        catalog, collection_id, item_id, assets, rescale,
+        max_size=1024, colormap_name=colormap_name, expression=expression,
+    )
+    if "preview_url" not in p:
+        return p
+    r = _client.get(p["preview_url"], timeout=90)
+    r.raise_for_status()
+    # ponytail: license from collection metadata only; per-item attribution
+    # when a catalog needs it
+    try:
+        license_ = _shareable_license(describe_collection(catalog, collection_id).get("license"))
+    except Exception:
+        license_ = None
+    html = _postcard_html(
+        r.content, place, date, collection_id,
+        _catalog_source(catalog, collection_id), caption, license_,
+    )
+    if out_path is None:
+        out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = str(out_dir / f"postcard-{slugify(place)}-{slugify(date)}.html")
+    Path(out_path).write_text(html, encoding="utf-8")
+    return {"path": out_path}
 
 
 def compare_dates(

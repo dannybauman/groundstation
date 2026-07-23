@@ -36,6 +36,7 @@ for fn in (
     tools.tile_url_template,
     tools.render_map,
     tools.render_map_3d,
+    tools.render_postcard,
     tools.active_events,
     tools.weather_summary,
 ):
