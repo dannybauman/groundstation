@@ -419,6 +419,7 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
     }
 
 def _split_antimeridian(box: list[float]) -> list[list[float]]:
+    # Per RFC 7946 §5.2, a bbox with west > east is the antimeridian-crossing form, not an invalid box
     if not box or len(box) < 4:
         return []
     w, s, e, n = box
