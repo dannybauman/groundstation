@@ -27,8 +27,16 @@ Heads-up for editors: component *names* are joined by code (`src/groundstation/s
 - what: NASA's curated Earth science data platform — fire severity, air quality, disaster layers
 - ds-role: contributes
 - integration: the catalog for analysis-ready NASA products, with its own raster API
-- speaks-to: STAC, Azure Blob
+- speaks-to: STAC, eoAPI, Azure Blob
 - link: https://www.earthdata.nasa.gov/dashboard
+
+## eoAPI
+- kind: access
+- what: the deployable Earth-observation API stack — STAC search, dynamic tiling, and vector features as one install
+- ds-role: created
+- integration: NASA VEDA's catalog and raster APIs run on an eoAPI deployment, so every VEDA layer here is served by it
+- speaks-to: STAC, NASA VEDA, TiTiler
+- link: https://eoapi.dev
 
 ## Planetary Computer
 - kind: data

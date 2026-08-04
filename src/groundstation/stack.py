@@ -94,6 +94,11 @@ def stack_instances(
     if catalogs:  # raster pixels on screen -> the raster pipeline is live
         active_names |= {_CATALOG_COMPONENT[c] for c in catalogs if c in _CATALOG_COMPONENT}
         active_names |= {"STAC", "COG + HTTP range requests", "Cloud object storage"}
+    if "veda" in catalogs:
+        # VEDA's STAC and raster APIs are an eoAPI deployment — the one place
+        # a live artifact's DATA row is served by a DevSeed-created stack, so
+        # dropping this line hides the best attribution the panel has
+        active_names.add("eoAPI")
     if facts.get("tiler_hosts"):  # a tiler only served this artifact if a host did
         active_names.add("TiTiler")
     if facts.get("mosaic_scenes"):  # rio-tiler baked the pixels client-side
