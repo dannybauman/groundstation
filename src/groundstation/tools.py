@@ -264,13 +264,25 @@ def geocode(query: str) -> dict[str, Any]:
         return {"error": f"No geocoding result for {query!r}"}
     r0 = results[0]
     s, n, w, e = (float(x) for x in r0["boundingbox"])
-    return {
+    lat, lon = float(r0["lat"]), float(r0["lon"])
+    out = {
         "name": r0.get("display_name", query),
-        "lat": float(r0["lat"]),
-        "lon": float(r0["lon"]),
+        "lat": lat,
+        "lon": lon,
         "bbox": [w, s, e, n],
         "source": "nominatim",
     }
+    # Nominatim returns a NODE for peaks and landmarks, so the bbox collapses to
+    # a point (Mount Rainier came back 0.0001 deg wide). A degenerate bbox makes
+    # a useless imagery search and an empty 3D scene, so widen it and say so.
+    if (e - w) < 0.02 or (n - s) < 0.02:
+        d = 0.15
+        out["bbox"] = [lon - d, lat - d, lon + d, lat + d]
+        out["bbox_note"] = (
+            "geocoder returned a point, not an extent — widened to a "
+            f"{2 * d:g} deg box around it. Pass your own bbox if the subject is bigger"
+        )
+    return out
 
 
 def reverse_geocode(lat: float, lon: float) -> dict[str, Any]:
@@ -317,6 +329,10 @@ def search_datasets(keywords: str, catalog: str | None = None) -> list[dict[str,
 
     Case-insensitive match against collection id, title, description, and
     keywords. Returns up to 20 hits with {catalog, id, title, summary}.
+
+    An empty result means "not in these three catalogs", NOT "no such data
+    exists" — say that rather than telling someone the data is unavailable.
+    Himawari is the live example: real, and not here.
     """
     terms = [t.lower() for t in keywords.split() if t]
     hits = []
@@ -386,6 +402,10 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
         "bbox": item.get("bbox"),
         "assets": sorted(item.get("assets", {}).keys()),
         "self_url": self_url,
+        # SAR backscatter is only comparable between passes of the same
+        # geometry. The catalog knows the orbit; don't drop it and leave a
+        # change-detection answer resting on two mismatched passes
+        **({"orbit_state": props["sat:orbit_state"]} if props.get("sat:orbit_state") else {}),
     }
 
 
@@ -615,7 +635,39 @@ def compute_statistics(
             }
         return node
 
-    return _slim(stats)
+    out = _slim(stats)
+    if not aoi_geojson:
+        # Unclipped stats cover the WHOLE item. For a MODIS tile that is most of
+        # a continent, so the mean is real and meaningless — this is how a demo
+        # ships a confident wrong number. Say what was actually measured.
+        try:
+            item = _get_json(
+                f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
+            )
+            bb = item.get("bbox")
+            if bb:
+                w, h = bb[2] - bb[0], bb[3] - bb[1]
+                out["extent_note"] = (
+                    f"stats cover the full item extent ({w:.1f} x {h:.1f} deg)"
+                    + (
+                        ". That is a very large area — pass aoi_geojson to clip, "
+                        "or these numbers describe a region, not your subject"
+                        if max(w, h) > 5
+                        else ". Pass aoi_geojson to clip to your subject"
+                    )
+                )
+            # scale/offset live in STAC, so pass them through rather than
+            # teaching this tool any one collection's units (MODIS LST is
+            # 0.02 K per DN — the caller cannot guess that from raw values)
+            for a in item.get("assets", {}).values():
+                for band in a.get("raster:bands", []) or []:
+                    if band.get("scale") is not None or band.get("offset") is not None:
+                        out.setdefault("band_scaling", []).append(
+                            {k: band[k] for k in ("name", "scale", "offset", "unit") if k in band}
+                        )
+        except Exception:
+            pass
+    return out
 
 
 def tile_url_template(
@@ -912,6 +964,23 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _footprints_overlap(resolved: list[dict[str, Any]], min_frac: float = 0.6) -> bool:
+    """True when two raster layers cover the same ground, i.e. a real comparison.
+
+    A before/after pair shares a footprint. A mosaic's tiles sit side by side,
+    and swiping one hides half the AOI behind the divider. Unknown bounds means
+    we cannot tell, so fall back to comparison — that is what a caller who
+    passed two dates is asking for.
+    """
+    boxes = [l["bounds"] for l in resolved if l.get("type") == "raster" and l.get("bounds")]
+    if len(boxes) != 2:
+        return True
+    a, b = boxes
+    inter = max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    return smaller > 0 and inter / smaller >= min_frac
+
+
 def _artifact_path(out_path: str | None, prefix: str, title: str) -> str:
     if out_path:
         return out_path
@@ -976,14 +1045,31 @@ def _snapshot_artifact(
             "snapshot cards need playwright: uv add playwright && uv run playwright install chromium"
         )
     with sync_playwright() as pw:
-        try:
-            browser = pw.chromium.launch()
-        except Exception:
-            raise RuntimeError("chromium is not installed: run `uv run playwright install chromium` once")
+        # playwright pins a chromium BUILD per package version, so a browser
+        # installed by another venv on a different playwright won't satisfy this
+        # one. Rather than make everyone download ~100MB to take a screenshot,
+        # fall back to a Chromium-family browser they already have. Bundled
+        # first, because it is the reproducible one.
+        browser = None
+        for kwargs in ({}, {"channel": "chromium"}, {"channel": "chrome"}, {"channel": "msedge"}):
+            try:
+                browser = pw.chromium.launch(**kwargs)
+                break
+            except Exception:
+                continue
+        if browser is None:
+            raise RuntimeError(
+                "no Chromium-family browser found. Install Google Chrome, or run "
+                "`uv run playwright install chromium --only-shell` once "
+                "(--only-shell is enough for stills and is a much smaller download)"
+            )
         try:
             page = browser.new_page(viewport={"width": width, "height": height})
             page.goto(Path(html_path).resolve().as_uri() + "#clean")
-            loaded = "window.gsMaps && window.gsMaps.every(m => m.loaded())"
+            # a postcard has no MapLibre map — its pixels are already embedded —
+            # so requiring gsMaps to exist hangs until timeout on a page that
+            # was ready immediately
+            loaded = "!window.gsMaps || window.gsMaps.every(m => m.loaded())"
             page.wait_for_function(loaded, timeout=90000)
             # re-fit to the card's bbox, keeping any pitch. Flat maps get zero
             # padding (the load-time fit pads 40px and leaks area beyond the
@@ -994,7 +1080,7 @@ def _snapshot_artifact(
             # queryTerrainElevation, project the summit) if a case defeats it
             bb = json.dumps(fit_bbox) if fit_bbox else "BBOX"
             page.evaluate(
-                "window.gsMaps.forEach(m => { try { const B = " + bb + "; "
+                "(window.gsMaps || []).forEach(m => { try { const B = " + bb + "; "
                 "const head = m.getPitch() > 0 ? Math.round(m.getContainer().clientHeight * 0.28) : 0; "
                 "m.fitBounds([[B[0], B[1]], [B[2], B[3]]],"
                 "{ padding: { top: head, left: 0, right: 0, bottom: 0 },"
@@ -1194,10 +1280,15 @@ def render_map(
         resolved.append(_resolve_layer(l))
     if compare is None:
         # swipe only for a true comparison: two rasters of the same collection
+        # whose footprints actually overlap. Same-collection alone is NOT enough
+        # — an auto-mosaic full_coverage_set is also two rasters of one
+        # collection, and swiping it puts each tile on its own side of the
+        # divider, so half the AOI is blank at every slider position
         compare = (
             len(raster_collections) == 2
             and raster_collections[0] is not None
             and raster_collections[0] == raster_collections[1]
+            and _footprints_overlap(resolved)
         )
     stack_html, stack_note = "", None
     if stack_layer:
@@ -1221,6 +1312,18 @@ def render_map(
     out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
     if stack_note:
         out["note"] = stack_note
+    # A map whose layers do not fill the view has a hole in it, and the hole is
+    # invisible from the caller's side — the render "succeeded". Say it here, or
+    # it ships in a demo. search_imagery already hands back full_coverage_set
+    # for exactly this; the usual cause is rendering only its first item.
+    _boxes = [l["bounds"] for l in resolved if l.get("type") == "raster" and l.get("bounds")]
+    if _boxes:
+        _cov = _union_coverage_pct(bbox, _boxes)
+        if _cov < 95:
+            out["coverage_note"] = (
+                f"layers cover {_cov:.0f}% of the requested view, so the rest renders blank. "
+                "Pass the whole full_coverage_set from search_imagery, or tighten bbox to what you have"
+            )
     if postcard:
         card_path, card_note = _artifact_postcard(
             out_path, postcard, _map_stack_facts(resolved, layers, stack_facts), layers, stack_layer,

@@ -76,7 +76,28 @@ else
   note "earth-search not reachable — imagery search will fail until you're online"
 fi
 
-echo "6. up to date (new tools only reach you after an update)"
+echo "6. browser for share cards (optional — everything else works without it)"
+# Ask the launcher, don't look for a build number. Playwright pins a chromium
+# BUILD per package version, so "a browser is installed" from another venv is
+# not the same question as "this venv can launch one" — and any Chromium-family
+# browser will do for a screenshot.
+browser=$(uv run python -c "
+from playwright.sync_api import sync_playwright
+try:
+    with sync_playwright() as pw:
+        for kw in ({}, {'channel':'chromium'}, {'channel':'chrome'}, {'channel':'msedge'}):
+            try:
+                b = pw.chromium.launch(**kw); print(kw.get('channel','bundled chromium')); b.close(); break
+            except Exception: continue
+except Exception: pass
+" 2>/dev/null | tail -1)
+if [ -n "$browser" ]; then
+  ok "postcards and field-test stills can render (using: $browser)"
+else
+  note "no Chromium-family browser launchable — snapshot cards degrade to a note. Install Google Chrome, or: uv run playwright install chromium --only-shell"
+fi
+
+echo "7. up to date (new tools only reach you after an update)"
 # plugin installs are cached per version under ~/.claude/plugins/cache/<mkt>/<plugin>/<version>,
 # so a copy stays frozen until the plugin version bumps — that's what makes new tools appear
 repo_version=$(python3 -c 'import json,sys;print(json.load(open(".claude-plugin/plugin.json"))["version"])' 2>/dev/null)

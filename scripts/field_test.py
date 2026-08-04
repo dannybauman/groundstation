@@ -13,6 +13,7 @@ inline markup the cards use (<b>, <em>).
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -111,14 +112,46 @@ def _card(n: int, c: dict) -> str:
     return "\n".join(parts)
 
 
+def _autoshoot(case: dict, cases_path: Path) -> None:
+    """Fill in a card's still from its artifact, so `image` is never hand-authored.
+
+    A card with no image renders as a text-only block — the single most common
+    way a field-test page ships looking half-built. The artifact is already on
+    disk, so the still is derivable and nobody should have to remember it.
+    Shoots once and reuses: delete the .png to force a re-shoot.
+    """
+    art = case.get("artifact")
+    if not art or case.get("image") or art.startswith(("http://", "https://")):
+        return
+    src = (cases_path.parent / art).resolve()
+    if not src.exists() or src.suffix != ".html":
+        return
+    png = src.with_suffix(".png")
+    rel = os.path.relpath(png, cases_path.parent)
+    if png.exists():
+        case["image"] = rel
+        return
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+        from groundstation.tools import _snapshot_artifact
+
+        png.write_bytes(_snapshot_artifact(str(src), width=1000, height=700))
+        case["image"] = rel
+        print(f"  shot {rel} ({png.stat().st_size // 1024} KB)")
+    except Exception as e:
+        print(f"  no still for {src.name}: {e}", file=sys.stderr)
+
+
 def build(cases_path: str | Path) -> Path:
-    spec = json.loads(Path(cases_path).read_text(encoding="utf-8"))
+    cases_path = Path(cases_path)
+    spec = json.loads(cases_path.read_text(encoding="utf-8"))
     n = 0
     rounds_html = []
     for rnd in spec["rounds"]:
         cards = []
         for c in rnd["cases"]:
             n += 1
+            _autoshoot(c, cases_path)
             cards.append(_card(n, c))
         rounds_html.append(f'<h2 class="round">{rnd["name"]}</h2>\n<div class="grid">\n' + "\n\n".join(cards) + "\n</div>")
     stats = "\n".join(f'  <div class="stat"><b>{s["value"]}</b><span>{s["label"]}</span></div>' for s in spec.get("stats", []))

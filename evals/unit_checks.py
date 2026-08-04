@@ -108,6 +108,23 @@ def t_union_coverage_no_double_count():
     assert _bbox_coverage_pct([-114.0, 51.0, -114.0, 51.0], [-115.0, 50.0, -113.0, 52.0]) is None
 
 
+def t_mosaic_is_not_a_swipe():
+    # the real Chelan regression: two adjacent Sentinel-2 tiles of ONE
+    # collection are a mosaic, not a before/after. Swiping them leaves half
+    # the AOI blank at every divider position.
+    west = {"type": "raster", "bounds": [-121.665655, 47.731054, -120.147575, 48.744975]}
+    east = {"type": "raster", "bounds": [-120.332977, 47.690861, -118.79173, 48.720918]}
+    assert tools._footprints_overlap([west, east]) is False
+    # same scene at two dates IS a comparison
+    a = {"type": "raster", "bounds": [90.896, 23.577, 93.650, 25.501]}
+    b = {"type": "raster", "bounds": [90.899, 23.562, 93.653, 25.485]}
+    assert tools._footprints_overlap([a, b]) is True
+    # two layers off one item (true colour + index) always compare
+    assert tools._footprints_overlap([a, a]) is True
+    # unknown bounds cannot be judged, so keep the asked-for comparison
+    assert tools._footprints_overlap([{"type": "raster"}, {"type": "raster"}]) is True
+
+
 def t_tile_url_expression():
     t = tools.tile_url_template("earth-search", "sentinel-2-l2a", "ITEM", expression="(nir-red)/(nir+red)", rescale="-1,1")
     assert "b1" in t and "assets=nir" in t and "assets=visual" not in t
@@ -116,6 +133,23 @@ def t_tile_url_expression():
 def t_tile_url_default_visual():
     t = tools.tile_url_template("earth-search", "sentinel-2-l2a", "ITEM")
     assert "assets=visual" in t and "expression" not in t
+
+
+def t_coverage_note_names_the_hole():
+    # a map whose layers cover a sliver of the view "succeeds" and renders
+    # mostly blank — the field test №4 Dolphin card shipped exactly this way
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        sliver = [{"type": "item", "name": "A", "catalog": "earth-search",
+                   "collection_id": "sentinel-2-l2a", "item_id": "X",
+                   "bbox": [0.0, 0.0, 1.0, 1.0]}]
+        r = tools.render_map("t", [0, 0, 10, 10], sliver, out_path=out)
+        assert "coverage_note" in r and "1%" in r["coverage_note"]
+        full = [{"type": "item", "name": "A", "catalog": "earth-search",
+                 "collection_id": "sentinel-2-l2a", "item_id": "X",
+                 "bbox": [0, 0, 10, 10]}]
+        r = tools.render_map("t", [0, 0, 10, 10], full, out_path=out)
+        assert "coverage_note" not in r
 
 
 def t_render_map_compare_mode():
