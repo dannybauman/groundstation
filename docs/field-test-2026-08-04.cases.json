@@ -1,0 +1,131 @@
+{
+  "title": "groundstation field test №4 — the best of, re-run live",
+  "heading": "THE FIELD TEST №4",
+  "sub": "groundstation · 10 prompts · the representative set from tests №1–№3 · August 4, 2026 · Development Seed labs",
+  "lede": "Ten prompts chosen from the 43 across the first three field tests — one per capability, one per audience — and every one re-run against live data on August 4. Nothing here is replayed from a previous edition. The interesting result is that four of the ten came back disagreeing with the question, and those are the four worth reading first.",
+  "stats": [
+    { "value": "10/10", "label": "prompts answered with working artifacts" },
+    { "value": "4", "label": "answers that corrected the question asked" },
+    { "value": "5", "label": "auto-mosaics fired without being asked" },
+    { "value": "0", "label": "API keys needed for any of it" }
+  ],
+  "rounds": [
+    {
+      "name": "Round 1 — what is actually happening right now",
+      "cases": [
+        {
+          "tag": "global triage",
+          "who": "humanitarian response",
+          "prompt": "What are the most severe disaster alerts anywhere in the world right now? Give me the top three by severity and map the worst one with recent imagery.",
+          "answer": "There is no top three. <b>Super Typhoon Dolphin is the only non-Green alert on Earth</b> — one GDACS Orange against a feed where every other flood, fire, quake and drought is Green. Ranking three would have meant inventing a severity difference that the data does not contain. Dolphin sits at 25.2°N 140.6°E in open ocean: <b>110 km/h peak winds and 46 mm of rain today, 76 mm tomorrow</b>, nearest inhabited land Chichijima about 260 km northeast.",
+          "artifact": "img/ft4-dolphin.html",
+          "artifact_label": "live map ↗",
+          "shows": "active_events (EONET + GDACS), weather_summary, render_map",
+          "learning": "The honest answer to \"give me three\" is sometimes \"there is one.\" A severity scale that bottoms out at Green for 30+ events is telling you the ranking question is wrong, not that you should rank anyway."
+        },
+        {
+          "tag": "live events",
+          "who": "disaster response",
+          "prompt": "Find the clearest Sentinel-2 scene of Lake Chelan from the past two weeks, tell me what's burning nearby, and give me a map I can share.",
+          "answer": "No single scene covers the lake — it straddles two Sentinel-2 tiles. The <b>July 30 pair mosaicked automatically</b> (10UFU at 2.8% cloud, 10UGU at 0.01%) to 100% coverage, with <b>four active fires</b> from EONET on top: LITTLE GIANT sitting right at the lake's west end, plus PEARL HILL, SINLAHEKIN and PTARMIGAN.",
+          "artifact": "img/ft4-chelan.html",
+          "artifact_label": "live map ↗",
+          "shows": "search_imagery full_coverage_set, active_events, render_map with a geojson layer",
+          "learning": "This is the July 9 opener re-run. Then it returned one clipped scene. Now the mosaic is the default and nobody had to ask. <b>The first version of this card was broken and a human caught it:</b> the mosaic rendered as a swipe, so each tile sat on its own side of the divider and half the map was blank at every slider position. Auto-mosaic and the older swipe heuristic disagreed — same collection meant \"comparison\" to one and \"two halves of one picture\" to the other. Fixed here, with a regression check pinned to these exact tiles."
+        },
+        {
+          "tag": "auto-mosaic + stack",
+          "who": "the regression case",
+          "prompt": "Show me Calgary. All of it. And show me what's behind the map.",
+          "answer": "Fixed, and smarter than expected. Best single scene covers <b>71.2%</b> — the same missing west edge that needed a reprompt in July. The mosaic fired on its own, and it did not simply grab the newest date: <b>July 31's west tile stops at 51.04°N and Calgary reaches 51.21°N</b>, so it stepped back to the July 29 pair whose union actually covers the city. The Stack panel names the collections, tiler and buckets on screen.",
+          "artifact": "img/ft4-calgary.html",
+          "artifact_label": "live map ↗",
+          "shows": "auto-mosaic, stack_layer",
+          "learning": "The regression that started this feature is closed. The part worth noticing is that \"newest\" and \"covers the AOI\" are different questions, and it answered the second one."
+        }
+      ]
+    },
+    {
+      "name": "Round 2 — the newer artifacts, and index math",
+      "cases": [
+        {
+          "tag": "3d + stack",
+          "who": "the roadshow",
+          "prompt": "Mount Rainier in 3D, and show me what's behind the rendering.",
+          "answer": "A <b>2.1%-cloud July 30 scene at 98.1% coverage</b> draped over Terrarium elevation at 1.8× exaggeration, with a live slider and an orbit. The Stack panel names the terrain source underneath the imagery, not just the imagery.",
+          "artifact": "img/ft4-rainier-3d.html",
+          "artifact_label": "live 3D ↗",
+          "shows": "render_map_3d, stack_layer",
+          "learning": "This is the demo-to-sales-conversation hinge: the picture gets attention, the Stack panel is what turns it into a conversation about the tools that made it."
+        },
+        {
+          "tag": "index postcard",
+          "who": "agriculture",
+          "prompt": "NDVI postcard of the Salinas Valley at the height of the growing season.",
+          "answer": "Made — but <b>the geocoder had to be overridden twice first</b>. \"Salinas Valley\" resolved to a town in the <em>Philippines</em>; \"Salinas Valley California\" resolved to a residential street in Simi Valley, 300 km south. The AOI was set by hand, then an <b>August 3 scene at 5.3% cloud and 100% coverage</b> carried the card.",
+          "artifact": "img/ft4-salinas-ndvi.html",
+          "artifact_label": "postcard ↗",
+          "shows": "render_postcard with expression + colormap + bbox framing, stack_layer",
+          "learning": "The failure mode that matters is not that the geocoder missed. It is that it returned a confident, precisely-bounded wrong answer twice, and an unchecked run would have produced a beautiful NDVI card of the wrong continent."
+        },
+        {
+          "tag": "flood radar",
+          "who": "humanitarian / monsoon",
+          "prompt": "Peak monsoon: assess flooding around Sylhet, Bangladesh using Sentinel-1 radar since optical will be clouded out — compare backscatter now vs pre-monsoon April.",
+          "answer": "Radar cuts straight through the monsoon cloud. The pairing is the careful part: the newest pass is <b>August 3 at 23:47 UTC</b>, but April's is <b>11:56 UTC</b> — a different orbit direction, so the geometry does not compare. Used <b>August 1 at 11:56 UTC</b> instead, matching April 20's pass, both at 100% coverage.",
+          "artifact": "img/ft4-sylhet.html",
+          "artifact_label": "swipe map ↗",
+          "shows": "sentinel-1-grd, render_map compare mode",
+          "learning": "Newest is not the same as comparable. Two SAR scenes from opposing passes will differ in backscatter for reasons that have nothing to do with water on the ground."
+        }
+      ]
+    },
+    {
+      "name": "Round 3 — where the honest answer beat the question",
+      "cases": [
+        {
+          "tag": "epistemics",
+          "who": "marine / coastal",
+          "prompt": "Show me the Wadden Sea tidal flats: latest cloud-free Sentinel-2, compute NDWI, and tell me honestly what you can and cannot say about tide state from one scene.",
+          "answer": "NDVI-style separation works cleanly: <b>mean NDWI −0.21, median −0.46, but the majority value is +0.67</b> and the standard deviation is 0.53. That is a textbook bimodal split — water and not-water, sharply divided, 72% valid pixels. <b>What it cannot tell you is the tide.</b> One scene is one instant in a 12-hour cycle. Without the tide clock for that timestamp, a large exposed flat and a low-water anomaly are the same picture.",
+          "artifact": "img/ft4-wadden.html",
+          "artifact_label": "live map ↗",
+          "shows": "compute_statistics with an expression, render_map overlay",
+          "learning": "The statistics are real and the conclusion the customer wants is still unavailable. Saying so is the product."
+        },
+        {
+          "tag": "catalog trust",
+          "who": "data providers",
+          "prompt": "Find the same recent Sentinel-2 scene over Munich in both earth-search and planetary-computer, compare their reported cloud cover, preview both, and tell me if the catalogs agree.",
+          "answer": "They agree <b>exactly</b> — 1.221937% on both for the August 3 tile, 0.005463% on both for its neighbour, 5.212803% on both for July 31. Six decimal places of agreement is not two independent measurements converging. <b>It is the same ESA-produced metadata republished by two catalogs.</b> Where they genuinely differ is the timestamp: Earth Search reports 10:27:27, Planetary Computer 10:15:59, same granule.",
+          "artifact": "img/ft4-munich.html",
+          "artifact_label": "swipe map ↗",
+          "shows": "cross-catalog search, render_map compare mode",
+          "learning": "Agreement between catalogs is worth almost nothing as a trust signal when both are reading the same upstream field. The datetime disagreement is the one to actually watch, because it will silently break a same-day join."
+        },
+        {
+          "tag": "deforestation",
+          "who": "GNW / nature",
+          "prompt": "It's the start of the Amazon dry season — check the area around Novo Progresso in Pará, Brazil for fresh forest clearing: compare vegetation now vs March, look for new bare patches, be honest about what optical can miss, and map what you find.",
+          "answer": "The August side is excellent: an <b>August 3 mosaic at 0.001–3.2% cloud</b>, NDVI <b>mean 0.74, median 0.83</b>, with the low tail (2nd percentile at <b>0.33</b>) marking the cleared and bare ground. <b>The March side does not exist.</b> Every March scene over this AOI runs <b>50% to 99.99% cloud</b> — March is peak wet season in Pará. The comparison the question asks for cannot be made honestly from optical, and the answer is a dry-season baseline plus a recommendation to use Sentinel-1 for the wet-season leg.",
+          "artifact": "img/ft4-novo-progresso.html",
+          "artifact_label": "live map ↗",
+          "shows": "auto-mosaic, compute_statistics, NDVI overlay",
+          "learning": "\"Be honest about what optical can miss\" turned out to apply to the comparison date rather than the imagery. A year-over-year prompt written from a temperate-latitude intuition does not survive a tropical wet season."
+        },
+        {
+          "tag": "urban heat",
+          "who": "cities / heat risk",
+          "prompt": "Phoenix in July: use MODIS land surface temperature from Planetary Computer to show the urban heat island — the metro versus the surrounding desert — plus this week's forecast highs.",
+          "answer": "<b>The premise is inverted, and the data says so cleanly.</b> Daytime land surface temperature: metro <b>42.8°C</b>, surrounding Sonoran desert <b>45.1°C</b> — the desert is <b>2.3°C hotter</b>. At night it flips: metro <b>34.6°C</b>, desert <b>33.4°C</b>, the city <b>1.2°C warmer</b>. Phoenix's urban heat island is a <em>nighttime</em> phenomenon. Irrigated vegetation and shade cool the metro by day, then concrete releases stored heat after dark. The day-to-night swing tells the same story: desert <b>11.7°C</b>, metro <b>8.2°C</b>. Air temperature meanwhile hit <b>46°C</b> on August 1 and stays in the low 40s all week.",
+          "artifact": "img/ft4-phoenix.html",
+          "artifact_label": "swipe map ↗",
+          "shows": "modis-11A2-061 day + night bands, compute_statistics clipped to two AOIs, weather_summary",
+          "learning": "The single most useful result of the ten, and it only appeared because the statistics were clipped to two named areas rather than read off the whole MODIS tile. Whole-tile stats for this scene span 12°C to 62°C and mean nothing — the tile is most of the American southwest."
+        }
+      ]
+    }
+  ],
+  "repro": "git clone https://github.com/dannybauman/groundstation && cd groundstation\nbash scripts/doctor.sh                    # walks the setup chain, prints the fix\nuv run evals/unit_checks.py               # offline checks\nuv run evals/run_evals.py                 # live checks against real endpoints\nuv run scripts/field_test.py docs/field-test-2026-08-04.cases.json   # rebuild this page",
+  "footer": "field test №4 · August 4, 2026 · the representative 10 drawn from field tests №1–№3, all re-run live · groundstation · Development Seed labs"
+}
