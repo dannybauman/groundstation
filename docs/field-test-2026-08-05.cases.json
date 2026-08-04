@@ -1,0 +1,138 @@
+{
+  "title": "groundstation field test №5 — what changed, and when's the next look",
+  "heading": "THE FIELD TEST №5",
+  "sub": "groundstation · 11 prompts · compare_dates and next_pass make their debut · August 4, 2026 · Development Seed labs",
+  "lede": "A fresh set, built around the two questions every Earth conversation ends with: what changed, and when can we look again. compare_dates and next_pass run for the first time, the coverage_set parameter retires the hand-unrolled mosaic, and the eoAPI attribution shipped this afternoon shows up on a live panel. One case found a real bug and kept it on the card.",
+  "stats": [
+    { "value": "11/11", "label": "prompts answered, all against live data" },
+    { "value": "2", "label": "tools on their first field test (compare_dates, next_pass)" },
+    { "value": "19:11", "label": "predicted next-pass time — matching the archive's real acquisition slot" },
+    { "value": "1", "label": "bug found by a case and filed on the card" }
+  ],
+  "rounds": [
+    {
+      "name": "Round 1 — what changed",
+      "cases": [
+        {
+          "tag": "compare_dates",
+          "who": "agriculture",
+          "prompt": "How is the Palouse harvest going? Compare early July to now.",
+          "answer": "One call. Same tile (11TMN), same satellite (S2B), July 7 vs July 27, both under 0.02% cloud — a clean pair. <b>NDVI fell from 0.419 to 0.319, −23.8% in three weeks.</b> That is the wheat coming off the hills, measured. The swipe map shows the green draining out of the Palouse field by field.",
+          "artifact": "img/ft5-palouse.html",
+          "artifact_label": "swipe map ↗",
+          "shows": "compare_dates — first field test: matched-tile scene pairing, index delta, swipe map in one call",
+          "learning": "The tool's matched-tile discipline is the point: same MGRS tile, same satellite, comparable geometry, so the delta means what it claims to mean."
+        },
+        {
+          "tag": "compare_dates",
+          "who": "water security",
+          "prompt": "Is Lake Mead's surface water noticeably different from a year ago?",
+          "answer": "<b>No — and the tool says so with a straight face.</b> NDWI over the same tile, July 28 2025 vs August 2 2026, both under 0.01% cloud: −2.1%, within seasonal noise. A year of headlines, no measurable surface-area story in this pair. The honest null result is the answer a client can actually use.",
+          "artifact": "img/ft5-lake-mead.html",
+          "artifact_label": "swipe map ↗",
+          "shows": "compare_dates with a custom NDWI expression, year-over-year windows",
+          "learning": "A change tool that can say \"nothing changed\" is worth more than one that always finds a story."
+        },
+        {
+          "tag": "next_pass",
+          "who": "wildfire response",
+          "prompt": "When can we next get imagery of the MITRE ROCK fire in Stevens County?",
+          "answer": "<b>Radar tomorrow, optical Thursday.</b> Sentinel-1C passes Aug 5 at 14:20 UTC (sees through smoke), Sentinel-2B Thursday Aug 6 at 19:00 UTC — daylight, weather permitting. Live TLEs from Celestrak, swath geometry, honest caveat attached: a pass is a possible capture, not a promise, and imagery lands in catalogs hours later. <b>Validation baked in:</b> the tool predicts Sentinel-2 over the Chelan area at 19:11 UTC — the exact acquisition slot stamped on every real Chelan scene in the archive.",
+          "artifact": null,
+          "shows": "next_pass — first field test: Skyfield + live Celestrak TLEs, pattern from developmentseed/eo-predictor",
+          "learning": "\"When can we look again\" is the question disaster responders actually ask, and the prediction agreeing with the archive's real acquisition times is the check that it's not making orbits up."
+        }
+      ]
+    },
+    {
+      "name": "Round 2 — the mosaic grows up, and the stack tells the truth",
+      "cases": [
+        {
+          "tag": "coverage_set",
+          "who": "the regression case",
+          "prompt": "Show me Calgary. All of it. One parameter this time.",
+          "answer": "The two-tile answer is now <b>one layer entry</b>: pass search_imagery's <code>full_coverage_set</code> straight through as <code>{\"type\": \"coverage_set\"}</code> and it expands to a named layer per scene — no hand-unrolling, no dropped tiles, auto-overlay instead of a swipe. The render reports no coverage_note, which is the machine agreeing the city is whole.",
+          "artifact": "img/ft5-calgary-oneparam.html",
+          "artifact_label": "live map ↗",
+          "shows": "the new coverage_set layer type, auto-mosaic ergonomics",
+          "learning": "Field test №4 shipped a 58%-coverage map because a human unrolled a coverage set by hand and dropped scenes. The fix wasn't a warning — it was making the right thing the easy thing. The warning stayed too."
+        },
+        {
+          "tag": "same-day imagery",
+          "who": "fire monitoring",
+          "prompt": "GDACS lists active forest fires in Angola. What does the newest imagery show?",
+          "answer": "The newest imagery is <b>from this morning</b> — Sentinel-2 acquired at 09:23 UTC today, four tiles mosaicked to 100% coverage via one coverage_set entry, with the GDACS fire zone marked. Southern-hemisphere dry season, burn scars and smoke visible in true colour, hours old.",
+          "artifact": "img/ft5-angola.html",
+          "artifact_label": "live map ↗",
+          "shows": "coverage_set + active_events on one map, acquisition-to-artifact same day",
+          "learning": "The satellite-to-shareable-map latency here is measured in hours, and no key or account was involved at any step."
+        },
+        {
+          "tag": "eoAPI on the panel",
+          "who": "the attribution case",
+          "prompt": "Show me Caldor fire burn severity from NASA VEDA, and show me what's serving it.",
+          "answer": "The burn severity layer renders as before — but the Stack panel now carries a new row: <b>eoAPI, DevSeed-created, serving VEDA's catalog and raster APIs.</b> Verified this afternoon against openveda.cloud's own API landing page (stac-fastapi). Every VEDA layer in every previous field test was served by eoAPI too; the panel just never said so. Now the filled DevSeed badge sits on the serving layer behind a data row, not only on the tiler.",
+          "artifact": "img/ft5-caldor-eoapi.html",
+          "artifact_label": "live map ↗",
+          "shows": "stack_layer with the new eoAPI attribution — joined only when VEDA pixels are on screen",
+          "learning": "The best attribution fix of the day cost zero deployments: the DevSeed-built instance was already in production at NASA, unclaimed."
+        },
+        {
+          "tag": "band scaling",
+          "who": "heat risk / Europe",
+          "prompt": "How hot is the ground in Seville right now — in actual degrees?",
+          "answer": "MODIS 8-day surface temperature, clipped to the city: <b>mean 34.5°C ground temperature</b> — and the conversion is no longer folklore. The stats response now carries <code>band_scaling</code> read from STAC's raster:bands (<b>scale 0.02, unit Kelvin</b>), so raw DN 15382 becomes 34.5°C by the catalog's own declaration, not a magic number someone remembered. Unclipped, the response warns the tile spans 13° × 10°.",
+          "artifact": "img/ft5-seville-lst.html",
+          "artifact_label": "live map ↗",
+          "shows": "compute_statistics with aoi clip, band_scaling passthrough, extent_note guard",
+          "learning": "The scale factor was always in the catalog. Passing it through is the difference between a number and an answer."
+        }
+      ]
+    },
+    {
+      "name": "Round 3 — partner-shaped, and one honest bug",
+      "cases": [
+        {
+          "tag": "public space",
+          "who": "Trust for Public Land-shaped",
+          "prompt": "For south Atlanta, can a project manager benchmark public green space access within a geography?",
+          "answer": "The raw material, on one map: <b>60cm NAIP aerial photography with ESA WorldCover land classes as a toggle</b> — tree cover, grassland, built-up, at 10m, over imagery sharp enough to see individual ball fields. This is the shape of a real inbound (an org that wants exactly this benchmarked for any US community), and the honest framing is that this map is the start of that conversation, not the product: the product needs park boundaries, population, and access analysis built on top.",
+          "artifact": "img/ft5-atlanta-parks.html",
+          "artifact_label": "live map ↗",
+          "shows": "NAIP + WorldCover toggle on planetary-computer, the demo-to-scoping-conversation move",
+          "learning": "A sandbox answer that names what it is NOT (the access analysis) sells the build better than overclaiming would."
+        },
+        {
+          "tag": "3d + geocode guard",
+          "who": "the roadshow",
+          "prompt": "The Matterhorn in 3D.",
+          "answer": "Nominatim returned the Matterhorn as a <b>point</b> — a bbox 0.0001° wide, which last month would have made an empty 3D scene. The geocoder now widens it to a 0.3° box and says so in <code>bbox_note</code>. On that box: a <b>0.0007%-cloud July 24 scene</b> draped at 1.6× exaggeration, orbit and slider live.",
+          "artifact": "img/ft5-matterhorn-3d.html",
+          "artifact_label": "live 3D ↗",
+          "shows": "the degenerate-bbox guard from field test №4, render_map_3d",
+          "learning": "Peaks and landmarks are OSM nodes, not areas. The guard turns a silent empty scene into a stated assumption the caller can override."
+        },
+        {
+          "tag": "honest bug",
+          "who": "polar / antimeridian",
+          "prompt": "Iceberg B22A sits near the Ross Sea. What does the archive actually have over it?",
+          "answer": "Plenty — and a bug. Sentinel-1 images the area <b>daily</b> in extra-wide polar mode (HH/HV, radar, so polar night is no obstacle; optical is dead there until spring). But every result reports <b>covers_aoi_pct: 0</b>, which is false: the scene footprints cross the <b>antimeridian</b>, their bboxes wrap west-greater-than-east, and the coverage math reads that as a degenerate box. The scenes cover the iceberg; the number says they don't.",
+          "artifact": null,
+          "shows": "orbit_state on results, EW-mode HH/HV assets, and a found limitation filed as a finding",
+          "learning": "Filed: covers_aoi_pct (and full_coverage_set, which builds on it) is wrong for antimeridian-crossing scenes. A field test that only shows the wins isn't a test."
+        },
+        {
+          "tag": "next_pass + radar",
+          "who": "the pairing",
+          "prompt": "So when will Sentinel-1 next sweep the B22A area?",
+          "answer": "The two tools answer together: the archive shows <b>ascending EW passes on Aug 1, 2, and 3</b> — near-daily radar coverage — and next_pass projects the cadence forward from live TLEs. For a drifting iceberg in polar winter this is the whole monitoring story: radar, day or night, cloud irrelevant, roughly a pass a day, imagery in the catalog hours behind the satellite.",
+          "artifact": null,
+          "shows": "orbit_state + next_pass composing into a monitoring answer",
+          "learning": "\"What's there\" and \"when's the next look\" are one question to a responder. The tools now answer it as one."
+        }
+      ]
+    }
+  ],
+  "repro": "git clone https://github.com/dannybauman/groundstation && cd groundstation\nbash scripts/doctor.sh                    # walks the setup chain, prints the fix\nuv run evals/unit_checks.py               # offline checks\nuv run evals/run_evals.py                 # live checks against real endpoints\nuv run scripts/field_test.py docs/field-test-2026-08-05.cases.json   # rebuild this page",
+  "footer": "field test №5 · August 4, 2026 · compare_dates and next_pass debut · groundstation · Development Seed labs"
+}

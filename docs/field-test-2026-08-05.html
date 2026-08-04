@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>groundstation field test №5 — what changed, and when's the next look</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
+  --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
+  --calm: #2e7d32; --blue: #1d4e8f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
+header { border-bottom: 2px solid var(--ink); padding: 42px 24px 30px; }
+.wrap { max-width: 1060px; margin: 0 auto; }
+header h1 { font: 700 34px/1.1 'Roboto Condensed', sans-serif; margin: 0 0 6px; letter-spacing: .02em; }
+header h1 .dot { display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); margin-right: 12px; }
+header .sub { font: 500 11.5px 'Roboto Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--mid); }
+header p.lede { max-width: 760px; font-size: 16px; margin: 16px 0 0; color: var(--mid); }
+.stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 26px auto 0; max-width: 1060px; padding: 0; }
+.stat { flex: 1; min-width: 160px; background: var(--white); border: 1px solid var(--rule); border-top: 3px solid var(--accent); padding: 12px 16px; }
+.stat b { display: block; font: 600 30px 'Roboto Condensed', sans-serif; color: var(--accent); }
+.stat span { font-size: 12px; color: var(--mid); }
+main { padding: 10px 24px 60px; }
+h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
+  display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
+h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 16px; }
+@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.card .top { display: flex; align-items: center; gap: 10px; }
+.card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.card .tag { font: 500 10px 'Roboto Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); border: 1px solid var(--rule); padding: 3px 8px; }
+.card .who { margin-left: auto; font: 400 10.5px 'Roboto Mono', monospace; color: var(--muted); }
+.label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
+.answer { font-size: 13.5px; color: var(--mid); }
+.answer b { color: var(--ink); }
+.learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
+.learning b { color: var(--accent); font-style: normal; }
+.shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
+.fig { position: relative; display: block; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; }
+.fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
+  background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
+.fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 0 40px; }
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <h1><span class="dot"></span>THE FIELD TEST №5</h1>
+  <div class="sub">groundstation · 11 prompts · compare_dates and next_pass make their debut · August 4, 2026 · Development Seed labs</div>
+  <p class="lede">A fresh set, built around the two questions every Earth conversation ends with: what changed, and when can we look again. compare_dates and next_pass run for the first time, the coverage_set parameter retires the hand-unrolled mosaic, and the eoAPI attribution shipped this afternoon shows up on a live panel. One case found a real bug and kept it on the card.</p>
+</div></header>
+
+<div class="stats wrap" style="padding: 0 24px">
+  <div class="stat"><b>11/11</b><span>prompts answered, all against live data</span></div>
+  <div class="stat"><b>2</b><span>tools on their first field test (compare_dates, next_pass)</span></div>
+  <div class="stat"><b>19:11</b><span>predicted next-pass time — matching the archive's real acquisition slot</span></div>
+  <div class="stat"><b>1</b><span>bug found by a case and filed on the card</span></div>
+</div>
+
+<main class="wrap">
+<h2 class="round">Round 1 — what changed</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">1</div><div class="tag">compare_dates</div><div class="who">agriculture</div></div>
+<div><div class="label">Input</div><div class="prompt">How is the Palouse harvest going? Compare early July to now.</div></div>
+<div class="answer"><div class="label">Output</div>One call. Same tile (11TMN), same satellite (S2B), July 7 vs July 27, both under 0.02% cloud — a clean pair. <b>NDVI fell from 0.419 to 0.319, −23.8% in three weeks.</b> That is the wheat coming off the hills, measured. The swipe map shows the green draining out of the Palouse field by field.</div>
+<a class="fig" href="img/ft5-palouse.html" target="_blank" title="open the live artifact"><img src="img/ft5-palouse.png" alt="artifact produced by example 1" loading="lazy"><span class="open">swipe map ↗</span></a>
+<div class="learning"><b>Learning →</b> The tool's matched-tile discipline is the point: same MGRS tile, same satellite, comparable geometry, so the delta means what it claims to mean.</div>
+<div class="shows">compare_dates — first field test: matched-tile scene pairing, index delta, swipe map in one call</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">2</div><div class="tag">compare_dates</div><div class="who">water security</div></div>
+<div><div class="label">Input</div><div class="prompt">Is Lake Mead's surface water noticeably different from a year ago?</div></div>
+<div class="answer"><div class="label">Output</div><b>No — and the tool says so with a straight face.</b> NDWI over the same tile, July 28 2025 vs August 2 2026, both under 0.01% cloud: −2.1%, within seasonal noise. A year of headlines, no measurable surface-area story in this pair. The honest null result is the answer a client can actually use.</div>
+<a class="fig" href="img/ft5-lake-mead.html" target="_blank" title="open the live artifact"><img src="img/ft5-lake-mead.png" alt="artifact produced by example 2" loading="lazy"><span class="open">swipe map ↗</span></a>
+<div class="learning"><b>Learning →</b> A change tool that can say "nothing changed" is worth more than one that always finds a story.</div>
+<div class="shows">compare_dates with a custom NDWI expression, year-over-year windows</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">3</div><div class="tag">next_pass</div><div class="who">wildfire response</div></div>
+<div><div class="label">Input</div><div class="prompt">When can we next get imagery of the MITRE ROCK fire in Stevens County?</div></div>
+<div class="answer"><div class="label">Output</div><b>Radar tomorrow, optical Thursday.</b> Sentinel-1C passes Aug 5 at 14:20 UTC (sees through smoke), Sentinel-2B Thursday Aug 6 at 19:00 UTC — daylight, weather permitting. Live TLEs from Celestrak, swath geometry, honest caveat attached: a pass is a possible capture, not a promise, and imagery lands in catalogs hours later. <b>Validation baked in:</b> the tool predicts Sentinel-2 over the Chelan area at 19:11 UTC — the exact acquisition slot stamped on every real Chelan scene in the archive.</div>
+<div class="learning"><b>Learning →</b> "When can we look again" is the question disaster responders actually ask, and the prediction agreeing with the archive's real acquisition times is the check that it's not making orbits up.</div>
+<div class="shows">next_pass — first field test: Skyfield + live Celestrak TLEs, pattern from developmentseed/eo-predictor</div>
+</div>
+</div>
+
+<h2 class="round">Round 2 — the mosaic grows up, and the stack tells the truth</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">4</div><div class="tag">coverage_set</div><div class="who">the regression case</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me Calgary. All of it. One parameter this time.</div></div>
+<div class="answer"><div class="label">Output</div>The two-tile answer is now <b>one layer entry</b>: pass search_imagery's <code>full_coverage_set</code> straight through as <code>{"type": "coverage_set"}</code> and it expands to a named layer per scene — no hand-unrolling, no dropped tiles, auto-overlay instead of a swipe. The render reports no coverage_note, which is the machine agreeing the city is whole.</div>
+<a class="fig" href="img/ft5-calgary-oneparam.html" target="_blank" title="open the live artifact"><img src="img/ft5-calgary-oneparam.png" alt="artifact produced by example 4" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="learning"><b>Learning →</b> Field test №4 shipped a 58%-coverage map because a human unrolled a coverage set by hand and dropped scenes. The fix wasn't a warning — it was making the right thing the easy thing. The warning stayed too.</div>
+<div class="shows">the new coverage_set layer type, auto-mosaic ergonomics</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">5</div><div class="tag">same-day imagery</div><div class="who">fire monitoring</div></div>
+<div><div class="label">Input</div><div class="prompt">GDACS lists active forest fires in Angola. What does the newest imagery show?</div></div>
+<div class="answer"><div class="label">Output</div>The newest imagery is <b>from this morning</b> — Sentinel-2 acquired at 09:23 UTC today, four tiles mosaicked to 100% coverage via one coverage_set entry, with the GDACS fire zone marked. Southern-hemisphere dry season, burn scars and smoke visible in true colour, hours old.</div>
+<a class="fig" href="img/ft5-angola.html" target="_blank" title="open the live artifact"><img src="img/ft5-angola.png" alt="artifact produced by example 5" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="learning"><b>Learning →</b> The satellite-to-shareable-map latency here is measured in hours, and no key or account was involved at any step.</div>
+<div class="shows">coverage_set + active_events on one map, acquisition-to-artifact same day</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">6</div><div class="tag">eoAPI on the panel</div><div class="who">the attribution case</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me Caldor fire burn severity from NASA VEDA, and show me what's serving it.</div></div>
+<div class="answer"><div class="label">Output</div>The burn severity layer renders as before — but the Stack panel now carries a new row: <b>eoAPI, DevSeed-created, serving VEDA's catalog and raster APIs.</b> Verified this afternoon against openveda.cloud's own API landing page (stac-fastapi). Every VEDA layer in every previous field test was served by eoAPI too; the panel just never said so. Now the filled DevSeed badge sits on the serving layer behind a data row, not only on the tiler.</div>
+<a class="fig" href="img/ft5-caldor-eoapi.html" target="_blank" title="open the live artifact"><img src="img/ft5-caldor-eoapi.png" alt="artifact produced by example 6" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="learning"><b>Learning →</b> The best attribution fix of the day cost zero deployments: the DevSeed-built instance was already in production at NASA, unclaimed.</div>
+<div class="shows">stack_layer with the new eoAPI attribution — joined only when VEDA pixels are on screen</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">7</div><div class="tag">band scaling</div><div class="who">heat risk / Europe</div></div>
+<div><div class="label">Input</div><div class="prompt">How hot is the ground in Seville right now — in actual degrees?</div></div>
+<div class="answer"><div class="label">Output</div>MODIS 8-day surface temperature, clipped to the city: <b>mean 34.5°C ground temperature</b> — and the conversion is no longer folklore. The stats response now carries <code>band_scaling</code> read from STAC's raster:bands (<b>scale 0.02, unit Kelvin</b>), so raw DN 15382 becomes 34.5°C by the catalog's own declaration, not a magic number someone remembered. Unclipped, the response warns the tile spans 13° × 10°.</div>
+<a class="fig" href="img/ft5-seville-lst.html" target="_blank" title="open the live artifact"><img src="img/ft5-seville-lst.png" alt="artifact produced by example 7" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="learning"><b>Learning →</b> The scale factor was always in the catalog. Passing it through is the difference between a number and an answer.</div>
+<div class="shows">compute_statistics with aoi clip, band_scaling passthrough, extent_note guard</div>
+</div>
+</div>
+
+<h2 class="round">Round 3 — partner-shaped, and one honest bug</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">8</div><div class="tag">public space</div><div class="who">Trust for Public Land-shaped</div></div>
+<div><div class="label">Input</div><div class="prompt">For south Atlanta, can a project manager benchmark public green space access within a geography?</div></div>
+<div class="answer"><div class="label">Output</div>The raw material, on one map: <b>60cm NAIP aerial photography with ESA WorldCover land classes as a toggle</b> — tree cover, grassland, built-up, at 10m, over imagery sharp enough to see individual ball fields. This is the shape of a real inbound (an org that wants exactly this benchmarked for any US community), and the honest framing is that this map is the start of that conversation, not the product: the product needs park boundaries, population, and access analysis built on top.</div>
+<a class="fig" href="img/ft5-atlanta-parks.html" target="_blank" title="open the live artifact"><img src="img/ft5-atlanta-parks.png" alt="artifact produced by example 8" loading="lazy"><span class="open">live map ↗</span></a>
+<div class="learning"><b>Learning →</b> A sandbox answer that names what it is NOT (the access analysis) sells the build better than overclaiming would.</div>
+<div class="shows">NAIP + WorldCover toggle on planetary-computer, the demo-to-scoping-conversation move</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">9</div><div class="tag">3d + geocode guard</div><div class="who">the roadshow</div></div>
+<div><div class="label">Input</div><div class="prompt">The Matterhorn in 3D.</div></div>
+<div class="answer"><div class="label">Output</div>Nominatim returned the Matterhorn as a <b>point</b> — a bbox 0.0001° wide, which last month would have made an empty 3D scene. The geocoder now widens it to a 0.3° box and says so in <code>bbox_note</code>. On that box: a <b>0.0007%-cloud July 24 scene</b> draped at 1.6× exaggeration, orbit and slider live.</div>
+<a class="fig" href="img/ft5-matterhorn-3d.html" target="_blank" title="open the live artifact"><img src="img/ft5-matterhorn-3d.png" alt="artifact produced by example 9" loading="lazy"><span class="open">live 3D ↗</span></a>
+<div class="learning"><b>Learning →</b> Peaks and landmarks are OSM nodes, not areas. The guard turns a silent empty scene into a stated assumption the caller can override.</div>
+<div class="shows">the degenerate-bbox guard from field test №4, render_map_3d</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">10</div><div class="tag">honest bug</div><div class="who">polar / antimeridian</div></div>
+<div><div class="label">Input</div><div class="prompt">Iceberg B22A sits near the Ross Sea. What does the archive actually have over it?</div></div>
+<div class="answer"><div class="label">Output</div>Plenty — and a bug. Sentinel-1 images the area <b>daily</b> in extra-wide polar mode (HH/HV, radar, so polar night is no obstacle; optical is dead there until spring). But every result reports <b>covers_aoi_pct: 0</b>, which is false: the scene footprints cross the <b>antimeridian</b>, their bboxes wrap west-greater-than-east, and the coverage math reads that as a degenerate box. The scenes cover the iceberg; the number says they don't.</div>
+<div class="learning"><b>Learning →</b> Filed: covers_aoi_pct (and full_coverage_set, which builds on it) is wrong for antimeridian-crossing scenes. A field test that only shows the wins isn't a test.</div>
+<div class="shows">orbit_state on results, EW-mode HH/HV assets, and a found limitation filed as a finding</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">11</div><div class="tag">next_pass + radar</div><div class="who">the pairing</div></div>
+<div><div class="label">Input</div><div class="prompt">So when will Sentinel-1 next sweep the B22A area?</div></div>
+<div class="answer"><div class="label">Output</div>The two tools answer together: the archive shows <b>ascending EW passes on Aug 1, 2, and 3</b> — near-daily radar coverage — and next_pass projects the cadence forward from live TLEs. For a drifting iceberg in polar winter this is the whole monitoring story: radar, day or night, cloud irrelevant, roughly a pass a day, imagery in the catalog hours behind the satellite.</div>
+<div class="learning"><b>Learning →</b> "What's there" and "when's the next look" are one question to a responder. The tools now answer it as one.</div>
+<div class="shows">orbit_state + next_pass composing into a monitoring answer</div>
+</div>
+</div>
+<div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
+bash scripts/doctor.sh                    # walks the setup chain, prints the fix
+uv run evals/unit_checks.py               # offline checks
+uv run evals/run_evals.py                 # live checks against real endpoints
+uv run scripts/field_test.py docs/field-test-2026-08-05.cases.json   # rebuild this page</code></div>
+</main>
+
+<footer>field test №5 · August 4, 2026 · compare_dates and next_pass debut · groundstation · Development Seed labs</footer>
+
+</body>
+</html>
