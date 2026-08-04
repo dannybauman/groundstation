@@ -97,28 +97,38 @@ FULL_COVERAGE_PCT = 99.0
 def _union_coverage_pct(aoi: list[float], boxes: list[list[float]]) -> float:
     """Union coverage of the AOI by several bboxes — exact for axis-aligned
     rectangles (coordinate-sweep grid), so overlapping tiles never double-count."""
-    aw, as_, ae, an = aoi
-    aoi_area = (ae - aw) * (an - as_)
+    aoi_parts = _split_antimeridian(aoi)
+    aoi_area = sum((part[2] - part[0]) * (part[3] - part[1]) for part in aoi_parts)
     if aoi_area <= 0:
         return 0.0
-    clipped = []
+    split_boxes = []
     for b in boxes:
-        if not b or len(b) < 4:
+        split_boxes.extend(_split_antimeridian(b))
+    total_covered = 0.0
+    for part in aoi_parts:
+        paw, pas_, pae, pan = part
+        clipped = []
+        for b in split_boxes:
+            if not b or len(b) < 4:
+                continue
+            w = max(paw, b[0])
+            s = max(pas_, b[1])
+            e = min(pae, b[2])
+            n = min(pan, b[3])
+            if e > w and n > s:
+                clipped.append((w, s, e, n))
+        if not clipped:
             continue
-        w, s, e, n = max(aw, b[0]), max(as_, b[1]), min(ae, b[2]), min(an, b[3])
-        if e > w and n > s:
-            clipped.append((w, s, e, n))
-    if not clipped:
-        return 0.0
-    xs = sorted({v for r in clipped for v in (r[0], r[2])})
-    ys = sorted({v for r in clipped for v in (r[1], r[3])})
-    covered = 0.0
-    for i in range(len(xs) - 1):
-        for j in range(len(ys) - 1):
-            cx, cy = (xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2
-            if any(r[0] <= cx <= r[2] and r[1] <= cy <= r[3] for r in clipped):
-                covered += (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j])
-    return round(100.0 * covered / aoi_area, 1)
+        xs = sorted({v for r in clipped for v in (r[0], r[2])})
+        ys = sorted({v for r in clipped for v in (r[1], r[3])})
+        covered = 0.0
+        for i in range(len(xs) - 1):
+            for j in range(len(ys) - 1):
+                cx, cy = (xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2
+                if any(r[0] <= cx <= r[2] and r[1] <= cy <= r[3] for r in clipped):
+                    covered += (xs[i + 1] - xs[i]) * (ys[j + 1] - ys[j])
+        total_covered += covered
+    return round(100.0 * total_covered / aoi_area, 1)
 
 
 def find_full_coverage_set(
@@ -408,24 +418,40 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
         **({"orbit_state": props["sat:orbit_state"]} if props.get("sat:orbit_state") else {}),
     }
 
+def _split_antimeridian(box: list[float]) -> list[list[float]]:
+    # Per RFC 7946 §5.2, a bbox with west > east is the antimeridian-crossing form, not an invalid box
+    if not box or len(box) < 4:
+        return []
+    w, s, e, n = box
+    if w > e:
+        return [
+            [w, s, 180.0, n],
+            [-180.0, s, e, n]
+        ]
+    return [box]
+
 
 def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float | None:
     # ponytail: bbox-overlap approximation — a tilted scene footprint covers
-    # less than its bbox suggests, and antimeridian-crossing boxes aren't
-    # handled; good enough to separate "clips the corner" from "covers the
-    # whole AOI" at city scale, swap in real footprint geometry if it matters.
+    # less than its bbox suggests; split-at-180 handles antimeridian crossing,
+    # swap in real footprint geometry if it matters.
     if not item_bbox or len(item_bbox) < 4:
         return None
-    aoi_area = (aoi[2] - aoi[0]) * (aoi[3] - aoi[1])
+    aoi_parts = _split_antimeridian(aoi)
+    aoi_area = sum((part[2] - part[0]) * (part[3] - part[1]) for part in aoi_parts)
     if aoi_area <= 0:
         return None
-    w = max(aoi[0], item_bbox[0])
-    s = max(aoi[1], item_bbox[1])
-    e = min(aoi[2], item_bbox[2])
-    n = min(aoi[3], item_bbox[3])
-    if e <= w or n <= s:
-        return 0.0
-    return round(100.0 * (e - w) * (n - s) / aoi_area, 1)
+    item_parts = _split_antimeridian(item_bbox)
+    total_overlap = 0.0
+    for ap in aoi_parts:
+        for ip in item_parts:
+            w = max(ap[0], ip[0])
+            s = max(ap[1], ip[1])
+            e = min(ap[2], ip[2])
+            n = min(ap[3], ip[3])
+            if e > w and n > s:
+                total_overlap += (e - w) * (n - s)
+    return round(100.0 * total_overlap / aoi_area, 1)
 
 
 def search_imagery(
@@ -1005,8 +1031,20 @@ def _footprints_overlap(resolved: list[dict[str, Any]], min_frac: float = 0.6) -
     if len(boxes) != 2:
         return True
     a, b = boxes
-    inter = max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
-    smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    a_parts = _split_antimeridian(a)
+    b_parts = _split_antimeridian(b)
+    area_a = sum((p[2] - p[0]) * (p[3] - p[1]) for p in a_parts)
+    area_b = sum((p[2] - p[0]) * (p[3] - p[1]) for p in b_parts)
+    inter = 0.0
+    for pa in a_parts:
+        for pb in b_parts:
+            w = max(pa[0], pb[0])
+            s = max(pa[1], pb[1])
+            e = min(pa[2], pb[2])
+            n = min(pa[3], pb[3])
+            if e > w and n > s:
+                inter += (e - w) * (n - s)
+    smaller = min(area_a, area_b)
     return smaller > 0 and inter / smaller >= min_frac
 
 
