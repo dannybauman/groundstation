@@ -61,6 +61,40 @@ def t_coverage_degenerate_inputs():
     assert _bbox_coverage_pct(aoi, [-115.0]) is None
 
 
+def t_coverage_antimeridian():
+    # 1. Pinned real B22A case (crossing scene, normal AOI)
+    aoi_b22a = [-178.5, -68.6, -175.4, -65.6]
+    scene_b22a = [177.5841928816539, -69.74115112594123, -171.51300204756348, -66.10281509848461]
+    cov = _bbox_coverage_pct(aoi_b22a, scene_b22a)
+    assert cov is not None
+    assert 80.0 < cov < 90.0, f"Expected coverage between 80 and 90, got {cov}"
+
+    # 2. Crossing AOI vs non-crossing scene
+    crossing_aoi = [179.0, -10.0, -179.0, 10.0]  # wraps across 180 (width 2 degrees)
+    normal_scene_inside = [-179.8, -5.0, -179.2, 5.0]  # inside the eastern part of AOI
+    cov2 = _bbox_coverage_pct(crossing_aoi, normal_scene_inside)
+    assert cov2 == 15.0, f"Expected coverage 15.0, got {cov2}"
+
+    # 3. Non-crossing AOI vs crossing scene
+    normal_aoi = [-179.5, -10.0, -178.5, 10.0]
+    crossing_scene = [179.0, -5.0, -179.0, 5.0]
+    cov3 = _bbox_coverage_pct(normal_aoi, crossing_scene)
+    assert cov3 == 25.0, f"Expected coverage 25.0, got {cov3}"
+
+    # 4. Union coverage crossing
+    cov_union = tools._union_coverage_pct(crossing_aoi, [[179.5, -5.0, 180.0, 5.0], [-180.0, -5.0, -179.5, 5.0]])
+    assert cov_union == 25.0, f"Expected union coverage 25.0, got {cov_union}"
+
+    # 5. Footprints overlap crossing
+    layer_a = {"type": "raster", "bounds": [179.0, -10.0, -179.0, 10.0]}
+    layer_b = {"type": "raster", "bounds": [179.5, -10.0, -179.5, 10.0]}
+    assert tools._footprints_overlap([layer_a, layer_b]) is True
+
+    layer_c = {"type": "raster", "bounds": [179.0, -10.0, 179.5, 10.0]}
+    layer_d = {"type": "raster", "bounds": [-179.5, -10.0, -179.0, 10.0]}
+    assert tools._footprints_overlap([layer_c, layer_d]) is False
+
+
 def _fcs_item(id_, day, bbox, collection="sentinel-2-l2a"):
     return {"id": id_, "datetime": f"{day}T18:30:00Z", "bbox": bbox, "collection": collection}
 
