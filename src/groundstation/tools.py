@@ -2423,7 +2423,10 @@ def conditions_brief(
         daily = weather.get("daily", {})
         time_arr = daily.get("time", [])
 
-        # The indices: today is index days_back, tomorrow is index days_back + 1
+        # Today is index days_back, tomorrow is index days_back + 1.
+        # This is positional rather than date-based because weather_summary calls Open-Meteo
+        # with timezone=auto. "Today" in the returned array is the location's today, and looking
+        # it up by the local machine's date would be wrong whenever the AOI is in a different day.
         # Let's check bounds to prevent index errors
         today_idx = days_back
         tomorrow_idx = days_back + 1
