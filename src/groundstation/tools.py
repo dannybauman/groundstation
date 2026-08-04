@@ -2281,3 +2281,270 @@ def next_pass(
             "Pattern: developmentseed/eo-predictor"
         ),
     }
+
+
+def _compass(deg: float | None) -> str:
+    """Format dominant wind direction (meteorological: direction wind comes FROM) into a compass word."""
+    if deg is None:
+        return "unknown"
+    deg = float(deg) % 360
+    sectors = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+    idx = int(((deg + 22.5) % 360) // 45)
+    return f"from the {sectors[idx]}"
+
+
+def _normalize_event_type(category: str | None, type_str: str | None) -> str:
+    """Map NASA EONET categories and GDACS event types to a canonical form."""
+    cat = (category or "").lower()
+    t = (type_str or "").lower()
+    if "wildfire" in cat or "wildfire" in t or t == "wf":
+        return "wildfire"
+    if "storm" in cat or "cyclone" in t or "storm" in t or t == "tc":
+        return "storm"
+    if "volcano" in cat or "volcano" in t or t == "vo":
+        return "volcano"
+    if "flood" in cat or "flood" in t or t == "fl":
+        return "flood"
+    if "earthquake" in cat or "earthquake" in t or t == "eq":
+        return "earthquake"
+    return "other"
+
+
+def _conditions_signals(dryness: dict[str, Any], wind: dict[str, Any], events: dict[str, Any]) -> list[str]:
+    """Derive verbatim fact strings from dryness, wind, and active events."""
+    signals = []
+
+    # Dryness signal
+    if "error" in dryness or not dryness:
+        signals.append("dryness data unavailable")
+    else:
+        days_since = dryness.get("days_since_last_rain")
+        days_back = dryness.get("days_back", 14)
+        if days_since is None:
+            signals.append(f"no rain ≥1mm in the last {days_back} days")
+        else:
+            if days_since == 1:
+                signals.append("last rain ≥1mm was 1 day ago")
+            else:
+                signals.append(f"last rain ≥1mm was {days_since} days ago")
+
+    # Wind signal
+    if "error" in wind or not wind:
+        signals.append("wind data unavailable")
+    else:
+        today = wind.get("today", {})
+        today_speed = today.get("wind_speed_max")
+        today_compass = today.get("wind_direction_compass")
+        if today_speed is not None and today_compass:
+            signals.append(f"peak wind today {round(today_speed)} km/h {today_compass}")
+
+    # Events signal
+    if not events or ("eonet_error" in events and "gdacs_error" in events):
+        signals.append("active events data unavailable")
+    else:
+        eonet_list = events.get("eonet", []) or []
+        gdacs_list = events.get("gdacs", []) or []
+
+        counts = {}
+        for ev in eonet_list:
+            t = _normalize_event_type(ev.get("category"), None)
+            counts[t] = counts.get(t, 0) + 1
+        for ev in gdacs_list:
+            t = _normalize_event_type(None, ev.get("type"))
+            counts[t] = counts.get(t, 0) + 1
+
+        plurals = {
+            "wildfire": "wildfires",
+            "storm": "storms",
+            "volcano": "volcanoes",
+            "flood": "floods",
+            "earthquake": "earthquakes",
+            "other": "other events",
+        }
+        singulars = {
+            "wildfire": "wildfire",
+            "storm": "storm",
+            "volcano": "volcano",
+            "flood": "flood",
+            "earthquake": "earthquake",
+            "other": "other event",
+        }
+
+        event_signals = []
+        for t in ["wildfire", "storm", "volcano", "flood", "earthquake", "other"]:
+            c = counts.get(t, 0)
+            if c > 0:
+                if c == 1:
+                    event_signals.append(f"1 active {singulars[t]} within ~150 km")
+                else:
+                    event_signals.append(f"{c} active {plurals[t]} within ~150 km")
+
+        if event_signals:
+            signals.extend(event_signals)
+        else:
+            signals.append("no active events within ~150 km")
+
+    return signals
+
+
+def conditions_brief(
+    place: str | None = None,
+    lat: float | None = None,
+    lon: float | None = None,
+    days_back: int = 14,
+) -> dict[str, Any]:
+    """Provide a brief summary of current conditions around a location.
+
+    Resolves the place name or coordinates, aggregates dryness, wind, active events,
+    latest Sentinel-2 look, and upcoming satellite passes, then generates honest,
+    verbatim fact signals.
+    """
+    # ponytail: no terrain in v1 — add Copernicus DEM relief when a real case wants it
+    if place:
+        g = geocode(place)
+        if "error" in g:
+            return g
+        lat = g.get("lat")
+        lon = g.get("lon")
+        bbox = g.get("bbox")
+    elif lat is not None and lon is not None:
+        bbox = [lon - 0.25, lat - 0.25, lon + 0.25, lat + 0.25]
+    else:
+        return {"error": "Provide place or lat and lon"}
+
+    if lat is None or lon is None or bbox is None:
+        return {"error": "Could not resolve location coordinates or bbox"}
+
+    brief: dict[str, Any] = {}
+
+    # 1. dryness and wind (from weather_summary)
+    try:
+        weather = weather_summary(lat, lon, past_days=days_back)
+        daily = weather.get("daily", {})
+        time_arr = daily.get("time", [])
+
+        # Today is index days_back, tomorrow is index days_back + 1.
+        # This is positional rather than date-based because weather_summary calls Open-Meteo
+        # with timezone=auto. "Today" in the returned array is the location's today, and looking
+        # it up by the local machine's date would be wrong whenever the AOI is in a different day.
+        # Let's check bounds to prevent index errors
+        today_idx = days_back
+        tomorrow_idx = days_back + 1
+
+        dryness = {}
+        wind = {}
+
+        if today_idx < len(time_arr):
+            precip_past_today = daily.get("precipitation_sum", [])[:today_idx + 1]
+            total_precip = round(sum(precip_past_today), 1) if precip_past_today else 0.0
+
+            days_since = None
+            for i in range(len(precip_past_today)):
+                idx = len(precip_past_today) - 1 - i
+                val = precip_past_today[idx]
+                if val is not None and val >= 1.0:
+                    days_since = i
+                    break
+
+            dryness = {
+                "total_precipitation": total_precip,
+                "days_since_last_rain": days_since,
+                "days_back": days_back,
+            }
+
+            today_speed = daily.get("wind_speed_10m_max", [None])[today_idx]
+            today_dir = daily.get("wind_direction_10m_dominant", [None])[today_idx]
+            tomorrow_speed = daily.get("wind_speed_10m_max", [None])[tomorrow_idx] if tomorrow_idx < len(time_arr) else None
+            tomorrow_dir = daily.get("wind_direction_10m_dominant", [None])[tomorrow_idx] if tomorrow_idx < len(time_arr) else None
+
+            wind = {
+                "today": {
+                    "wind_speed_max": today_speed,
+                    "wind_direction_dominant": today_dir,
+                    "wind_direction_compass": _compass(today_dir),
+                },
+                "tomorrow": {
+                    "wind_speed_max": tomorrow_speed,
+                    "wind_direction_dominant": tomorrow_dir,
+                    "wind_direction_compass": _compass(tomorrow_dir),
+                },
+            }
+            brief["dryness"] = dryness
+            brief["wind"] = wind
+        else:
+            brief["weather_error"] = f"Expected at least {days_back + 1} daily weather entries, got {len(time_arr)}"
+    except Exception as e:
+        brief["weather_error"] = str(e)
+
+    # 2. active events
+    try:
+        events_data = active_events(bbox=bbox, pad=1.5)
+        brief["events"] = events_data
+    except Exception as e:
+        brief["events_error"] = str(e)
+
+    # 3. latest look (earth-search Sentinel-2)
+    try:
+        datetime_range = last_days_window(days_back)
+        img_res = search_imagery(
+            "earth-search",
+            ["sentinel-2-l2a"],
+            bbox=bbox,
+            datetime_range=datetime_range,
+            limit=50,
+        )
+        items = img_res.get("items", [])
+        latest_look = None
+        if items:
+            # Find the newest item with cloud_cover <= 20.0, or fall back to lowest cloud
+            low_cloud_items = [it for it in items if it.get("cloud_cover") is not None and it["cloud_cover"] <= 20.0]
+            if low_cloud_items:
+                best_item = low_cloud_items[0]
+            else:
+                best_item = min(items, key=lambda it: it.get("cloud_cover") or 100.0)
+
+            latest_look = {
+                "id": best_item["id"],
+                "date": best_item["datetime"][:10],
+                "cloud": best_item.get("cloud_cover"),
+                "covers_aoi_pct": best_item.get("covers_aoi_pct"),
+            }
+        brief["latest_look"] = latest_look
+    except Exception as e:
+        brief["latest_look_error"] = str(e)
+
+    # 4. next looks (next_pass)
+    try:
+        pass_res = next_pass(lat, lon, days=3)
+        passes = pass_res.get("passes", [])
+        next_looks = []
+        for p in passes[:3]:
+            next_looks.append({
+                "constellation": p.get("constellation"),
+                "satellite": p.get("satellite"),
+                "time_utc": p.get("time_utc"),
+                "track_distance_km": p.get("track_distance_km"),
+                "kind": p.get("kind"),
+            })
+        brief["next_looks"] = next_looks
+    except Exception as e:
+        brief["next_looks_error"] = str(e)
+
+    # 5. signals & summary & note
+    dryness_val = brief.get("dryness") or {"error": brief.get("weather_error", "unavailable")}
+    wind_val = brief.get("wind") or {"error": brief.get("weather_error", "unavailable")}
+    events_val = brief.get("events") or {"error": brief.get("events_error", "unavailable")}
+
+    signals = _conditions_signals(dryness_val, wind_val, events_val)
+    brief["signals"] = signals
+
+    summary_parts = []
+    for sig in signals:
+        if sig:
+            summary_parts.append(sig[0].upper() + sig[1:])
+    brief["summary"] = ". ".join(summary_parts) + "." if summary_parts else ""
+
+    # Honesty framing note
+    brief["note"] = "current conditions from live sources — not a risk model, not a prediction"
+
+    return brief

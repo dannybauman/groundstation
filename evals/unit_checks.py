@@ -280,6 +280,123 @@ def t_plugin_version_is_semver():
     assert re.fullmatch(r"\d+\.\d+\.\d+", v), f"plugin.json version {v!r} is not major.minor.patch"
 
 
+def t_compass():
+    assert tools._compass(0) == "from the N"
+    assert tools._compass(360) == "from the N"
+    assert tools._compass(45) == "from the NE"
+    assert tools._compass(90) == "from the E"
+    assert tools._compass(135) == "from the SE"
+    assert tools._compass(180) == "from the S"
+    assert tools._compass(225) == "from the SW"
+    assert tools._compass(270) == "from the W"
+    assert tools._compass(315) == "from the NW"
+    assert tools._compass(None) == "unknown"
+
+
+def t_conditions_signals_cases():
+    # 1. Dry and windy case
+    dryness = {"total_precipitation": 0.0, "days_since_last_rain": None, "days_back": 14}
+    wind = {"today": {"wind_speed_max": 45.2, "wind_direction_compass": "from the NE"}}
+    events = {"eonet": [], "gdacs": []}
+    signals = tools._conditions_signals(dryness, wind, events)
+    assert "no rain ≥1mm in the last 14 days" in signals
+    assert "peak wind today 45 km/h from the NE" in signals
+    assert "no active events within ~150 km" in signals
+
+    # 2. Rainy case with 1 active wildfire
+    dryness = {"total_precipitation": 12.4, "days_since_last_rain": 3, "days_back": 14}
+    wind = {"today": {"wind_speed_max": 15.0, "wind_direction_compass": "from the S"}}
+    events = {"eonet": [{"category": "Wildfires", "title": "Fire A"}], "gdacs": []}
+    signals2 = tools._conditions_signals(dryness, wind, events)
+    assert "last rain ≥1mm was 3 days ago" in signals2
+    assert "peak wind today 15 km/h from the S" in signals2
+    assert "1 active wildfire within ~150 km" in signals2
+
+    # 3. Multiple events case (and 1 day since rain)
+    dryness = {"total_precipitation": 0.0, "days_since_last_rain": 1, "days_back": 14}
+    wind = {}
+    events = {
+        "eonet": [{"category": "Severe Storms"}],
+        "gdacs": [{"type": "WF"}, {"type": "WF"}]
+    }
+    signals3 = tools._conditions_signals(dryness, wind, events)
+    assert "last rain ≥1mm was 1 day ago" in signals3
+    assert "2 active wildfires within ~150 km" in signals3
+    assert "1 active storm within ~150 km" in signals3
+
+
+def t_conditions_weather_partitioning():
+    # Save original functions
+    orig_weather = tools.weather_summary
+    orig_events = tools.active_events
+    orig_imagery = tools.search_imagery
+    orig_next = tools.next_pass
+
+    try:
+        # Mock weather_summary
+        # Phoenix example with N=3 on Aug 4:
+        # daily array has 10 elements. today is index 3.
+        # past & today has zero rain, forecast has rain.
+        def mock_weather_summary(lat, lon, past_days):
+            return {
+                "units": {"precipitation_sum": "mm", "wind_speed_10m_max": "km/h"},
+                "daily": {
+                    "time": ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-08", "2026-08-09", "2026-08-10"],
+                    "precipitation_sum": [0.0, 0.0, 0.0, 0.0, 1.4, 0.0, 0.0, 0.5, 4.5, 1.2],
+                    "wind_speed_10m_max": [10.0, 10.0, 10.0, 45.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
+                    "wind_direction_10m_dominant": [45, 45, 45, 45, 45, 45, 45, 45, 45, 45]
+                }
+            }
+
+        def mock_active_events(bbox, pad):
+            return {"eonet": [], "gdacs": []}
+
+        def mock_search_imagery(catalog, collections, bbox, datetime_range, limit):
+            return {"items": []}
+
+        def mock_next_pass(lat, lon, days):
+            return {"passes": []}
+
+        tools.weather_summary = mock_weather_summary
+        tools.active_events = mock_active_events
+        tools.search_imagery = mock_search_imagery
+        tools.next_pass = mock_next_pass
+
+        # Run conditions_brief for N=3
+        res = tools.conditions_brief(lat=33.4484, lon=-112.0740, days_back=3)
+
+        # Assertions
+        assert "weather_error" not in res
+        dryness = res["dryness"]
+        assert dryness["total_precipitation"] == 0.0
+        assert dryness["days_since_last_rain"] is None
+        assert "no rain ≥1mm in the last 3 days" in res["signals"]
+
+        # Now test when there was rain on yesterday (index 2)
+        def mock_weather_summary_rain(lat, lon, past_days):
+            return {
+                "units": {"precipitation_sum": "mm", "wind_speed_10m_max": "km/h"},
+                "daily": {
+                    "time": ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05"],
+                    # yesterday index 2 has 2.0mm
+                    "precipitation_sum": [0.0, 0.0, 2.0, 0.0, 5.0],
+                    "wind_speed_10m_max": [10.0, 10.0, 10.0, 45.0, 10.0],
+                    "wind_direction_10m_dominant": [45, 45, 45, 45, 45]
+                }
+            }
+        tools.weather_summary = mock_weather_summary_rain
+        res_rain = tools.conditions_brief(lat=33.4484, lon=-112.0740, days_back=3)
+        assert res_rain["dryness"]["total_precipitation"] == 2.0
+        assert res_rain["dryness"]["days_since_last_rain"] == 1 # yesterday
+        assert "last rain ≥1mm was 1 day ago" in res_rain["signals"]
+
+    finally:
+        tools.weather_summary = orig_weather
+        tools.active_events = orig_events
+        tools.search_imagery = orig_imagery
+        tools.next_pass = orig_next
+
+
 # smallest valid PNG (1x1) — the card only has to embed bytes, not decode them
 CANNED_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="

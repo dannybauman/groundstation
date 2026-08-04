@@ -42,6 +42,7 @@ TOOLS = (
     tools.active_events,
     tools.weather_summary,
     tools.next_pass,
+    tools.conditions_brief,
 )
 
 for fn in TOOLS:
