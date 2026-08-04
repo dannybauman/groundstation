@@ -41,6 +41,7 @@ TOOLS = (
     tools.render_postcard,
     tools.active_events,
     tools.weather_summary,
+    tools.next_pass,
 )
 
 for fn in TOOLS:

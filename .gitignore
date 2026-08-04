@@ -8,3 +8,4 @@ selfdoc/skills/
 .gstack/
 .ua/.trash-*
 .ua/tmp/
+.playwright-cli/

@@ -964,6 +964,35 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _expand_coverage_set(layer: dict[str, Any]) -> list[dict[str, Any]]:
+    """A {"type": "coverage_set"} layer becomes one item layer per scene.
+
+    Takes search_imagery's full_coverage_set verbatim, so the caller never
+    hand-unrolls items — the authoring path that dropped scenes and shipped
+    a 58%-coverage map in field test №4. Render params (assets, expression,
+    colormap_name, rescale, opacity) apply to every scene in the set.
+    """
+    if layer.get("type") != "coverage_set":
+        return [layer]
+    items = (layer.get("set") or {}).get("items") or []
+    if not items:
+        raise ValueError("coverage_set layer has no items — pass search_imagery's full_coverage_set")
+    prefix = layer.get("name") or (layer.get("set") or {}).get("date") or "coverage"
+    params = {k: layer[k] for k in ("assets", "expression", "colormap_name", "rescale", "opacity") if k in layer}
+    out = []
+    for it in items:
+        out.append({
+            "type": "item",
+            "name": f"{prefix} · {it['id'].split('_')[1] if '_' in it['id'] else it['id']}",
+            "catalog": it["catalog"],
+            "collection_id": it["collection"],
+            "item_id": it["id"],
+            "bbox": it.get("bbox"),
+            **params,
+        })
+    return out
+
+
 def _footprints_overlap(resolved: list[dict[str, Any]], min_frac: float = 0.6) -> bool:
     """True when two raster layers cover the same ground, i.e. a real comparison.
 
@@ -1247,6 +1276,12 @@ def render_map(
                               # search results) — it skips a STAC re-fetch
       {"type": "raster", "name": ..., "tiles": "https://..{z}/{x}/{y}.."}
       {"type": "geojson", "name": ..., "data": <FeatureCollection>, "color": "#hex"}
+      {"type": "coverage_set", "set": <full_coverage_set from search_imagery>,
+       "name": "True colour",  # optional prefix, tiles get N/S/E/W-ish suffixes
+       "assets"/"expression"/"colormap_name"/"rescale"/"opacity": ...}
+        — expands to one item layer per scene in the set. Pass search_imagery's
+        full_coverage_set object straight through instead of hand-unrolling its
+        items; hand-unrolling is how scenes get dropped and maps ship holes.
     Item layers resolve to the right tiling backend automatically. The HTML
     is shareable: MapLibre + live tile URLs, no server of ours required.
 
@@ -1270,6 +1305,7 @@ def render_map(
     plus a postcard_note with the install command. Use when the view is
     the story; a plain one-scene imagery card is render_postcard's job.
     """
+    layers = [x for l in layers for x in _expand_coverage_set(l)]
     resolved = []
     raster_collections: list[str | None] = []
     for l in layers:
@@ -2070,3 +2106,140 @@ def weather_summary(lat: float, lon: float, past_days: int = 7) -> dict[str, Any
         },
     )
     return {"units": data.get("daily_units"), "daily": data.get("daily")}
+
+
+# ---------------------------------------------------------------- next pass
+
+# constellation constants vendored from developmentseed/eo-predictor
+# (scripts/satellites/*.json is the maintained source of truth — sync there)
+_CONSTELLATIONS = {
+    "sentinel-2": {"norad_ids": [40697, 42063, 60989], "swath_km": 290, "optical": True},
+    "sentinel-1": {"norad_ids": [39634, 62261], "swath_km": 410, "optical": False},
+    "landsat": {"norad_ids": [39084, 49260], "swath_km": 185, "optical": True},
+}
+_TLE_CACHE = Path(os.environ.get(
+    "GROUNDSTATION_TLE_CACHE", Path.home() / ".cache" / "groundstation" / "tle.txt"
+))
+_TLE_MAX_AGE_S = 24 * 3600  # TLEs drift slowly; a day-old set is fine for swath math
+
+
+def _local_solar_hour(utc_hour: float, lon: float) -> float:
+    """Approximate local solar time — daylight check without an ephemeris file."""
+    return (utc_hour + lon / 15.0) % 24.0
+
+
+def _pass_minima(dists_km: list[float], within_km: float) -> list[int]:
+    """Indices of local minima at or under within_km — each is one pass.
+
+    Pure so it's testable offline; the skyfield propagation just feeds it.
+    """
+    hits = []
+    for i in range(1, len(dists_km) - 1):
+        if dists_km[i] <= within_km and dists_km[i] <= dists_km[i - 1] and dists_km[i] < dists_km[i + 1]:
+            hits.append(i)
+    return hits
+
+
+def _fetch_tles() -> str:
+    if _TLE_CACHE.exists() and time.time() - _TLE_CACHE.stat().st_mtime < _TLE_MAX_AGE_S:
+        return _TLE_CACHE.read_text(encoding="utf-8")
+    chunks = []
+    for c in _CONSTELLATIONS.values():
+        for nid in c["norad_ids"]:
+            r = _client.get(
+                "https://celestrak.org/NORAD/elements/gp.php",
+                params={"CATNR": nid, "FORMAT": "tle"},
+            )
+            r.raise_for_status()
+            if "No GP data found" not in r.text:
+                chunks.append(r.text.strip())
+    text = "\n".join(chunks) + "\n"
+    _TLE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    _TLE_CACHE.write_text(text, encoding="utf-8")
+    return text
+
+
+def next_pass(
+    lat: float,
+    lon: float,
+    days: int = 3,
+    constellations: list[str] | None = None,
+) -> dict[str, Any]:
+    """Predict upcoming satellite passes over a point (Sentinel-2, Sentinel-1, Landsat).
+
+    Answers "when could we next get imagery of this place." Propagates live
+    Celestrak TLEs with Skyfield and reports each time a satellite's swath
+    band sweeps the point in the next `days` (max 7). Optical passes are
+    filtered to local daytime; radar (Sentinel-1) images day and night.
+
+    Honest limits, and say them when it matters: this is swath geometry, not
+    the acquisition plan — a pass is a POSSIBLE capture, not a promised one
+    (Sentinel-2 acquires systematically over land, so there it's near-certain;
+    Sentinel-1 follows an observation scenario). Cloud cover is its own
+    gamble, and imagery lands in the public catalogs hours to a day later.
+
+    The prediction pattern follows developmentseed/eo-predictor, which does
+    this for many more constellations with an interactive map.
+    """
+    import numpy as np
+    from skyfield.api import load, wgs84
+
+    days = min(days, 7)
+    wanted = constellations or list(_CONSTELLATIONS)
+    _fetch_tles()  # ensures the cache file exists and is fresh
+    sats = load.tle_file(str(_TLE_CACHE))
+    by_id = {s.model.satnum: s for s in sats}
+
+    ts = load.timescale()
+    t0 = ts.now()
+    step_s = 30.0
+    n_steps = int(days * 86400 / step_s)
+    times = ts.tt_jd(t0.tt + [i * step_s / 86400.0 for i in range(n_steps)])
+    target = wgs84.latlon(lat, lon)
+
+    passes = []
+    for cname in wanted:
+        cfg = _CONSTELLATIONS.get(cname)
+        if not cfg:
+            continue
+        for nid in cfg["norad_ids"]:
+            sat = by_id.get(nid)
+            if sat is None:
+                continue
+            # ground-track distance to the target at every step
+            subpoint = wgs84.subpoint_of(sat.at(times))
+            lat1, lon1 = np.radians(subpoint.latitude.degrees), np.radians(subpoint.longitude.degrees)
+            lat2, lon2 = np.radians(lat), np.radians(lon)
+            d = 6371.0 * np.arccos(
+                np.clip(
+                    np.sin(lat1) * np.sin(lat2) + np.cos(lat1) * np.cos(lat2) * np.cos(lon1 - lon2),
+                    -1, 1,
+                )
+            )
+            for i in _pass_minima(d.tolist(), cfg["swath_km"] / 2):
+                t = times[i]
+                utc = t.utc_datetime()
+                if cfg["optical"]:
+                    solar = _local_solar_hour(utc.hour + utc.minute / 60.0, lon)
+                    if not (6.0 <= solar <= 18.0):
+                        continue  # optical only acquires in daylight
+                passes.append(
+                    {
+                        "constellation": cname,
+                        "satellite": sat.name,
+                        "time_utc": utc.strftime("%Y-%m-%d %H:%M"),
+                        "track_distance_km": round(float(d[i]), 1),
+                        "kind": "optical" if cfg["optical"] else "radar (day or night, sees through cloud)",
+                    }
+                )
+    passes.sort(key=lambda p: p["time_utc"])
+    return {
+        "point": {"lat": lat, "lon": lon},
+        "window_days": days,
+        "passes": passes,
+        "note": (
+            "swath geometry from live TLEs, not the acquisition plan — a pass is a "
+            "possible capture, and imagery reaches public catalogs hours to a day later. "
+            "Pattern: developmentseed/eo-predictor"
+        ),
+    }

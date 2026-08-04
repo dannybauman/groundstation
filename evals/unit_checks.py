@@ -135,6 +135,39 @@ def t_tile_url_default_visual():
     assert "assets=visual" in t and "expression" not in t
 
 
+def t_coverage_set_expands_to_item_layers():
+    # pass search_imagery's full_coverage_set straight through — the manual
+    # unroll is how field test №4 shipped a 58%-coverage Novo Progresso map
+    fcs = {"date": "2026-08-03", "items": [
+        {"catalog": "earth-search", "collection": "sentinel-2-l2a", "id": "S2B_21MXN_X", "bbox": [0, 0, 1, 1]},
+        {"catalog": "earth-search", "collection": "sentinel-2-l2a", "id": "S2B_21MXM_X", "bbox": [0, -1, 1, 0]},
+    ]}
+    out = tools._expand_coverage_set({"type": "coverage_set", "set": fcs, "name": "NDVI",
+                                      "expression": "(nir-red)/(nir+red)"})
+    assert len(out) == 2 and all(l["type"] == "item" for l in out)
+    assert all(l["expression"] == "(nir-red)/(nir+red)" for l in out)
+    assert out[0]["bbox"] == [0, 0, 1, 1] and "NDVI" in out[0]["name"]
+    # non-coverage layers pass through untouched
+    plain = {"type": "geojson", "name": "x", "data": {}}
+    assert tools._expand_coverage_set(plain) == [plain]
+    try:
+        tools._expand_coverage_set({"type": "coverage_set", "set": {}})
+        raise AssertionError("empty set should raise")
+    except ValueError:
+        pass
+
+
+def t_next_pass_pure_helpers():
+    # one dip under the swath line = one pass; a shallow approach = none
+    assert tools._pass_minima([300, 100, 50, 100, 300], 145) == [2]
+    assert tools._pass_minima([300, 200, 300], 145) == []
+    # plateau at the minimum still counts once (<= left, < right)
+    assert tools._pass_minima([300, 50, 50, 300], 145) == [2]
+    # local solar time: UTC 19:00 at 120W is 11:00 — a daytime optical pass
+    assert abs(tools._local_solar_hour(19.0, -120) - 11.0) < 0.01
+    assert abs(tools._local_solar_hour(2.0, 140) - 11.33) < 0.34
+
+
 def t_coverage_note_names_the_hole():
     # a map whose layers cover a sliver of the view "succeeds" and renders
     # mostly blank — the field test №4 Dolphin card shipped exactly this way
