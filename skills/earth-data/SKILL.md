@@ -9,7 +9,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 ## First: use the tools, never route around them
 
-The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 15 tools in about a second.
+The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 16 tools in about a second.
 
 - **Wait and retry discovery** a few times over ~10-15 seconds before doing anything else. The tools almost always appear.
 - **Never fall back to raw STAC / TiTiler / FIRMS / `httpx` calls to work around missing tools.** Hand-rolling the pipeline gives a worse answer and hides a fixable setup problem. Missing tools are a thing to fix, not to route around.
@@ -96,6 +96,11 @@ A field test is a showcase page: a set of prompts run live, each with its output
 `active_events` (EONET + GDACS) and `weather_summary` exist so you can answer "what's happening around X" and write proactive briefs. When events have coordinates, put them on the map as a geojson layer alongside imagery.
 
 `next_pass(lat, lon, days)` answers "when could we next get imagery of this place" — upcoming Sentinel-2, Sentinel-1, and Landsat passes from live TLEs. Be honest with its output: a pass is a *possible* capture (swath geometry, not the acquisition plan), radar sees through cloud and optical doesn't, and imagery reaches the catalogs hours to a day after acquisition. Pairs naturally with a disaster question: what's there now, and when's the next look. The full many-constellation version of this is [eo-predictor](https://github.com/developmentseed/eo-predictor).
+
+Reach for `conditions_brief` when a user wants a summary of current conditions around a location—specifically for disaster risk, insurance, or emergency response context (dryness, wind, nearby active events, latest imagery, and upcoming passes).
+
+**Honesty framing**: Groundstation delivers conditions intelligence honestly. Do not make predictions, generate outcome risk models, or assign severity categories (like "high/medium/low" risk scores). Present only the verbatim, current fact strings from live sources. Remind the user: *current conditions are compiled from live sources and represent observations, not a predictive risk model.*
+
 
 ## Judgment rules
 
