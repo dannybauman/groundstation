@@ -118,6 +118,35 @@ def _etime_seconds(s: str) -> float | None:
     return secs + (float(days) * 86400 if days else 0.0)
 
 
+def _preflight_version_bumped() -> None:
+    """Warn when shipped code changed after the last plugin version bump.
+
+    Installs cache per version, so a copy keeps serving whatever tool set it
+    was installed with. On Aug 5 2026 five commits of behaviour sat behind an
+    unchanged 0.6.1 — state on both renderers, the 3D coverage note, weather
+    elevation, the no-imagery warning — and nobody on that version had any of
+    it. A field test is the publish moment, so it is the right place to ask.
+    """
+    root = Path(__file__).resolve().parent.parent
+
+    def _last_commit(*paths: str) -> str:
+        try:
+            return subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%ct", "--", *paths],
+                                  capture_output=True, text=True, timeout=5).stdout.strip()
+        except Exception:
+            return ""
+
+    ver = _last_commit(".claude-plugin/plugin.json")
+    code = _last_commit("src", "skills")
+    if ver and code and int(code) > int(ver):
+        print(
+            "  [!] src/ or skills/ changed after the last plugin version bump. Installs cache\n"
+            "      per version, so anyone on the current version will not see these changes.\n"
+            "      Bump .claude-plugin/plugin.json before publishing this page.",
+            file=sys.stderr,
+        )
+
+
 def _preflight_server_freshness() -> None:
     """Warn when a running MCP server predates the code this page will describe.
 
@@ -211,6 +240,7 @@ def _autoshoot(case: dict, cases_path: Path) -> None:
 def build(cases_path: str | Path) -> Path:
     cases_path = Path(cases_path)
     _preflight_server_freshness()
+    _preflight_version_bumped()
     spec = json.loads(cases_path.read_text(encoding="utf-8"))
     n = 0
     rounds_html = []
