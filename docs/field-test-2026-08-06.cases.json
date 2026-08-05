@@ -1,0 +1,121 @@
+{
+  "title": "groundstation field test №6 — the loop closes, and maps become checkable",
+  "heading": "THE FIELD TEST №6",
+  "sub": "groundstation · 8 prompts · a bug filed, fixed and verified in 24 hours · August 5, 2026 · Development Seed labs",
+  "lede": "Field test №5 filed a bug on its own card: coverage read 0% for scenes crossing the antimeridian. The fix shipped that night and this edition verifies it. The bigger change is underneath — <b>render_map and render_map_3d now return the state they were built from</b>, so a map's contents are readable by an eval instead of only by a person opening the file. Every card separates what the tools returned from our reading of it: the data block is verbatim, the prose below is interpretation.",
+  "stats": [
+    {
+      "value": "24h",
+      "label": "from bug filed on a card to fix verified"
+    },
+    {
+      "value": "8/8",
+      "label": "prompts answered against live data"
+    },
+    {
+      "value": "2",
+      "label": "renderers now returning machine-readable state"
+    },
+    {
+      "value": "0",
+      "label": "API keys needed for any of it"
+    }
+  ],
+  "rounds": [
+    {
+      "name": "Round 1 — the bug №5 filed, closed",
+      "cases": [
+        {
+          "tag": "antimeridian",
+          "who": "polar monitoring",
+          "prompt": "Iceberg B22A again. Does the archive coverage read correctly now?",
+          "returned": "S1D_EW_GRDM_1SDH_20260805T074009  ascending  covers_aoi_pct: 43.4\nS1D_EW_GRDM_1SDH_20260803T075543  ascending  covers_aoi_pct: 83.2\nS1C_EW_GRDM_1SDH_20260802T080431  ascending  covers_aoi_pct: 15.0\n\n(field test №5, same query: 0.0 / 0.0 / 0.0)",
+          "answer": "Fixed, and the numbers discriminate rather than all reading zero. The Aug 3 scene is <b>83.2%</b> — the exact value the regression check was pinned to when the fix landed. Scene bboxes here wrap west-greater-than-east (177.58 → −171.51), which the old overlap math read as a degenerate box; coverage now splits any crossing box at ±180 and sums the parts.",
+          "shows": "_bbox_coverage_pct / _union_coverage_pct, antimeridian-safe",
+          "learning": "The card that filed this in №5 said \"a field test that only shows the wins isn't a test.\" Twenty-four hours from filed to verified is the argument for keeping a bug on its own card instead of a private list."
+        },
+        {
+          "tag": "state",
+          "who": "the regression case",
+          "prompt": "Show me Calgary, and prove the mosaic didn't render as a swipe.",
+          "returned": "state.compare: false\nstate.coverage_pct: 100.0\nstate.layers: [\"Jul 29 · 11UPS\", \"Jul 29 · 11UQS\"]",
+          "answer": "Previously this could only be checked by a human opening the file and dragging a divider that shouldn't exist. <b>render_map now returns the state it built the HTML from</b> — bbox, per-layer bounds and tiles, the compare flag, coverage. The two assertions that matter are now one line each, and they run in CI on every commit.",
+          "artifact": "img/ft6-calgary-state.html",
+          "artifact_label": "live map ↗",
+          "shows": "render_map state, coverage_set expansion",
+          "learning": "Both rendering bugs this repo has shipped were caught by eye. Exposing the state is what moved that class of bug from \"someone notices\" to \"CI fails\"."
+        }
+      ]
+    },
+    {
+      "name": "Round 2 — a volcano erupted this morning",
+      "cases": [
+        {
+          "tag": "live event",
+          "who": "disaster response",
+          "prompt": "GDACS is reporting Fuego. What does the imagery show, and when do we get another look?",
+          "returned": "GDACS  Eruption Fuego  VO  from 2026-08-05T08:09:00  [-90.88, 14.473]\nfull_coverage_set  date 2026-08-01  union 100%\n  S2B_15PYS_20260801  cloud 21.7%  covers 93.7%\n  S2B_15PYR_20260801  cloud  0.98%  covers 42.8%\nnext_pass: SENTINEL-2C  2026-08-06 16:39 UTC  optical",
+          "answer": "The eruption was reported <b>08:09 UTC this morning</b>. The freshest usable optical is <b>Aug 1</b>, four days before it — so this is the before, not the after. The next optical pass is <b>tomorrow 16:39 UTC</b>, mid-morning local and in daylight, which is the first real chance at an after image.",
+          "artifact": "img/ft6-fuego.html",
+          "artifact_label": "live map ↗",
+          "shows": "active_events (GDACS volcanic), coverage_set, next_pass, stack panel with eo-predictor",
+          "learning": "The honest answer to a same-day event is often \"we have the before, here is when the after arrives.\" Saying that beats presenting four-day-old imagery as if it showed the eruption."
+        },
+        {
+          "tag": "composed conditions",
+          "who": "the lahar question",
+          "prompt": "Fuego just erupted. What are the conditions there right now?",
+          "returned": "weather_summary(14.473, -90.88):\n  2026-08-05  precip 20.2 mm  wind max  8.8 km/h\n  2026-08-06  precip 17.0 mm  wind max 11.4 km/h\n  2026-08-07  precip  4.9 mm\n  temp max 8.5 C  (grid cell elevation is near the 3,763 m summit)",
+          "answer": "<b>Fresh ash and 20 mm of rain on the same day, with 17 mm more tomorrow.</b> That combination is the precondition for lahars, the volcanic mudflows that are historically the deadlier hazard at Fuego. groundstation does not model lahars and does not say one is coming — it composes what the sources report and lets a responder draw the line. Note the temperature: 8.5°C max is the summit grid cell at ~3,763 m, not the towns below.",
+          "shows": "weather_summary composed with active_events, conditions-not-predictions discipline",
+          "learning": "This is the whole conditions-brief thesis in one card. The useful output was not a model, it was two ordinary facts placed next to each other, plus the elevation caveat that stops a reader misreading the temperature."
+        },
+        {
+          "tag": "3d + state",
+          "who": "terrain context",
+          "prompt": "Show me Fuego in 3D so I can see what the drainages look like.",
+          "returned": "state.exaggeration: 1.7\nstate.terrain: true\nstate.layers: [{S2 2026-08-01}, {fill, deferred: true}]\nstate.coverage_pct: 94.0\nstate.coverage_pct_loaded: 100.0\ncoverage_note: the drape covers 94% of the view on load, the rest is\n  terrain with no imagery until someone clicks Load full coverage",
+          "answer": "A 3,763 m stratovolcano at 1.7× vertical exaggeration, which is what makes the radial drainages legible — and those drainages are where lahars run. <b>The 3D state reports two coverage numbers because they are two different facts:</b> 94% is what draws on load, 100% is what the button adds. The second scene is marked <code>deferred</code> because it is embedded but not requested until someone clicks.",
+          "artifact": "img/ft6-fuego-3d.html",
+          "artifact_label": "live 3D ↗",
+          "shows": "render_map_3d state with deferred extras, 3D-specific coverage note",
+          "learning": "Copying the 2D coverage warning would have been wrong here: in 3D the uncovered area is terrain with no imagery, not blank, and only the main layer draws on load. The note had to be written for 3D rather than reused."
+        }
+      ]
+    },
+    {
+      "name": "Round 3 — what changed since yesterday",
+      "cases": [
+        {
+          "tag": "storm tracking",
+          "who": "the moving target",
+          "prompt": "Dolphin was the only Orange alert yesterday. Where is it now?",
+          "returned": "EONET  Aug 4 12:00Z  [140.6, 25.2]   GDACS Orange\nEONET  Aug 5 06:00Z  [137.2, 25.6]   GDACS Orange\nweather at 25.6N 137.2E:\n  2026-08-05  wind max 99.7 km/h  precip 110.5 mm\n  2026-08-06  wind max 84.7 km/h  precip  42.7 mm\n  2026-08-07  wind max 40.0 km/h  precip   2.6 mm",
+          "answer": "It moved roughly <b>350 km west in 18 hours</b> and it is <b>weakening</b>: peak winds 110 → 100 → 85 → 40 km/h across today and the next two days, with rainfall collapsing from 110 mm today to under 3 mm by Friday. Still the only non-Green alert on Earth, and still over open ocean where optical imagery has nothing useful to add. <em>No map on this card: the artifact would be two dots over open ocean with no imagery under them, which is exactly what field test №5 found and not worth dressing up.</em>",
+          "shows": "active_events across two runs, weather_summary as a decay signal",
+          "learning": "Re-running the same query a day later is its own kind of test. The field-test cadence caught a moving storm decaying, which no single-run snapshot would have shown."
+        },
+        {
+          "tag": "conditions brief",
+          "who": "fire season, Europe",
+          "prompt": "GDACS has forest fires in northern Portugal. What are the conditions?",
+          "returned": "signals:\n  - no rain ≥1mm in the last 14 days\n  - peak wind today 21 km/h from the NW\n  - 1 active wildfire within ~150 km\nnext_looks: SENTINEL-1A 2026-08-05 17:55 UTC (radar)\n            SENTINEL-1C 2026-08-06 06:49 UTC (radar)\nerrors: none",
+          "answer": "<b>Fourteen days with no meaningful rain</b>, moderate wind from the northwest, one active fire in range. The next two looks are both <b>radar</b>, which for a fire is the wrong instrument for burn extent but the right one for cloud and smoke penetration — worth saying rather than presenting a pass as a pass.",
+          "shows": "conditions_brief over a new geography, next_pass composed in",
+          "learning": "The signals are deliberately verbatim facts with no severity score. \"No rain ≥1mm in 14 days\" is checkable; \"high fire risk\" would not be, and is not ours to say."
+        },
+        {
+          "tag": "attribution",
+          "who": "the stack panel",
+          "prompt": "On the Fuego map, what DevSeed tools actually did the work?",
+          "returned": "stack panel rows with a DevSeed badge:\n  TiTiler      created  tiling\n  rio-tiler    created  tiling\n  eoAPI        created  access   (not active — no VEDA layer here)\n  eo-predictor created  data     (next_pass informed this answer)\n  Gazet        created  access\nstack_facts passed: geocoded, events, passes",
+          "answer": "Four DevSeed-built components on one artifact, and <b>eo-predictor is new to the panel</b> — <code>next_pass</code> has been using its constellation definitions since yesterday without saying so. It only appears when the caller declares <code>passes: true</code>, because next_pass returns data rather than an artifact and nothing in the layers can reveal it.",
+          "shows": "stack_layer with the passes fact, honest opt-in attribution",
+          "learning": "Two DevSeed tools have now turned out to be already in use and unclaimed — eoAPI behind VEDA, eo-predictor behind next_pass. Worth a habit: when adding a capability, ask whether one of ours is already underneath it."
+        }
+      ]
+    }
+  ],
+  "repro": "git clone https://github.com/dannybauman/groundstation && cd groundstation\nbash scripts/doctor.sh                    # walks the setup chain, prints the fix\nuv run evals/unit_checks.py               # 83 offline checks\nuv run evals/run_evals.py                 # live checks against real endpoints\nuv run scripts/field_test.py docs/field-test-2026-08-06.cases.json   # rebuild this page",
+  "footer": "field test №6 · August 5, 2026 · a bug filed on a card in №5, fixed and verified here · groundstation · Development Seed labs"
+}
