@@ -1019,6 +1019,24 @@ def _expand_coverage_set(layer: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _layer_state(l: dict[str, Any], deferred: bool = False) -> dict[str, Any]:
+    """One layer as data an eval or a view can read, not HTML someone must open.
+
+    Shared by render_map and render_map_3d deliberately — two copies of a shape
+    that has to stay identical is how they quietly stop being identical.
+    `deferred` marks a 3D extra_layer: embedded, but not requested until the
+    viewer clicks Load full coverage.
+    """
+    return {
+        "name": l.get("name"),
+        "kind": l.get("type"),
+        **({"bounds": l["bounds"]} if l.get("bounds") else {}),
+        **({"tiles": l["tiles"]} if l.get("tiles") else {}),
+        **({"opacity": l["opacity"]} if l.get("opacity") not in (None, 1) else {}),
+        **({"deferred": True} if deferred else {}),
+    }
+
+
 def _footprints_overlap(resolved: list[dict[str, Any]], min_frac: float = 0.6) -> bool:
     """True when two raster layers cover the same ground, i.e. a real comparison.
 
@@ -1392,16 +1410,7 @@ def render_map(
     out["state"] = {
         "bbox": bbox,
         "compare": bool(compare),
-        "layers": [
-            {
-                "name": l.get("name"),
-                "kind": l.get("type"),
-                **({"bounds": l["bounds"]} if l.get("bounds") else {}),
-                **({"tiles": l["tiles"]} if l.get("tiles") else {}),
-                **({"opacity": l["opacity"]} if l.get("opacity") not in (None, 1) else {}),
-            }
-            for l in resolved
-        ],
+        "layers": [_layer_state(l) for l in resolved],
     }
     if stack_note:
         out["note"] = stack_note
@@ -1652,16 +1661,28 @@ def render_map_3d(
     out_path = _artifact_path(out_path, "map3d", title)
     Path(out_path).write_text(html, encoding="utf-8")
     out = {"path": out_path, "title": title}
+    # Same reasoning as render_map's state, with 3D's own facts: the vertical
+    # stretch actually rendered (the template rounds it, so report the rounded
+    # value), terrain always present, and extras marked deferred because they
+    # do not draw until someone clicks.
+    out["state"] = {
+        "bbox": bbox,
+        "exaggeration": round(float(exaggeration), 2),
+        "terrain": True,
+        "layers": [_layer_state(resolved), *(_layer_state(e, deferred=True) for e in extras)],
+    }
     # Same blind spot render_map had, but 3D differs twice: only the ONE main
     # layer drapes on load (extras wait behind the button), and an uncovered
     # area shows terrain with no imagery rather than blank. So report what the
     # viewer actually gets first, and what the button would add.
     if resolved.get("bounds"):
         _cov = _union_coverage_pct(bbox, [resolved["bounds"]])
+        out["state"]["coverage_pct"] = _cov
         if _cov < 95:
             _extra_boxes = [e["bounds"] for e in extras if e.get("bounds")]
             if _extra_boxes:
                 _full = _union_coverage_pct(bbox, [resolved["bounds"], *_extra_boxes])
+                out["state"]["coverage_pct_loaded"] = _full
                 out["coverage_note"] = (
                     f"the drape covers {_cov:.0f}% of the view on load, the rest is terrain with no "
                     f"imagery until someone clicks Load full coverage, which takes it to {_full:.0f}%"

@@ -270,7 +270,27 @@ def t_3d_coverage_note_accounts_for_the_load_button():
         full = {"type": "raster", "name": "F", "tiles": tile, "bounds": [0, 0, 10, 10]}
         r = tools.render_map_3d("t", [0, 0, 10, 10], full, out_path=str(Path(d) / "c.html"))
         assert "coverage_note" not in r
-        assert sorted(r) == ["path", "title"]  # the 3D return shape is unchanged
+        assert sorted(r) == ["path", "state", "title"]  # + state as of Aug 5
+
+
+def t_3d_state_marks_what_does_not_draw_on_load():
+    # 3D state is not 2D's: extras are embedded but deferred behind the Load
+    # full coverage button, and the vertical stretch is a real render fact.
+    tile = "https://x/{z}/{x}/{y}.png"
+    main = {"type": "raster", "name": "M", "tiles": tile, "bounds": [0, 0, 5, 10]}
+    extra = {"type": "raster", "name": "E", "tiles": tile, "bounds": [5, 0, 10, 10]}
+    with tempfile.TemporaryDirectory() as d:
+        r = tools.render_map_3d("t", [0, 0, 10, 10], main, extra_layers=[extra],
+                                exaggeration=1.8, out_path=str(Path(d) / "a.html"))
+        s = r["state"]
+        assert s["exaggeration"] == 1.8 and s["terrain"] is True
+        assert [l.get("deferred") for l in s["layers"]] == [None, True]
+        # the two coverage numbers are different things and both are reported
+        assert s["coverage_pct"] == 50.0 and s["coverage_pct_loaded"] == 100.0
+        # no extras means no loaded number to report
+        r = tools.render_map_3d("t", [0, 0, 10, 10], main, out_path=str(Path(d) / "b.html"))
+        assert r["state"]["coverage_pct"] == 50.0
+        assert "coverage_pct_loaded" not in r["state"]
 
 
 def t_state_never_changes_the_file():
