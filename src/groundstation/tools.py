@@ -1385,6 +1385,24 @@ def render_map(
     out_path = _artifact_path(out_path, "map", title)
     Path(out_path).write_text(html, encoding="utf-8")
     out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
+    # The map's contents were previously legible only to a human opening the
+    # file, so every rendering bug this repo has shipped was caught by eye and
+    # not by a check. `state` is the same thing the HTML was built from, in a
+    # form an eval (or an MCP Apps view) can read. The file is unchanged.
+    out["state"] = {
+        "bbox": bbox,
+        "compare": bool(compare),
+        "layers": [
+            {
+                "name": l.get("name"),
+                "kind": l.get("type"),
+                **({"bounds": l["bounds"]} if l.get("bounds") else {}),
+                **({"tiles": l["tiles"]} if l.get("tiles") else {}),
+                **({"opacity": l["opacity"]} if l.get("opacity") not in (None, 1) else {}),
+            }
+            for l in resolved
+        ],
+    }
     if stack_note:
         out["note"] = stack_note
     # A map whose layers do not fill the view has a hole in it, and the hole is
@@ -1394,6 +1412,7 @@ def render_map(
     _boxes = [l["bounds"] for l in resolved if l.get("type") == "raster" and l.get("bounds")]
     if _boxes:
         _cov = _union_coverage_pct(bbox, _boxes)
+        out["state"]["coverage_pct"] = _cov
         if _cov < 95:
             out["coverage_note"] = (
                 f"layers cover {_cov:.0f}% of the requested view, so the rest renders blank. "

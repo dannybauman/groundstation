@@ -219,6 +219,56 @@ def t_coverage_note_names_the_hole():
         assert "coverage_note" not in r
 
 
+def t_state_would_have_caught_the_two_real_bugs():
+    """Both bugs this repo shipped were caught by a human looking at a picture.
+
+    render_map's `state` is what makes them checkable. Each half below fails
+    on the pre-fix behaviour and passes now — that is the whole point of
+    returning state rather than only a file path.
+    """
+    tile = "https://x/{z}/{x}/{y}.png"
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+
+        # 1. Field test No.4's Chelan card: two mosaic tiles rendered as a swipe,
+        # so half the AOI was blank at every divider position.
+        west = {"type": "raster", "name": "W", "tiles": tile, "bounds": [-121.66, 47.73, -120.14, 48.74]}
+        east = {"type": "raster", "name": "E", "tiles": tile, "bounds": [-120.33, 47.69, -118.79, 48.72]}
+        r = tools.render_map("t", [-120.95, 47.83, -119.45, 48.75], [west, east], out_path=out)
+        assert r["state"]["compare"] is False, "a mosaic must not render as a swipe"
+        assert len(r["state"]["layers"]) == 2
+
+        # 2. Field test No.4's Novo Progresso card: one scene over an AOI it
+        # only half covered, shipped without anyone noticing the hole.
+        sliver = [{"type": "raster", "name": "A", "tiles": tile, "bounds": [0.0, 0.0, 1.0, 1.0]}]
+        r = tools.render_map("t", [0, 0, 10, 10], sliver, out_path=out)
+        assert r["state"]["coverage_pct"] < 95
+        assert "coverage_note" in r
+
+        # and a genuine before/after still compares — item layers, since
+        # auto-decide keys on collection and a raw raster layer has none
+        a = {"type": "item", "name": "A", "catalog": "earth-search",
+             "collection_id": "sentinel-2-l2a", "item_id": "X", "bbox": [0, 0, 10, 10]}
+        b = dict(a, name="B", item_id="Y")
+        r = tools.render_map("t", [0, 0, 10, 10], [a, b], out_path=out)
+        assert r["state"]["compare"] is True and r["state"]["coverage_pct"] == 100.0
+
+
+def t_state_never_changes_the_file():
+    # state is additive: the artifact a partner opens must be byte-identical
+    # whether or not anything reads the structured half
+    tile = "https://x/{z}/{x}/{y}.png"
+    layers = [{"type": "raster", "name": "A", "tiles": tile, "bounds": [0, 0, 1, 1]}]
+    with tempfile.TemporaryDirectory() as d:
+        one = str(Path(d) / "a.html")
+        two = str(Path(d) / "b.html")
+        r1 = tools.render_map("t", [0, 0, 1, 1], layers, out_path=one)
+        r2 = tools.render_map("t", [0, 0, 1, 1], layers, out_path=two)
+        assert Path(one).read_bytes() == Path(two).read_bytes()
+        assert r1["state"] == r2["state"]
+        assert r1["map_path"] != r2["map_path"]  # only the path differs
+
+
 def t_render_map_compare_mode():
     with tempfile.TemporaryDirectory() as d:
         out = str(Path(d) / "m.html")
