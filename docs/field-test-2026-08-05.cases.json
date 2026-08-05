@@ -2,12 +2,24 @@
   "title": "groundstation field test №5 — what changed, and when's the next look",
   "heading": "THE FIELD TEST №5",
   "sub": "groundstation · 11 prompts · compare_dates and next_pass make their debut · August 4, 2026 · Development Seed labs",
-  "lede": "A fresh set, built around the two questions every Earth conversation ends with: what changed, and when can we look again. compare_dates and next_pass run for the first time, the coverage_set parameter retires the hand-unrolled mosaic, and the eoAPI attribution shipped this afternoon shows up on a live panel. One case found a real bug and kept it on the card.",
+  "lede": "A fresh set, built around the two questions every Earth conversation ends with: what changed, and when can we look again. compare_dates and next_pass run for the first time, the coverage_set parameter retires the hand-unrolled mosaic, and the eoAPI attribution shipped this afternoon shows up on a live panel. One case found a real bug and kept it on the card. <b>Every card separates what the tools returned from our reading of it</b> — the data block is verbatim machine output, the prose below it is interpretation, and you should be able to disagree with the second without doubting the first.",
   "stats": [
-    { "value": "11/11", "label": "prompts answered, all against live data" },
-    { "value": "2", "label": "tools on their first field test (compare_dates, next_pass)" },
-    { "value": "19:11", "label": "predicted next-pass time — matching the archive's real acquisition slot" },
-    { "value": "1", "label": "bug found by a case and filed on the card" }
+    {
+      "value": "11/11",
+      "label": "prompts answered, all against live data"
+    },
+    {
+      "value": "2",
+      "label": "tools on their first field test (compare_dates, next_pass)"
+    },
+    {
+      "value": "19:11",
+      "label": "predicted next-pass time — matching the archive's real acquisition slot"
+    },
+    {
+      "value": "1",
+      "label": "bug found by a case and filed on the card"
+    }
   ],
   "rounds": [
     {
@@ -21,7 +33,8 @@
           "artifact": "img/ft5-palouse.html",
           "artifact_label": "swipe map ↗",
           "shows": "compare_dates — first field test: matched-tile scene pairing, index delta, swipe map in one call",
-          "learning": "The tool's matched-tile discipline is the point: same MGRS tile, same satellite, comparable geometry, so the delta means what it claims to mean."
+          "learning": "The tool's matched-tile discipline is the point: same MGRS tile, same satellite, comparable geometry, so the delta means what it claims to mean.",
+          "returned": "tile: 11TMN\nbefore: S2B_11TMN_20260707_0_L2A  2026-07-07  cloud 0.015%  mean 0.4186\nafter:  S2B_11TMN_20260727_0_L2A  2026-07-27  cloud 0.000179%  mean 0.3188\ndelta: -0.0998   delta_pct: -23.8   expression: (nir-red)/(nir+red)"
         },
         {
           "tag": "compare_dates",
@@ -31,7 +44,8 @@
           "artifact": "img/ft5-lake-mead.html",
           "artifact_label": "swipe map ↗",
           "shows": "compare_dates with a custom NDWI expression, year-over-year windows",
-          "learning": "A change tool that can say \"nothing changed\" is worth more than one that always finds a story."
+          "learning": "A change tool that can say \"nothing changed\" is worth more than one that always finds a story.",
+          "returned": "tile: 11SQA\nbefore: S2C_11SQA_20250728_0_L2A  2025-07-28  cloud 0.0099%  mean -0.2502\nafter:  S2C_11SQA_20260802_0_L2A  2026-08-02  cloud 0.0073%  mean -0.2555\ndelta: -0.0053   delta_pct: -2.1   expression: (green-nir)/(green+nir)"
         },
         {
           "tag": "next_pass",
@@ -40,7 +54,8 @@
           "answer": "<b>Radar tomorrow, optical Thursday.</b> Sentinel-1C passes Aug 5 at 14:20 UTC (sees through smoke), Sentinel-2B Thursday Aug 6 at 19:00 UTC — daylight, weather permitting. Live TLEs from Celestrak, swath geometry, honest caveat attached: a pass is a possible capture, not a promise, and imagery lands in catalogs hours later. <b>Validation baked in:</b> the tool predicts Sentinel-2 over the Chelan area at 19:11 UTC — the exact acquisition slot stamped on every real Chelan scene in the archive.",
           "artifact": null,
           "shows": "next_pass — first field test: Skyfield + live Celestrak TLEs, pattern from developmentseed/eo-predictor",
-          "learning": "\"When can we look again\" is the question disaster responders actually ask, and the prediction agreeing with the archive's real acquisition times is the check that it's not making orbits up."
+          "learning": "\"When can we look again\" is the question disaster responders actually ask, and the prediction agreeing with the archive's real acquisition times is the check that it's not making orbits up.",
+          "returned": "sentinel-1  SENTINEL-1C  2026-08-05 14:20  193.8 km  radar (day or night, sees through cloud)\nsentinel-2  SENTINEL-2B  2026-08-06 19:00   73.4 km  optical\nsentinel-1  SENTINEL-1A  2026-08-07 01:12  112.1 km  radar\nnote: swath geometry from live TLEs, not the acquisition plan"
         }
       ]
     },
@@ -55,7 +70,8 @@
           "artifact": "img/ft5-calgary-oneparam.html",
           "artifact_label": "live map ↗",
           "shows": "the new coverage_set layer type, auto-mosaic ergonomics",
-          "learning": "Field test №4 shipped a 58%-coverage map because a human unrolled a coverage set by hand and dropped scenes. The fix wasn't a warning — it was making the right thing the easy thing. The warning stayed too."
+          "learning": "Field test №4 shipped a 58%-coverage map because a human unrolled a coverage set by hand and dropped scenes. The fix wasn't a warning — it was making the right thing the easy thing. The warning stayed too.",
+          "returned": "layers: [\"Jul 29 · 11UPS\", \"Jul 29 · 11UQS\"]\ncoverage_note: (absent)"
         },
         {
           "tag": "same-day imagery",
@@ -65,7 +81,8 @@
           "artifact": "img/ft5-angola.html",
           "artifact_label": "live map ↗",
           "shows": "coverage_set + active_events on one map, acquisition-to-artifact same day",
-          "learning": "The satellite-to-shareable-map latency here is measured in hours, and no key or account was involved at any step."
+          "learning": "The satellite-to-shareable-map latency here is measured in hours, and no key or account was involved at any step.",
+          "returned": "full_coverage_set  date 2026-08-04  union_covers_aoi_pct 100\n  S2C_33LVJ_20260804  09:23:32Z  cloud 9.77%   covers 62.1%\n  S2C_33LWJ_20260804  09:23:28Z  cloud 0.85%   covers 36.0%\n  S2C_33LVK_20260804  09:23:17Z  cloud 0.0005%  covers 13.0%\n  S2C_33LWK_20260804  09:23:14Z  cloud 13.57%  covers 7.6%"
         },
         {
           "tag": "eoAPI on the panel",
@@ -75,7 +92,8 @@
           "artifact": "img/ft5-caldor-eoapi.html",
           "artifact_label": "live map ↗",
           "shows": "stack_layer with the new eoAPI attribution — joined only when VEDA pixels are on screen",
-          "learning": "The best attribution fix of the day cost zero deployments: the DevSeed-built instance was already in production at NASA, unclaimed."
+          "learning": "The best attribution fix of the day cost zero deployments: the DevSeed-built instance was already in production at NASA, unclaimed.",
+          "returned": "veda / caldor-fire-burn-severity  item: bs_to_save\nstack panel rows incl.: eoAPI (ds-role: created)\nverified: openveda.cloud/api/stac -> stac-fastapi"
         },
         {
           "tag": "band scaling",
@@ -85,7 +103,8 @@
           "artifact": "img/ft5-seville-lst.html",
           "artifact_label": "live map ↗",
           "shows": "compute_statistics with aoi clip, band_scaling passthrough, extent_note guard",
-          "learning": "The scale factor was always in the catalog. Passing it through is the difference between a number and an answer."
+          "learning": "The scale factor was always in the catalog. Passing it through is the difference between a number and an answer.",
+          "returned": "clipped to Seville AOI:  mean 15381.85 DN  (x0.02 K = 307.64 K = 34.5 C)\nunclipped extent_note: stats cover the full item extent (13.1 x 10.0 deg)\nband_scaling: [{scale: 0.02, unit: Kelvin}, ...]"
         }
       ]
     },
@@ -110,7 +129,8 @@
           "artifact": "img/ft5-matterhorn-3d.html",
           "artifact_label": "live 3D ↗",
           "shows": "the degenerate-bbox guard from field test №4, render_map_3d",
-          "learning": "Peaks and landmarks are OSM nodes, not areas. The guard turns a silent empty scene into a stated assumption the caller can override."
+          "learning": "Peaks and landmarks are OSM nodes, not areas. The guard turns a silent empty scene into a stated assumption the caller can override.",
+          "returned": "geocode(\"Matterhorn\") -> bbox [7.509, 45.826, 7.809, 46.126]  source: nominatim\nbbox_note: geocoder returned a point, not an extent — widened to a 0.3 deg box\nscene: S2A_32TLR_20260724_1_L2A  cloud 0.000747%"
         },
         {
           "tag": "honest bug",
@@ -119,7 +139,8 @@
           "answer": "Plenty — and a bug. Sentinel-1 images the area <b>daily</b> in extra-wide polar mode (HH/HV, radar, so polar night is no obstacle; optical is dead there until spring). But every result reports <b>covers_aoi_pct: 0</b>, which is false: the scene footprints cross the <b>antimeridian</b>, their bboxes wrap west-greater-than-east, and the coverage math reads that as a degenerate box. The scenes cover the iceberg; the number says they don't.",
           "artifact": null,
           "shows": "orbit_state on results, EW-mode HH/HV assets, and a found limitation filed as a finding",
-          "learning": "Filed: covers_aoi_pct (and full_coverage_set, which builds on it) is wrong for antimeridian-crossing scenes. A field test that only shows the wins isn't a test."
+          "learning": "Filed: covers_aoi_pct (and full_coverage_set, which builds on it) is wrong for antimeridian-crossing scenes. A field test that only shows the wins isn't a test.",
+          "returned": "S1D_EW_GRDM_1SDH_20260803T075543  orbit_state: ascending  covers_aoi_pct: 0\nS1C_EW_GRDM_1SDH_20260802T080431  orbit_state: ascending  covers_aoi_pct: 0\nS1D_EW_GRDM_1SDH_20260801T081234  orbit_state: ascending  covers_aoi_pct: 0\nassets: hh, hv   (scene bboxes wrap: west 177.58 > east -171.51)"
         },
         {
           "tag": "next_pass + radar",

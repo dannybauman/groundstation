@@ -3,7 +3,10 @@
 
 A field test is a repeatable ritual — run real prompts against live data,
 show the outputs in one consistent format, link every result to its live
-interactive artifact. This script owns the format so each edition is just a
+interactive artifact. `returned` is verbatim machine output (numbers, ids,
+counts) and renders as a data block; `answer` is OUR reading of it. Keeping
+them visually separate is the point — a reader must be able to tell what the
+tools said from what we concluded, or the honesty the cards claim is unearned. This script owns the format so each edition is just a
 cases file. Cases are curated by us (trusted); `answer`/`learning` allow the
 inline markup the cards use (<b>, <em>).
 
@@ -56,6 +59,7 @@ h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
 .card .who { margin-left: auto; font: 400 10.5px 'Roboto Mono', monospace; color: var(--muted); }
 .label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
 .prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
+.returned { font: 400 12px/1.5 'Roboto Mono', monospace; background: #fbfaf7; border: 1px solid var(--rule); border-left: 3px solid var(--mid); padding: 8px 12px; color: var(--ink); white-space: pre-wrap; overflow-x: auto; }
 .answer { font-size: 13.5px; color: var(--mid); }
 .answer b { color: var(--ink); }
 .learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
@@ -99,7 +103,11 @@ def _card(n: int, c: dict) -> str:
     parts = [f'<div class="card"><div class="top"><div class="num">{n}</div>'
              f'<div class="tag">{c["tag"]}</div><div class="who">{c.get("who", "")}</div></div>']
     parts.append(f'<div><div class="label">Input</div><div class="prompt">{c["prompt"]}</div></div>')
-    parts.append(f'<div class="answer"><div class="label">Output</div>{c["answer"]}</div>')
+    if c.get("returned"):
+        parts.append(f'<div><div class="label">What the tools returned</div>'
+                     f'<div class="returned">{c["returned"]}</div></div>')
+    read_label = "Our read" if c.get("returned") else "Output"
+    parts.append(f'<div class="answer"><div class="label">{read_label}</div>{c["answer"]}</div>')
     if c.get("artifact"):
         img = f'<img src="{c["image"]}" alt="artifact produced by example {n}" loading="lazy">' if c.get("image") else ""
         label = c.get("artifact_label", "live artifact ↗")
