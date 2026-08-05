@@ -254,6 +254,25 @@ def t_state_would_have_caught_the_two_real_bugs():
         assert r["state"]["compare"] is True and r["state"]["coverage_pct"] == 100.0
 
 
+def t_3d_coverage_note_accounts_for_the_load_button():
+    # 3D differs from 2D twice: only the main layer drapes on load, and an
+    # uncovered area shows terrain with no imagery rather than blank. The note
+    # has to say what the viewer gets NOW and what the button would add.
+    tile = "https://x/{z}/{x}/{y}.png"
+    main = {"type": "raster", "name": "M", "tiles": tile, "bounds": [0, 0, 5, 10]}
+    extra = {"type": "raster", "name": "E", "tiles": tile, "bounds": [5, 0, 10, 10]}
+    with tempfile.TemporaryDirectory() as d:
+        r = tools.render_map_3d("t", [0, 0, 10, 10], main, out_path=str(Path(d) / "a.html"))
+        assert "50%" in r["coverage_note"] and "extra_layers" in r["coverage_note"]
+        r = tools.render_map_3d("t", [0, 0, 10, 10], main, extra_layers=[extra],
+                                out_path=str(Path(d) / "b.html"))
+        assert "50%" in r["coverage_note"] and "100%" in r["coverage_note"]
+        full = {"type": "raster", "name": "F", "tiles": tile, "bounds": [0, 0, 10, 10]}
+        r = tools.render_map_3d("t", [0, 0, 10, 10], full, out_path=str(Path(d) / "c.html"))
+        assert "coverage_note" not in r
+        assert sorted(r) == ["path", "title"]  # the 3D return shape is unchanged
+
+
 def t_state_never_changes_the_file():
     # state is additive: the artifact a partner opens must be byte-identical
     # whether or not anything reads the structured half

@@ -1652,6 +1652,25 @@ def render_map_3d(
     out_path = _artifact_path(out_path, "map3d", title)
     Path(out_path).write_text(html, encoding="utf-8")
     out = {"path": out_path, "title": title}
+    # Same blind spot render_map had, but 3D differs twice: only the ONE main
+    # layer drapes on load (extras wait behind the button), and an uncovered
+    # area shows terrain with no imagery rather than blank. So report what the
+    # viewer actually gets first, and what the button would add.
+    if resolved.get("bounds"):
+        _cov = _union_coverage_pct(bbox, [resolved["bounds"]])
+        if _cov < 95:
+            _extra_boxes = [e["bounds"] for e in extras if e.get("bounds")]
+            if _extra_boxes:
+                _full = _union_coverage_pct(bbox, [resolved["bounds"], *_extra_boxes])
+                out["coverage_note"] = (
+                    f"the drape covers {_cov:.0f}% of the view on load, the rest is terrain with no "
+                    f"imagery until someone clicks Load full coverage, which takes it to {_full:.0f}%"
+                )
+            else:
+                out["coverage_note"] = (
+                    f"the drape covers {_cov:.0f}% of the view, the rest renders as terrain with no "
+                    "imagery. Pass the rest of a same-day full_coverage_set as extra_layers"
+                )
     if stack_note:
         out["note"] = stack_note
     if postcard:
