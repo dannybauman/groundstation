@@ -1332,8 +1332,9 @@ def render_map(
     the map — the actual collections, tiler, formats, and buckets on screen,
     joined from docs/stack.md. Attribution to projects, never people.
     stack_facts: honest extras the panel can't see from the layers alone —
-    pass {"geocoded": True} if you resolved the place via geocode, and
-    {"events": True} if an events layer came from active_events. Only claim
+    pass {"geocoded": True} if you resolved the place via geocode,
+    {"events": True} if an events layer came from active_events, and
+    {"passes": True} if next_pass informed the answer. Only claim
     what actually happened.
 
     postcard: {"place": ..., "date": ..., "caption": ..., "out_path": ...}

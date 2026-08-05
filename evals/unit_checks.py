@@ -648,6 +648,16 @@ def t_stack_layer_missing_stack_md_skips_gracefully():
 # ---- stack layer on the remaining surfaces (G.3) ----
 
 
+def t_stack_passes_claims_eo_predictor():
+    # next_pass returns data, not an artifact, so the panel can only learn it
+    # from a caller-declared fact — and must not claim it otherwise
+    comps = gstack.parse_stack()
+    on = gstack.stack_instances(comps, {"catalogs": ["earth-search"], "maplibre": True, "passes": True})
+    assert any(c["name"] == "eo-predictor" and c["ds-role"] == "created" for c in on)
+    off = gstack.stack_instances(comps, {"catalogs": ["earth-search"], "maplibre": True})
+    assert not any(c["name"] == "eo-predictor" for c in off)
+
+
 def t_stack_3d_claims_terrain():
     html = _render_3d(stack_layer=True)
     assert 'id="stack-toggle"' in html and 'id="stack"' in html

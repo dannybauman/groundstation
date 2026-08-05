@@ -94,6 +94,14 @@ Heads-up for editors: component *names* are joined by code (`src/groundstation/s
 - speaks-to: Nominatim
 - link: https://github.com/developmentseed/gazet
 
+## eo-predictor
+- kind: data
+- what: satellite pass prediction — when each Earth-observation constellation next flies over a place
+- ds-role: created
+- integration: next_pass follows its prediction approach and uses its constellation definitions (swath, orbit ids), so "when's the next look" is answered the way it answers it
+- speaks-to: Earth Search, STAC
+- link: https://github.com/developmentseed/eo-predictor
+
 ## Nominatim
 - kind: access
 - what: OpenStreetMap's geocoder

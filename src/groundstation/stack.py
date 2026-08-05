@@ -110,6 +110,10 @@ def stack_instances(
         active_names |= {"Gazet", "Nominatim"}
     if facts.get("events"):
         active_names |= {"NASA EONET", "GDACS", "Open-Meteo"}
+    if facts.get("passes"):
+        # next_pass returns data, not an artifact, so nothing in the layers can
+        # reveal it — the caller declares it the same way they declare geocoded
+        active_names.add("eo-predictor")
 
     instance_bits = {
         "TiTiler": f"serving {collections or 'this layer'}" + (f" via {hosts}" if hosts else ""),
