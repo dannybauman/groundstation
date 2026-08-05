@@ -93,7 +93,7 @@ A field test is a showcase page: a set of prompts run live, each with its output
 
 ## Monitoring and briefings
 
-`active_events` (EONET + GDACS) and `weather_summary` exist so you can answer "what's happening around X" and write proactive briefs. When events have coordinates, put them on the map as a geojson layer alongside imagery.
+`active_events` (EONET + GDACS) and `weather_summary` exist so you can answer "what's happening around X" and write proactive briefs. `weather_summary` returns `grid_cell` with the elevation the reading is actually from, plus an `elevation_note` above 500 m — quote it when the place spans real relief, or an 8.5°C summit reading gets read as the temperature in the valley. **And when you map a live event, check whether the imagery predates it** — for a same-day eruption or landfall the honest answer is usually "this is the before, here is when the after arrives" (use `next_pass`), not four-day-old imagery presented as the event. When events have coordinates, put them on the map as a geojson layer alongside imagery.
 
 `next_pass(lat, lon, days)` answers "when could we next get imagery of this place" — upcoming Sentinel-2, Sentinel-1, and Landsat passes from live TLEs. Be honest with its output: a pass is a *possible* capture (swath geometry, not the acquisition plan), radar sees through cloud and optical doesn't, and imagery reaches the catalogs hours to a day after acquisition. Pairs naturally with a disaster question: what's there now, and when's the next look. The full many-constellation version of this is [eo-predictor](https://github.com/developmentseed/eo-predictor).
 

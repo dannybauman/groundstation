@@ -309,6 +309,24 @@ def t_field_test_etime_parser():
     assert ft._etime_seconds("not-a-time") is None
 
 
+def t_map_with_no_imagery_says_so():
+    # field test No.6: a geojson-only storm track rendered a 10 KB still that
+    # was two dots on blank. The render "succeeded" and nothing said otherwise.
+    gj = {"type": "FeatureCollection", "features": []}
+    with tempfile.TemporaryDirectory() as d:
+        r = tools.render_map("t", [0, 0, 10, 10],
+                             [{"type": "geojson", "name": "x", "data": gj}],
+                             out_path=str(Path(d) / "a.html"))
+        assert "no imagery layer" in r["coverage_note"]
+        # with a raster present the note reverts to the coverage question
+        r = tools.render_map("t", [0, 0, 10, 10],
+                             [{"type": "raster", "name": "r", "tiles": "https://x/{z}/{x}/{y}.png",
+                               "bounds": [0, 0, 10, 10]},
+                              {"type": "geojson", "name": "x", "data": gj}],
+                             out_path=str(Path(d) / "b.html"))
+        assert "coverage_note" not in r
+
+
 def t_state_never_changes_the_file():
     # state is additive: the artifact a partner opens must be byte-identical
     # whether or not anything reads the structured half

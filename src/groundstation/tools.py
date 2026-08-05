@@ -1418,6 +1418,14 @@ def render_map(
     # invisible from the caller's side — the render "succeeded". Say it here, or
     # it ships in a demo. search_imagery already hands back full_coverage_set
     # for exactly this; the usual cause is rendering only its first item.
+    # A map with no raster at all draws vectors on nothing. Field test No.6's
+    # storm-track card produced a 10 KB still that was two dots on blank, and
+    # only a human noticing the file size caught it.
+    if not any(l.get("type") == "raster" for l in resolved):
+        out["coverage_note"] = (
+            "no imagery layer on this map, so it renders as vectors on a blank background. "
+            "Add a scene, or say plainly that none is available for this area"
+        )
     _boxes = [l["bounds"] for l in resolved if l.get("type") == "raster" and l.get("bounds")]
     if _boxes:
         _cov = _union_coverage_pct(bbox, _boxes)
@@ -2203,7 +2211,21 @@ def weather_summary(lat: float, lon: float, past_days: int = 7) -> dict[str, Any
             "timezone": "auto",
         },
     )
-    return {"units": data.get("daily_units"), "daily": data.get("daily")}
+    # Open-Meteo snaps to a grid cell and reports ITS elevation, which at a
+    # volcano or a mountain town is a different climate from the place asked
+    # for — Fuego returned 8.5C max because the cell sits at 3,704 m, not in
+    # the villages below. Returning both stops that being read as the answer.
+    out = {"units": data.get("daily_units"), "daily": data.get("daily")}
+    grid = {k: data[k] for k in ("latitude", "longitude", "elevation") if k in data}
+    if grid:
+        out["grid_cell"] = grid
+        if grid.get("elevation", 0) > 500:
+            out["elevation_note"] = (
+                f"readings are for a grid cell at {grid['elevation']:.0f} m "
+                f"({grid.get('latitude'):.3f}, {grid.get('longitude'):.3f}) — say so if the "
+                "place spans a big elevation range, the valley is warmer than this"
+            )
+    return out
 
 
 # ---------------------------------------------------------------- next pass
