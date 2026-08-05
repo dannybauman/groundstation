@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The field-test factory: cases JSON in, the standard field-test page out.
 
-A field test is a repeatable ritual — run real prompts against live data,
+A field test is a repeatable ritual — check the running MCP server is not older
+than the code (this script warns), run real prompts against live data,
 show the outputs in one consistent format, link every result to its live
 interactive artifact. `returned` is verbatim machine output (numbers, ids,
 counts) and renders as a data block; `answer` is OUR reading of it. Keeping
@@ -17,7 +18,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 PAGE = """<!doctype html>
@@ -99,6 +102,61 @@ __REPRO__
 """
 
 
+def _etime_seconds(s: str) -> float | None:
+    """`ps -o etime` as seconds. Formats: MM:SS, HH:MM:SS, DD-HH:MM:SS."""
+    s = s.strip()
+    if not s:
+        return None
+    days, _, rest = s.rpartition("-")
+    try:
+        parts = [float(x) for x in rest.split(":")]
+    except ValueError:
+        return None
+    secs = 0.0
+    for x in parts:
+        secs = secs * 60 + x
+    return secs + (float(days) * 86400 if days else 0.0)
+
+
+def _preflight_server_freshness() -> None:
+    """Warn when a running MCP server predates the code this page will describe.
+
+    A field test run through MCP tools reports whatever the SERVER booted with,
+    not the working tree. On Aug 5 2026 that gap was real and silent: the same
+    B22A query returned 0% through MCP and 83.2% in-process, because the server
+    had started before the antimeridian fix merged. A page built that way
+    documents a version of groundstation nobody has.
+    """
+    src = Path(__file__).resolve().parent.parent / "src" / "groundstation"
+    if not src.exists():
+        return
+    newest = max((f.stat().st_mtime for f in src.rglob("*.py")), default=0)
+    try:
+        pids = subprocess.run(["pgrep", "-f", "run groundstation"],
+                              capture_output=True, text=True, timeout=5).stdout.split()
+    except Exception:
+        return
+    stale = []
+    for pid in pids:
+        try:
+            et = subprocess.run(["ps", "-o", "etime=", "-p", pid],
+                                capture_output=True, text=True, timeout=5).stdout
+        except Exception:
+            continue
+        secs = _etime_seconds(et)
+        if secs is not None and (time.time() - secs) < newest:
+            stale.append(pid)
+    if stale:
+        mins = int((time.time() - newest) / 60)
+        print(
+            f"  [!] {len(stale)} groundstation MCP server(s) started BEFORE the newest source "
+            f"change ({mins} min ago): pid {', '.join(stale)}.\n"
+            "      Cases run through MCP tools will reflect the old code. Either reconnect the\n"
+            "      server (/mcp in Claude Code) or run the cases in-process before trusting this page.",
+            file=sys.stderr,
+        )
+
+
 def _card(n: int, c: dict) -> str:
     parts = [f'<div class="card"><div class="top"><div class="num">{n}</div>'
              f'<div class="tag">{c["tag"]}</div><div class="who">{c.get("who", "")}</div></div>']
@@ -152,6 +210,7 @@ def _autoshoot(case: dict, cases_path: Path) -> None:
 
 def build(cases_path: str | Path) -> Path:
     cases_path = Path(cases_path)
+    _preflight_server_freshness()
     spec = json.loads(cases_path.read_text(encoding="utf-8"))
     n = 0
     rounds_html = []

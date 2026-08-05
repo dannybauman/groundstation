@@ -293,6 +293,22 @@ def t_3d_state_marks_what_does_not_draw_on_load():
         assert "coverage_pct_loaded" not in r["state"]
 
 
+def t_field_test_etime_parser():
+    # the field-test preflight compares MCP server start time against source
+    # mtime; getting ps -o etime parsing wrong makes the warning silently never
+    # fire, which is the failure it exists to prevent
+    import importlib.util
+    fp = Path(__file__).resolve().parents[1] / "scripts" / "field_test.py"
+    spec = importlib.util.spec_from_file_location("_ft", fp)
+    ft = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ft)
+    assert ft._etime_seconds("05:30") == 330
+    assert ft._etime_seconds("01:00:00") == 3600
+    assert ft._etime_seconds("2-03:00:00") == 2 * 86400 + 3 * 3600
+    assert ft._etime_seconds("") is None
+    assert ft._etime_seconds("not-a-time") is None
+
+
 def t_state_never_changes_the_file():
     # state is additive: the artifact a partner opens must be byte-identical
     # whether or not anything reads the structured half
