@@ -1,0 +1,151 @@
+{
+  "title": "groundstation field test №7 — a true number that produces a false answer",
+  "heading": "THE FIELD TEST №7",
+  "sub": "groundstation · 10 prompts · 2 findings filed · August 11, 2026 · Development Seed labs",
+  "lede": "This edition went looking for the failure mode that matters most to anything agentic: <b>a tool returning a number that is arithmetically correct and semantically misleading</b>. It found one. <em>compare_dates</em> reported an 87.8% NDVI collapse over Chilika Lake during the monsoon — the season vegetation grows. The number is real. The reading it invites is wrong, for two independent reasons, and nothing in the return marks it. The other finding is older and cheaper: our own geocoder still never fires. Every card separates what the tools returned from our reading of it: the data block is verbatim, the prose below is interpretation.",
+  "stats": [
+    {
+      "value": "10/10",
+      "label": "prompts answered against live data"
+    },
+    {
+      "value": "−87.8%",
+      "label": "the delta that means nothing"
+    },
+    {
+      "value": "2",
+      "label": "findings filed on their own cards"
+    },
+    {
+      "value": "0",
+      "label": "API keys needed for any of it"
+    }
+  ],
+  "rounds": [
+    {
+      "name": "Round 1 — what a tool has to say so a model can't fill the gap itself",
+      "cases": [
+        {
+          "tag": "grounding",
+          "who": "fire duty officer",
+          "prompt": "What are conditions right now around the Bug fire in Lassen County?",
+          "returned": "signals:\n  \"no rain ≥1mm in the last 14 days\"\n  \"peak wind today 28 km/h from the NW\"\n  \"4 active wildfires within ~150 km\"\n\nlatest_look: S2A_10SGJ_20260810_0_L2A  2026-08-10  cloud 9.4  covers_aoi_pct 48.9\nnext_looks:  LANDSAT 9    2026-08-11 18:39 UTC\n             SENTINEL-2C  2026-08-11 19:03 UTC\n\nnote: \"current conditions from live sources — not a risk model, not a prediction\"",
+          "answer": "The tool returns <b>signals as finished sentences</b>, not raw numbers for a model to narrate. That is the whole design: a small model asked to \"summarise conditions\" from a JSON blob will reach for background knowledge and invent a fire-risk rating. Given pre-written verbatim signals it has nothing left to invent, and the <em>note</em> refuses the inference the phrasing would otherwise invite. Worth saying plainly: the wind is 28 km/h from the NW and four fires are burning within 150 km, and this still is not a risk assessment.",
+          "shows": "conditions_brief — dryness + wind + events + latest look + next pass, composed into verbatim signals",
+          "learning": "This is the structural version of a grounding prompt. <b>geo-assistant</b> ends its system prompt with \"do not use background knowledge, only use the tools above\" — a rule the model can ignore. Pre-writing the sentence is the same rule enforced where the model has no vote."
+        },
+        {
+          "tag": "honest-empty",
+          "who": "the confabulation check",
+          "prompt": "Do you have Himawari data?",
+          "returned": "{\"result\": []}",
+          "answer": "Himawari is a real and heavily used geostationary satellite. It is not in these three catalogs. The distinction the tool's own docstring insists on: <b>an empty result means \"not in these three catalogs\", not \"no such data exists\"</b> — and the docstring names Himawari as the live example, so the tool ships knowing its own blind spot. An agent that reports \"no Himawari data available\" has said something false while returning something true.",
+          "shows": "search_datasets across earth-search, veda, planetary-computer",
+          "learning": "The hardest honesty problem in a tool surface is not wrong answers, it's <b>empty ones</b>. Zero results is the shape most likely to be narrated into a confident falsehood, and the fix is in the docstring the model reads, not the code."
+        }
+      ]
+    },
+    {
+      "name": "Round 2 — finding 1: our own geocoder still never fires",
+      "cases": [
+        {
+          "tag": "⚠ finding",
+          "who": "Story 1.3, still blocked",
+          "prompt": "Two geocodes, run back to back: \"Chilika Lake\" and \"Leh Ladakh\".",
+          "returned": "geocode(\"Chilika Lake\")\n  name:   Chilika Lake, Krushna Prasad, Puri, Odisha, India\n  source: nominatim\n\ngeocode(\"Leh Ladakh\")\n  name:   Living Stones, Leh, Ladakh, Upper Karzoo, Zangsti,\n          Leh, Leh district, Ladakh, 194101, India\n  source: nominatim\n  bbox_note: \"geocoder returned a point, not an extent —\n              widened to a 0.3 deg box around it\"",
+          "answer": "Two for two on <b>source: nominatim</b>. The Gazet-first branch in <em>tools.py</em> is coded and dormant, because gazet.ds.io fronts the Streamlit demo rather than the FastAPI <em>/search</em>, so it activates only when a JSON endpoint exists or GAZET_URL is set. The second result is the sharper half: <b>\"Leh Ladakh\" resolved to a guesthouse</b>, not the town — Living Stones is a place to stay in Leh, and OpenStreetMap ranked it first. The tool caught the shape of the error (a point where an extent was wanted) and widened the box, which is honest and is not the same as being right.",
+          "shows": "geocode — Gazet-first, Geodini second, Nominatim last. Legs two and three are not wired",
+          "learning": "This is the third field test to file the same thing, and it is <b>blocked on a one-line ask, not on build capacity</b>. The cost is not cosmetic: the Stack panel credits Gazet as DevSeed-created on maps that ran entirely on OpenStreetMap. Ambiguous place names are exactly what a small-model geocoder over Overture was built for."
+        }
+      ]
+    },
+    {
+      "name": "Round 3 — the loop, and the choice an agent gets wrong",
+      "cases": [
+        {
+          "tag": "coverage",
+          "who": "the scene-picking trap",
+          "prompt": "Find me a clear recent Sentinel-2 scene over Chilika Lake.",
+          "returned": "S2B_45QUC_20260605_1_L2A  cloud  2.2   covers_aoi_pct  24.2\nS2B_45QTB_20260605_0_L2A  cloud  5.0   covers_aoi_pct  17.2\nS2C_45QUB_20260610_0_L2A  cloud 21.9   covers_aoi_pct  97.9",
+          "answer": "\"Clear\" and \"useful\" point in opposite directions here, and the ranking makes the trap explicit: <b>the two cleanest scenes see a fifth of the lagoon</b>. Sorted on cloud alone an agent picks the 2.2% scene, renders a beautiful card of a quarter of the subject, and never mentions it. <em>covers_aoi_pct</em> exists so that choice is visible rather than implicit — the right answer is the 21.9%-cloud scene at 97.9% coverage, and saying why is part of the answer.",
+          "shows": "search_imagery — covers_aoi_pct on every item, full_coverage_set when nothing single covers",
+          "learning": "A tool that returns a ranked list has already made a decision on the model's behalf. The defensible move is to <b>return the axis it did not sort on</b>, in the same object, so the tradeoff can't be silently lost."
+        },
+        {
+          "tag": "extent",
+          "who": "the number that is about the wrong area",
+          "prompt": "What's the NDVI over that Chilika scene?",
+          "returned": "mean:           0.0425\nmedian:        -0.0073\npercentile_98:  0.6032\nvalid_percent: 96.71\n\nextent_note: \"stats cover the full item extent (1.1 x 1.0 deg).\n              Pass aoi_geojson to clip to your subject\"",
+          "answer": "A mean NDVI of <b>0.04</b> would read as near-total absence of vegetation. It isn't: the scene is a brackish lagoon plus a slab of the Bay of Bengal, so most pixels are water and water sits near or below zero. The median of <b>−0.007</b> is the tell, and the 98th percentile of <b>0.60</b> shows the vegetation is there, just outnumbered. The <em>extent_note</em> is the tool saying, unprompted, that the question asked and the question answered are different questions.",
+          "shows": "compute_statistics — band math via the catalog's tiler statistics endpoint, with an unrequested scope warning",
+          "learning": "Whole-scene statistics are the most quietly wrong number in earth observation. Every asked-for stat should carry <b>what area it covers</b>, because the caller almost always meant a smaller one."
+        }
+      ]
+    },
+    {
+      "name": "Round 4 — finding 2: the delta that means nothing, and the instrument that answers it",
+      "cases": [
+        {
+          "tag": "⚠ finding",
+          "who": "the headline nobody should write",
+          "prompt": "How did vegetation around Chilika Lake change from pre-monsoon to monsoon?",
+          "returned": "tile:   45QUB\nbefore: S2A_45QUB_20260523_1_L2A  2026-05-23  cloud 16.0  mean 0.0605\nafter:  S2C_45QUB_20260809_0_L2A  2026-08-09  cloud 51.7  mean 0.0074\ndelta:  -0.0531\ndelta_pct: -87.8",
+          "answer": "As arithmetic this is correct. As ecology it is backwards — <b>the monsoon is when Odisha greens</b>, and a −87.8% headline says the opposite. Two independent things break it. First, the after scene is <b>51.7% cloud</b>: cloud pushes NDVI toward zero, and half the pixels are cloud. Second, and worse, <b>delta_pct is a percentage on a near-zero baseline</b> — a mostly-water scene has a mean NDVI of 0.06, so an absolute move of 0.05 becomes −87.8% and is reported to one decimal place as though that precision meant something.",
+          "artifact": "img/ft7-chilika-ndvi-trap.html",
+          "artifact_label": "open the swipe map ↗",
+          "shows": "compare_dates — matched MGRS tile, both means, the delta, and a swipe map",
+          "learning": "<b>The fix already exists in this codebase three times over and this tool doesn't use it.</b> next_pass returns a <em>note</em>, compute_statistics returns an <em>extent_note</em>, conditions_brief returns a <em>note</em>. compare_dates returns a bare number. Filed: return a caveat field when either scene's cloud crosses a threshold or the baseline mean is near zero. Both conditions are already computed — they just aren't said."
+        },
+        {
+          "tag": "instrument",
+          "who": "the answer the optical question couldn't give",
+          "prompt": "Then what should I have used over a monsoon lagoon?",
+          "returned": "search_imagery(sentinel-1-grd, Chilika, Jul 15 – Aug 11)\n  S1D_IW_GRDH_1SDV_20260807T001306…\n    cloud_cover:    null\n    covers_aoi_pct: 100\n    orbit_state:    descending\n\nnext_pass(19.685, 85.250, days=3)\n  SENTINEL-1C  2026-08-12 12:02 UTC  radar (day or night, sees through cloud)\n  SENTINEL-2B  2026-08-14 05:03 UTC  optical",
+          "answer": "<b>cloud_cover: null and covers_aoi_pct: 100</b>, on August 7, in the middle of the monsoon that defeated the optical comparison two cards up. Radar does not care about the sky. The pass prediction makes the same point forward-looking: the next radar look is <b>two days out</b> and the next usable optical look is four, and in monsoon Odisha the optical one may well be cloud anyway.",
+          "artifact": "img/ft7-chilika-two-instruments.html",
+          "artifact_label": "open the two-instrument map ↗",
+          "shows": "search_imagery on sentinel-1-grd, next_pass propagating live Celestrak TLEs with Skyfield",
+          "learning": "next_pass is careful to say what it is: <b>\"swath geometry, not the acquisition plan — a pass is a possible capture\"</b>. That sentence is why the tool is usable for planning. The pattern is developmentseed/eo-predictor, which does this across many more constellations."
+        }
+      ]
+    },
+    {
+      "name": "Round 5 — live Earth, and the things people keep",
+      "cases": [
+        {
+          "tag": "live",
+          "who": "disaster desk",
+          "prompt": "Anything active near Wenzhou, and what did the weather actually do?",
+          "returned": "active_events\n  Super Typhoon Dolphin       EONET  2026-08-09  [120.6, 27.9]\n  Flood in China              GDACS  Orange      [120.69, 28.16]\n                              2026-07-31 → 2026-08-11\n\nweather_summary(28.156, 120.688)\n  2026-08-08  precip   4.5 mm   wind 23.4 km/h\n  2026-08-09  precip 140.7 mm   wind 41.2 km/h\n  2026-08-10  precip  92.1 mm   wind 29.6 km/h\n  2026-08-11  precip  22.7 mm   wind 13.4 km/h",
+          "answer": "Two independent sources agreeing, which is the point of running both: NASA EONET has the typhoon, GDACS has an <b>Orange</b> flood alert at nearly the same coordinates, and the weather record shows why — <b>140.7 mm in a single day</b> on the 9th with winds at 41 km/h, then 92 mm on the 10th. The alert and the rainfall are separate feeds that were never joined by us, so the agreement is evidence rather than restatement.",
+          "shows": "active_events (EONET + GDACS), weather_summary (Open-Meteo, no key)",
+          "learning": "Wind <em>direction</em> is in this response too, and it is the field people forget to ask for. For smoke, ash and plume questions the bearing matters more than the speed, and it is meteorological convention — the direction the wind comes <b>from</b>."
+        },
+        {
+          "tag": "artifact",
+          "who": "the thing someone can actually post",
+          "prompt": "Give me something shareable of Chilika before the monsoon closed the sky.",
+          "returned": "postcard-chilika-lake--odisha--india-2026-06-10.html   2.4 MB\n  pixels:  embedded as a data URI\n  framed:  to the AOI bbox, snapped to a standard card shape\n  stack:   printed in the credit block, no live URLs",
+          "answer": "The size is the feature. <b>2.4 MB because the image is baked in</b> — no signed tile URL to expire, no local path, nothing that goes blank next week. A live map is the right artifact for exploring and the wrong one for sending to somebody. Framing to the AOI rather than the scene is what keeps scene-edge nodata off the card.",
+          "artifact": "img/ft7-chilika-postcard.html",
+          "artifact_label": "open the postcard ↗",
+          "shows": "render_postcard — data-URI pixels, attribution baked in, stack_layer in the credit block",
+          "learning": "Where and whether to post it stays the person's call. The tool's job is to make the artifact survive being sent, and a live tile URL does not."
+        },
+        {
+          "tag": "3d",
+          "who": "and the primitive underneath",
+          "prompt": "Show me Leh in 3D. And give me the raw NDVI tile URL for the Chilika scene.",
+          "returned": "render_map_3d state:\n  bbox:         [77.437, 34.022, 77.737, 34.322]\n  terrain:      true          exaggeration: 1.8\n  coverage_pct: 100           scene: S2B_43SGT_20260717_0_L2A (cloud 11.5)\n\ntile_url_template →\n  https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png\n    ?url=…/sentinel-2-l2a/items/S2C_45QUB_20260610_0_L2A\n    &expression=(b1-b2)/(b1+b2)&assets=nir&assets=red\n    &rescale=-1,1&colormap_name=rdylgn",
+          "answer": "Ladakh in July is the easy case for terrain — high relief, almost no cloud, 100% coverage. Elevation comes from keyless AWS Terrarium tiles, so the HTML is shareable with no account behind it. The second half is the part developers actually want: <b>every render is just a tile URL</b>, and the tool will hand it over. Drop it into MapLibre, Leaflet, QGIS, anything — no dependency on us at runtime.",
+          "artifact": "img/ft7-leh-3d.html",
+          "artifact_label": "open the 3D fly-through ↗",
+          "shows": "render_map_3d over Terrarium terrain; tile_url_template resolving assets and band math to an XYZ template",
+          "learning": "Both renderers now <b>return the state they built the HTML from</b> — bbox, per-layer bounds and tiles, coverage, the compare flag. That is what makes a map checkable by an eval instead of only by a person opening the file and looking at it."
+        }
+      ]
+    }
+  ],
+  "repro": "git clone https://github.com/dannybauman/groundstation && cd groundstation\nbash scripts/doctor.sh                    # walks the setup chain, prints the fix\nuv run evals/unit_checks.py               # offline checks\nuv run evals/run_evals.py                 # live checks against real endpoints\nuv run scripts/field_test.py docs/field-test-2026-08-11.cases.json   # rebuild this page",
+  "footer": "field test №7 · August 11, 2026 · two findings filed: compare_dates has no validity guard, and Gazet still never fires · groundstation · Development Seed labs"
+}

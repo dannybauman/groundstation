@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>groundstation field test №7 — a true number that produces a false answer</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
+  --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
+  --calm: #2e7d32; --blue: #1d4e8f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
+header { border-bottom: 2px solid var(--ink); padding: 42px 24px 30px; }
+.wrap { max-width: 1060px; margin: 0 auto; }
+header h1 { font: 700 34px/1.1 'Roboto Condensed', sans-serif; margin: 0 0 6px; letter-spacing: .02em; }
+header h1 .dot { display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); margin-right: 12px; }
+header .sub { font: 500 11.5px 'Roboto Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--mid); }
+header p.lede { max-width: 760px; font-size: 16px; margin: 16px 0 0; color: var(--mid); }
+.stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 26px auto 0; max-width: 1060px; padding: 0; }
+.stat { flex: 1; min-width: 160px; background: var(--white); border: 1px solid var(--rule); border-top: 3px solid var(--accent); padding: 12px 16px; }
+.stat b { display: block; font: 600 30px 'Roboto Condensed', sans-serif; color: var(--accent); }
+.stat span { font-size: 12px; color: var(--mid); }
+main { padding: 10px 24px 60px; }
+h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
+  display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
+h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 16px; }
+@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.card .top { display: flex; align-items: center; gap: 10px; }
+.card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.card .tag { font: 500 10px 'Roboto Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); border: 1px solid var(--rule); padding: 3px 8px; }
+.card .who { margin-left: auto; font: 400 10.5px 'Roboto Mono', monospace; color: var(--muted); }
+.label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
+.returned { font: 400 12px/1.5 'Roboto Mono', monospace; background: #fbfaf7; border: 1px solid var(--rule); border-left: 3px solid var(--mid); padding: 8px 12px; color: var(--ink); white-space: pre-wrap; overflow-x: auto; }
+.answer { font-size: 13.5px; color: var(--mid); }
+.answer b { color: var(--ink); }
+.learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
+.learning b { color: var(--accent); font-style: normal; }
+.shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
+.fig { position: relative; display: block; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; }
+.fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
+  background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
+.fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 0 40px; }
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <h1><span class="dot"></span>THE FIELD TEST №7</h1>
+  <div class="sub">groundstation · 10 prompts · 2 findings filed · August 11, 2026 · Development Seed labs</div>
+  <p class="lede">This edition went looking for the failure mode that matters most to anything agentic: <b>a tool returning a number that is arithmetically correct and semantically misleading</b>. It found one. <em>compare_dates</em> reported an 87.8% NDVI collapse over Chilika Lake during the monsoon — the season vegetation grows. The number is real. The reading it invites is wrong, for two independent reasons, and nothing in the return marks it. The other finding is older and cheaper: our own geocoder still never fires. Every card separates what the tools returned from our reading of it: the data block is verbatim, the prose below is interpretation.</p>
+</div></header>
+
+<div class="stats wrap" style="padding: 0 24px">
+  <div class="stat"><b>10/10</b><span>prompts answered against live data</span></div>
+  <div class="stat"><b>−87.8%</b><span>the delta that means nothing</span></div>
+  <div class="stat"><b>2</b><span>findings filed on their own cards</span></div>
+  <div class="stat"><b>0</b><span>API keys needed for any of it</span></div>
+</div>
+
+<main class="wrap">
+<h2 class="round">Round 1 — what a tool has to say so a model can't fill the gap itself</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">1</div><div class="tag">grounding</div><div class="who">fire duty officer</div></div>
+<div><div class="label">Input</div><div class="prompt">What are conditions right now around the Bug fire in Lassen County?</div></div>
+<div><div class="label">What the tools returned</div><div class="returned">signals:
+  "no rain ≥1mm in the last 14 days"
+  "peak wind today 28 km/h from the NW"
+  "4 active wildfires within ~150 km"
+
+latest_look: S2A_10SGJ_20260810_0_L2A  2026-08-10  cloud 9.4  covers_aoi_pct 48.9
+next_looks:  LANDSAT 9    2026-08-11 18:39 UTC
+             SENTINEL-2C  2026-08-11 19:03 UTC
+
+note: "current conditions from live sources — not a risk model, not a prediction"</div></div>
+<div class="answer"><div class="label">Our read</div>The tool returns <b>signals as finished sentences</b>, not raw numbers for a model to narrate. That is the whole design: a small model asked to "summarise conditions" from a JSON blob will reach for background knowledge and invent a fire-risk rating. Given pre-written verbatim signals it has nothing left to invent, and the <em>note</em> refuses the inference the phrasing would otherwise invite. Worth saying plainly: the wind is 28 km/h from the NW and four fires are burning within 150 km, and this still is not a risk assessment.</div>
+<div class="learning"><b>Learning →</b> This is the structural version of a grounding prompt. <b>geo-assistant</b> ends its system prompt with "do not use background knowledge, only use the tools above" — a rule the model can ignore. Pre-writing the sentence is the same rule enforced where the model has no vote.</div>
+<div class="shows">conditions_brief — dryness + wind + events + latest look + next pass, composed into verbatim signals</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">2</div><div class="tag">honest-empty</div><div class="who">the confabulation check</div></div>
+<div><div class="label">Input</div><div class="prompt">Do you have Himawari data?</div></div>
+<div><div class="label">What the tools returned</div><div class="returned">{"result": []}</div></div>
+<div class="answer"><div class="label">Our read</div>Himawari is a real and heavily used geostationary satellite. It is not in these three catalogs. The distinction the tool's own docstring insists on: <b>an empty result means "not in these three catalogs", not "no such data exists"</b> — and the docstring names Himawari as the live example, so the tool ships knowing its own blind spot. An agent that reports "no Himawari data available" has said something false while returning something true.</div>
+<div class="learning"><b>Learning →</b> The hardest honesty problem in a tool surface is not wrong answers, it's <b>empty ones</b>. Zero results is the shape most likely to be narrated into a confident falsehood, and the fix is in the docstring the model reads, not the code.</div>
+<div class="shows">search_datasets across earth-search, veda, planetary-computer</div>
+</div>
+</div>
+
+<h2 class="round">Round 2 — finding 1: our own geocoder still never fires</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">3</div><div class="tag">⚠ finding</div><div class="who">Story 1.3, still blocked</div></div>
+<div><div class="label">Input</div><div class="prompt">Two geocodes, run back to back: "Chilika Lake" and "Leh Ladakh".</div></div>
+<div><div class="label">What the tools returned</div><div class="returned">geocode("Chilika Lake")
+  name:   Chilika Lake, Krushna Prasad, Puri, Odisha, India
+  source: nominatim
+
+geocode("Leh Ladakh")
+  name:   Living Stones, Leh, Ladakh, Upper Karzoo, Zangsti,
+          Leh, Leh district, Ladakh, 194101, India
+  source: nominatim
+  bbox_note: "geocoder returned a point, not an extent —
+              widened to a 0.3 deg box around it"</div></div>
+<div class="answer"><div class="label">Our read</div>Two for two on <b>source: nominatim</b>. The Gazet-first branch in <em>tools.py</em> is coded and dormant, because gazet.ds.io fronts the Streamlit demo rather than the FastAPI <em>/search</em>, so it activates only when a JSON endpoint exists or GAZET_URL is set. The second result is the sharper half: <b>"Leh Ladakh" resolved to a guesthouse</b>, not the town — Living Stones is a place to stay in Leh, and OpenStreetMap ranked it first. The tool caught the shape of the error (a point where an extent was wanted) and widened the box, which is honest and is not the same as being right.</div>
+<div class="learning"><b>Learning →</b> This is the third field test to file the same thing, and it is <b>blocked on a one-line ask, not on build capacity</b>. The cost is not cosmetic: the Stack panel credits Gazet as DevSeed-created on maps that ran entirely on OpenStreetMap. Ambiguous place names are exactly what a small-model geocoder over Overture was built for.</div>
+<div class="shows">geocode — Gazet-first, Geodini second, Nominatim last. Legs two and three are not wired</div>
+</div>
+</div>
+
+<h2 class="round">Round 3 — the loop, and the choice an agent gets wrong</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">4</div><div class="tag">coverage</div><div class="who">the scene-picking trap</div></div>
+<div><div class="label">Input</div><div class="prompt">Find me a clear recent Sentinel-2 scene over Chilika Lake.</div></div>
+<div><div class="label">What the tools returned</div><div class="returned">S2B_45QUC_20260605_1_L2A  cloud  2.2   covers_aoi_pct  24.2
+S2B_45QTB_20260605_0_L2A  cloud  5.0   covers_aoi_pct  17.2
+S2C_45QUB_20260610_0_L2A  cloud 21.9   covers_aoi_pct  97.9</div></div>
+<div class="answer"><div class="label">Our read</div>"Clear" and "useful" point in opposite directions here, and the ranking makes the trap explicit: <b>the two cleanest scenes see a fifth of the lagoon</b>. Sorted on cloud alone an agent picks the 2.2% scene, renders a beautiful card of a quarter of the subject, and never mentions it. <em>covers_aoi_pct</em> exists so that choice is visible rather than implicit — the right answer is the 21.9%-cloud scene at 97.9% coverage, and saying why is part of the answer.</div>
+<div class="learning"><b>Learning →</b> A tool that returns a ranked list has already made a decision on the model's behalf. The defensible move is to <b>return the axis it did not sort on</b>, in the same object, so the tradeoff can't be silently lost.</div>
+<div class="shows">search_imagery — covers_aoi_pct on every item, full_coverage_set when nothing single covers</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">5</div><div class="tag">extent</div><div class="who">the number that is about the wrong area</div></div>
+<div><div class="label">Input</div><div class="prompt">What's the NDVI over that Chilika scene?</div></div>
+<div><div class="label">What the tools returned</div><div class="returned">mean:           0.0425
+median:        -0.0073
+percentile_98:  0.6032
+valid_percent: 96.71
+
+extent_note: "stats cover the full item extent (1.1 x 1.0 deg).
+              Pass aoi_geojson to clip to your subject"</div></div>
+<div class="answer"><div class="label">Our read</div>A mean NDVI of <b>0.04</b> would read as near-total absence of vegetation. It isn't: the scene is a brackish lagoon plus a slab of the Bay of Bengal, so most pixels are water and water sits near or below zero. The median of <b>−0.007</b> is the tell, and the 98th percentile of <b>0.60</b> shows the vegetation is there, just outnumbered. The <em>extent_note</em> is the tool saying, unprompted, that the question asked and the question answered are different questions.</div>
+<div class="learning"><b>Learning →</b> Whole-scene statistics are the most quietly wrong number in earth observation. Every asked-for stat should carry <b>what area it covers</b>, because the caller almost always meant a smaller one.</div>
+<div class="shows">compute_statistics — band math via the catalog's tiler statistics endpoint, with an unrequested scope warning</div>
+</div>
+</div>
+
+<h2 class="round">Round 4 — finding 2: the delta that means nothing, and the instrument that answers it</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">6</div><div class="tag">⚠ finding</div><div class="who">the headline nobody should write</div></div>
+<div><div class="label">Input</div><div class="prompt">How did vegetation around Chilika Lake change from pre-monsoon to monsoon?</div></div>
+<div><div class="label">What the tools returned</div><div class="returned">tile:   45QUB
+before: S2A_45QUB_20260523_1_L2A  2026-05-23  cloud 16.0  mean 0.0605
+after:  S2C_45QUB_20260809_0_L2A  2026-08-09  cloud 51.7  mean 0.0074
+delta:  -0.0531
+delta_pct: -87.8</div></div>
+<div class="answer"><div class="label">Our read</div>As arithmetic this is correct. As ecology it is backwards — <b>the monsoon is when Odisha greens</b>, and a −87.8% headline says the opposite. Two independent things break it. First, the after scene is <b>51.7% cloud</b>: cloud pushes NDVI toward zero, and half the pixels are cloud. Second, and worse, <b>delta_pct is a percentage on a near-zero baseline</b> — a mostly-water scene has a mean NDVI of 0.06, so an absolute move of 0.05 becomes −87.8% and is reported to one decimal place as though that precision meant something.</div>
+<a class="fig" href="img/ft7-chilika-ndvi-trap.html" target="_blank" title="open the live artifact"><img src="img/ft7-chilika-ndvi-trap.png" alt="artifact produced by example 6" loading="lazy"><span class="open">open the swipe map ↗</span></a>
+<div class="learning"><b>Learning →</b> <b>The fix already exists in this codebase three times over and this tool doesn't use it.</b> next_pass returns a <em>note</em>, compute_statistics returns an <em>extent_note</em>, conditions_brief returns a <em>note</em>. compare_dates returns a bare number. Filed: return a caveat field when either scene's cloud crosses a threshold or the baseline mean is near zero. Both conditions are already computed — they just aren't said.</div>
+<div class="shows">compare_dates — matched MGRS tile, both means, the delta, and a swipe map</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">7</div><div class="tag">instrument</div><div class="who">the answer the optical question couldn't give</div></div>
+<div><div class="label">Input</div><div class="prompt">Then what should I have used over a monsoon lagoon?</div></div>
+<div><div class="label">What the tools returned</div><div class="returned">search_imagery(sentinel-1-grd, Chilika, Jul 15 – Aug 11)
+  S1D_IW_GRDH_1SDV_20260807T001306…
+    cloud_cover:    null
+    covers_aoi_pct: 100
+    orbit_state:    descending
+
+next_pass(19.685, 85.250, days=3)
+  SENTINEL-1C  2026-08-12 12:02 UTC  radar (day or night, sees through cloud)
+  SENTINEL-2B  2026-08-14 05:03 UTC  optical</div></div>
+<div class="answer"><div class="label">Our read</div><b>cloud_cover: null and covers_aoi_pct: 100</b>, on August 7, in the middle of the monsoon that defeated the optical comparison two cards up. Radar does not care about the sky. The pass prediction makes the same point forward-looking: the next radar look is <b>two days out</b> and the next usable optical look is four, and in monsoon Odisha the optical one may well be cloud anyway.</div>
+<a class="fig" href="img/ft7-chilika-two-instruments.html" target="_blank" title="open the live artifact"><img src="img/ft7-chilika-two-instruments.png" alt="artifact produced by example 7" loading="lazy"><span class="open">open the two-instrument map ↗</span></a>
+<div class="learning"><b>Learning →</b> next_pass is careful to say what it is: <b>"swath geometry, not the acquisition plan — a pass is a possible capture"</b>. That sentence is why the tool is usable for planning. The pattern is developmentseed/eo-predictor, which does this across many more constellations.</div>
+<div class="shows">search_imagery on sentinel-1-grd, next_pass propagating live Celestrak TLEs with Skyfield</div>
+</div>
+</div>
+
+<h2 class="round">Round 5 — live Earth, and the things people keep</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">8</div><div class="tag">live</div><div class="who">disaster desk</div></div>
+<div><div class="label">Input</div><div class="prompt">Anything active near Wenzhou, and what did the weather actually do?</div></div>
+<div><div class="label">What the tools returned</div><div class="returned">active_events
+  Super Typhoon Dolphin       EONET  2026-08-09  [120.6, 27.9]
+  Flood in China              GDACS  Orange      [120.69, 28.16]
+                              2026-07-31 → 2026-08-11
+
+weather_summary(28.156, 120.688)
+  2026-08-08  precip   4.5 mm   wind 23.4 km/h
+  2026-08-09  precip 140.7 mm   wind 41.2 km/h
+  2026-08-10  precip  92.1 mm   wind 29.6 km/h
+  2026-08-11  precip  22.7 mm   wind 13.4 km/h</div></div>
+<div class="answer"><div class="label">Our read</div>Two independent sources agreeing, which is the point of running both: NASA EONET has the typhoon, GDACS has an <b>Orange</b> flood alert at nearly the same coordinates, and the weather record shows why — <b>140.7 mm in a single day</b> on the 9th with winds at 41 km/h, then 92 mm on the 10th. The alert and the rainfall are separate feeds that were never joined by us, so the agreement is evidence rather than restatement.</div>
+<div class="learning"><b>Learning →</b> Wind <em>direction</em> is in this response too, and it is the field people forget to ask for. For smoke, ash and plume questions the bearing matters more than the speed, and it is meteorological convention — the direction the wind comes <b>from</b>.</div>
+<div class="shows">active_events (EONET + GDACS), weather_summary (Open-Meteo, no key)</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">9</div><div class="tag">artifact</div><div class="who">the thing someone can actually post</div></div>
+<div><div class="label">Input</div><div class="prompt">Give me something shareable of Chilika before the monsoon closed the sky.</div></div>
+<div><div class="label">What the tools returned</div><div class="returned">postcard-chilika-lake--odisha--india-2026-06-10.html   2.4 MB
+  pixels:  embedded as a data URI
+  framed:  to the AOI bbox, snapped to a standard card shape
+  stack:   printed in the credit block, no live URLs</div></div>
+<div class="answer"><div class="label">Our read</div>The size is the feature. <b>2.4 MB because the image is baked in</b> — no signed tile URL to expire, no local path, nothing that goes blank next week. A live map is the right artifact for exploring and the wrong one for sending to somebody. Framing to the AOI rather than the scene is what keeps scene-edge nodata off the card.</div>
+<a class="fig" href="img/ft7-chilika-postcard.html" target="_blank" title="open the live artifact"><img src="img/ft7-chilika-postcard.png" alt="artifact produced by example 9" loading="lazy"><span class="open">open the postcard ↗</span></a>
+<div class="learning"><b>Learning →</b> Where and whether to post it stays the person's call. The tool's job is to make the artifact survive being sent, and a live tile URL does not.</div>
+<div class="shows">render_postcard — data-URI pixels, attribution baked in, stack_layer in the credit block</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">10</div><div class="tag">3d</div><div class="who">and the primitive underneath</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me Leh in 3D. And give me the raw NDVI tile URL for the Chilika scene.</div></div>
+<div><div class="label">What the tools returned</div><div class="returned">render_map_3d state:
+  bbox:         [77.437, 34.022, 77.737, 34.322]
+  terrain:      true          exaggeration: 1.8
+  coverage_pct: 100           scene: S2B_43SGT_20260717_0_L2A (cloud 11.5)
+
+tile_url_template →
+  https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png
+    ?url=…/sentinel-2-l2a/items/S2C_45QUB_20260610_0_L2A
+    &expression=(b1-b2)/(b1+b2)&assets=nir&assets=red
+    &rescale=-1,1&colormap_name=rdylgn</div></div>
+<div class="answer"><div class="label">Our read</div>Ladakh in July is the easy case for terrain — high relief, almost no cloud, 100% coverage. Elevation comes from keyless AWS Terrarium tiles, so the HTML is shareable with no account behind it. The second half is the part developers actually want: <b>every render is just a tile URL</b>, and the tool will hand it over. Drop it into MapLibre, Leaflet, QGIS, anything — no dependency on us at runtime.</div>
+<a class="fig" href="img/ft7-leh-3d.html" target="_blank" title="open the live artifact"><img src="img/ft7-leh-3d.png" alt="artifact produced by example 10" loading="lazy"><span class="open">open the 3D fly-through ↗</span></a>
+<div class="learning"><b>Learning →</b> Both renderers now <b>return the state they built the HTML from</b> — bbox, per-layer bounds and tiles, coverage, the compare flag. That is what makes a map checkable by an eval instead of only by a person opening the file and looking at it.</div>
+<div class="shows">render_map_3d over Terrarium terrain; tile_url_template resolving assets and band math to an XYZ template</div>
+</div>
+</div>
+<div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
+bash scripts/doctor.sh                    # walks the setup chain, prints the fix
+uv run evals/unit_checks.py               # offline checks
+uv run evals/run_evals.py                 # live checks against real endpoints
+uv run scripts/field_test.py docs/field-test-2026-08-11.cases.json   # rebuild this page</code></div>
+</main>
+
+<footer>field test №7 · August 11, 2026 · two findings filed: compare_dates has no validity guard, and Gazet still never fires · groundstation · Development Seed labs</footer>
+
+</body>
+</html>
