@@ -1149,6 +1149,40 @@ def t_local_synth_claude_default_never_touches_local():
         brief.subprocess.run = real_run
 
 
+def t_delta_caveat_chilika_regression():
+    # Field test №7: NDVI over Chilika read -87.8% during the monsoon, the season
+    # Odisha greens. Both reasons it was misleading are pinned here by their real
+    # numbers — 51.7% cloud on the after scene, and a 0.0605 baseline.
+    out = tools._delta_caveats(0.0605, 51.685119, 16.049817)
+    assert len(out) == 2, out
+    assert "cloud" in out[0] and "after scene 52%" in out[0], out[0]
+    assert "delta_pct" in out[1] and "0.0605" in out[1], out[1]
+
+
+def t_delta_caveat_clean_delta_says_nothing():
+    # A clear pair over a vegetated baseline earns no caveat, or the field is noise.
+    assert tools._delta_caveats(0.62, 3.0, 4.0) == []
+
+
+def t_delta_caveat_before_scene_alone_trips_it():
+    out = tools._delta_caveats(0.55, 2.0, 40.0)
+    assert len(out) == 1 and "before scene 40%" in out[0], out
+    assert "after" not in out[0], out
+
+
+def t_delta_caveat_handles_missing_cloud():
+    # Sentinel-1 and friends report cloud_cover as None; that is not "0% cloud".
+    assert tools._delta_caveats(0.55, None, None) == []
+
+
+def t_bbox_feature_closes_its_ring():
+    f = tools._bbox_feature([85.09, 19.46, 85.65, 19.90])
+    ring = f["geometry"]["coordinates"][0]
+    assert f["type"] == "Feature" and f["geometry"]["type"] == "Polygon"
+    assert len(ring) == 5 and ring[0] == ring[-1] == [85.09, 19.46], ring
+    assert [85.65, 19.90] in ring, ring
+
+
 if __name__ == "__main__":
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("t_")):
         check(name, fn)

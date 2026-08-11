@@ -611,6 +611,16 @@ def preview_item(
     return {"preview_url": f"{TITILER}/stac/{path}?{q}", "backend": "titiler-xyz"}
 
 
+def _bbox_feature(bbox: list[float]) -> dict[str, Any]:
+    """[w, s, e, n] as the GeoJSON Feature the tiler statistics POST wants."""
+    w, s, e, n = bbox
+    return {
+        "type": "Feature",
+        "properties": {},
+        "geometry": {"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n], [w, n], [w, s]]]},
+    }
+
+
 def compute_statistics(
     catalog: str,
     collection_id: str,
@@ -618,6 +628,7 @@ def compute_statistics(
     expression: str | None = None,
     assets: list[str] | None = None,
     aoi_geojson: dict[str, Any] | None = None,
+    bbox: list[float] | None = None,
 ) -> dict[str, Any]:
     """Compute pixel statistics (min/max/mean/std/histogram) for a STAC item.
 
@@ -625,7 +636,14 @@ def compute_statistics(
     NDVI on Sentinel-2 (Earth Search asset names; Planetary Computer uses band
     ids like B04/B08 — check describe_collection). Optionally clip to an AOI
     GeoJSON Feature. Backed by the catalog's tiler statistics endpoint.
+
+    bbox [w, s, e, n] clips to that area — the same thing aoi_geojson does, in
+    the shape callers actually hold. geocode and search_imagery hand back a
+    bbox, never a Feature, so unclipped whole-scene stats are usually just the
+    cost of the conversion. Pass one of the two and the extent_note goes away.
     """
+    if bbox and not aoi_geojson:
+        aoi_geojson = _bbox_feature(bbox)
     backend = CATALOGS[catalog]["raster"]
     params: list[tuple[str, str]] = [("max_size", "512")]
     if expression:
@@ -2037,6 +2055,40 @@ def render_postcard(
     return out
 
 
+# A delta can be arithmetically right and ecologically backwards. Cloud pushes a
+# normalized index toward zero, and a percentage on a near-zero baseline swings on
+# noise. Both inputs are already in hand when the delta is built, so the number
+# should not travel alone. Tune these rather than deleting the caveat.
+CLOUD_CAVEAT_PCT = 20.0  # either scene cloudier than this and the delta may be cloud
+FLAT_BASELINE = 0.1  # |mean_before| under this and delta_pct amplifies noise
+
+
+def _delta_caveats(
+    mean_before: float | None,
+    cloud_after: float | None,
+    cloud_before: float | None,
+) -> list[str]:
+    """Reasons this delta shouldn't be read at face value. Empty when it's clean."""
+    out: list[str] = []
+    cloudy = [
+        (w, c)
+        for w, c in (("after", cloud_after), ("before", cloud_before))
+        if c is not None and c >= CLOUD_CAVEAT_PCT
+    ]
+    if cloudy:
+        out.append(
+            "cloud may be driving this delta ("
+            + ", ".join(f"{w} scene {c:.0f}%" for w, c in cloudy)
+            + f", threshold {CLOUD_CAVEAT_PCT:.0f}%). Cloud pushes a normalized index toward zero."
+        )
+    if mean_before is not None and abs(mean_before) < FLAT_BASELINE:
+        out.append(
+            f"delta_pct is unstable: the baseline mean ({mean_before}) is near zero, so a small "
+            "absolute change reads as a large percentage. Trust delta over delta_pct."
+        )
+    return out
+
+
 def compare_dates(
     place: str | None = None,
     bbox: list[float] | None = None,
@@ -2057,6 +2109,10 @@ def compare_dates(
     side-by-side swipe map. Returns scenes, means, delta, and map_path.
     stack_layer passes through to the swipe map, and since this tool geocodes
     the place itself, the panel truthfully claims Gazet/Nominatim.
+
+    A caveat list comes back when the delta shouldn't be read at face value —
+    a cloudy scene on either end, or a near-zero baseline that makes delta_pct
+    swing on noise. When caveat is present, report it alongside the number.
     """
     geocoded = bbox is None and bool(place)
     bbox = _resolve_bbox(place, bbox)
@@ -2116,7 +2172,7 @@ def compare_dates(
         stack_facts={"geocoded": geocoded},
     )
     delta = round(mean_after - mean_before, 4) if mean_after is not None and mean_before is not None else None
-    return {
+    out = {
         "tile": best_tile,
         "after": {"id": a["id"], "date": a["datetime"][:10], "cloud": a.get("cloud_cover"), "mean": mean_after},
         "before": {"id": b["id"], "date": b["datetime"][:10], "cloud": b.get("cloud_cover"), "mean": mean_before},
@@ -2125,6 +2181,10 @@ def compare_dates(
         "expression": expression,
         "map_path": m["map_path"],
     }
+    caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"))
+    if caveats:
+        out["caveat"] = caveats
+    return out
 
 
 # ---------------------------------------------------------------- monitoring
