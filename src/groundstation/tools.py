@@ -2221,7 +2221,10 @@ def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 
     except Exception as e:
         out["eonet_error"] = str(e)
     try:
-        data = _get_json("https://www.gdacs.org/gdacsapi/api/events/geteventlist/MAP")
+        # GDACS made eventtype required on geteventlist/MAP (400 without it), and MAP
+        # returns per-episode track points. EVENTS4APP is the current-events feed:
+        # one Point per event, every type except drought
+        data = _get_json("https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP")
         for f in data.get("features", [])[:200]:
             p = f.get("properties", {})
             geom = f.get("geometry") or {}
