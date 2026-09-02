@@ -99,7 +99,7 @@ First `search_datasets` call takes ~20–30s while collection lists cache; every
 
 | Tool | What it does | Backed by |
 |---|---|---|
-| `geocode` / `reverse_geocode` | place name ↔ coordinates + bbox, retries descriptive phrases | Gazet (when its JSON API lands), Nominatim |
+| `geocode` / `reverse_geocode` | place name ↔ coordinates + bbox, retries descriptive phrases | Gazet (a no-LLM fuzzy index over Overture divisions and Natural Earth, gated on similarity), Nominatim fallback |
 | `list_catalogs` / `search_datasets` / `describe_collection` | find the right data across catalogs | Earth Search, NASA VEDA, Planetary Computer |
 | `search_imagery` | recent items, cloud filtering, place names accepted | STAC APIs |
 | `preview_item` / `tile_url_template` | browser-openable previews and XYZ tiles | titiler.xyz, VEDA raster API, PC data API |

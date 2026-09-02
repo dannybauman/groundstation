@@ -90,7 +90,7 @@ Heads-up for editors: component *names* are joined by code (`src/groundstation/s
 - kind: access
 - what: a small-model geocoder that resolves place names without a heavyweight service
 - ds-role: created
-- integration: first stop for turning "Torres del Paine" into a bbox
+- integration: first stop for turning "Chelan County" into a bbox — a no-LLM fuzzy match over Overture divisions and Natural Earth, gated on similarity so a near miss falls through to Nominatim
 - speaks-to: Nominatim
 - link: https://github.com/developmentseed/gazet
 

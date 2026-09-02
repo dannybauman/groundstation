@@ -1252,6 +1252,92 @@ def t_recommended_handles_sar_and_all_cloudy():
     assert tools._recommend([]) is None
 
 
+class _FakeResp:
+    def __init__(self, payload, ctype="application/json"):
+        self._p, self.headers = payload, {"content-type": ctype}
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._p
+
+
+_GAZET_CHELAN = {"ids": [
+    {"source": "divisions_area", "id": "4017061d", "name": "Chelan County", "matched_name": "Chelan County",
+     "country": "US", "subtype": "county", "admin_level": 2,
+     "bbox": [-121.18091, 47.2609433, -119.859708, 48.5509464], "similarity": 1.0, "is_substring_match": True},
+    {"source": "divisions_area", "id": "597dabcd", "name": "McLean County", "country": "US", "subtype": "county",
+     "bbox": [-102.386505, 47.157902, -100.58461, 47.849483], "similarity": 0.9209, "is_substring_match": False},
+]}
+_GAZET_SALINAS = {"ids": [
+    {"source": "divisions_area", "id": "5a372c80", "name": "Salinas", "country": "MX", "subtype": "county",
+     "bbox": [-101.9460654, 22.4650338, -101.3759004, 23.1814428], "similarity": 0.9, "is_substring_match": False},
+]}
+_GAZET_LOJA = {"ids": [
+    {"source": "divisions_area", "id": "4ad73a51", "name": "Loja Province", "country": "EC", "subtype": "region",
+     "bbox": [-80.4846769, -4.7488756, -79.1006936, -3.3295641], "similarity": 1.0, "is_substring_match": True},
+    {"source": "divisions_area", "id": "d6082edf", "name": "Loja Canton", "country": "EC", "subtype": "county",
+     "bbox": [-79.5457957, -4.5114788, -79.1006936, -3.6728594], "similarity": 1.0, "is_substring_match": True},
+    {"source": "divisions_area", "id": "fdd5690f", "name": "Maloja", "country": "CH", "subtype": "county",
+     "bbox": [9.4558, 46.2939, 10.1003, 46.6987], "similarity": 0.7222, "is_substring_match": True},
+]}
+_NOMINATIM_SALINAS = [{"boundingbox": ["36.2", "36.8", "-121.9", "-121.3"], "lat": "36.5", "lon": "-121.6",
+                       "display_name": "Salinas Valley, Monterey County, California"}]
+
+
+def _with_geocoders(gazet_payload, nominatim_payload, fn, ctype="application/json"):
+    saved_get, saved_json, saved_skip = tools._client.get, tools._get_json, tools._gazet_skip_until
+    calls = {"gazet": 0, "nominatim": 0}
+
+    def fake_get(url, **kw):
+        calls["gazet"] += 1
+        assert url == tools.GAZET_URL and kw["params"]["mode"] == "fuzzy" and kw["params"]["ids_only"] == "true", kw
+        return _FakeResp(gazet_payload, ctype)
+
+    def fake_json(url, **kw):
+        calls["nominatim"] += 1
+        return nominatim_payload
+
+    tools._client.get, tools._get_json, tools._gazet_skip_until = fake_get, fake_json, 0.0
+    try:
+        return fn(), calls
+    finally:
+        tools._client.get, tools._get_json, tools._gazet_skip_until = saved_get, saved_json, saved_skip
+
+
+def t_geocode_gazet_answers_first_with_the_real_extent():
+    # Field tests No.4 to No.7 all filed "our own geocoder never fires". The JSON API
+    # was live on the Space the whole time; the ds.io domain fronts a static page.
+    out, calls = _with_geocoders(_GAZET_CHELAN, [], lambda: tools.geocode("Chelan County"))
+    assert out["source"] == "gazet" and out["name"] == "Chelan County (US, county)", out
+    assert out["bbox"] == [-121.18091, 47.2609433, -119.859708, 48.5509464], out
+    assert "geocode_note" not in out, out
+    assert calls == {"gazet": 1, "nominatim": 0}, calls
+
+
+def t_geocode_similarity_gate_sends_near_misses_to_nominatim():
+    # Jaro-Winkler always returns a best row. "Salinas Valley" scored 0.9 as
+    # Salinas, Mexico — the gate is what stops a confident wrong continent.
+    out, calls = _with_geocoders(_GAZET_SALINAS, _NOMINATIM_SALINAS, lambda: tools.geocode("Salinas Valley"))
+    assert out["source"] == "nominatim" and out["bbox"] == [-121.9, 36.2, -121.3, 36.8], out
+    assert calls == {"gazet": 1, "nominatim": 1}, calls
+    assert tools.GAZET_MIN_SIMILARITY > 0.9
+
+
+def t_geocode_names_the_tie_it_broke():
+    # Two real Lojas score 1.0. Picking one silently is a decision the caller cannot see.
+    out, _ = _with_geocoders(_GAZET_LOJA, [], lambda: tools.geocode("Loja"))
+    assert out["source"] == "gazet" and out["name"] == "Loja Province (EC, region)", out
+    assert "2 places match 'Loja'" in out["geocode_note"] and "Loja Canton (EC, county)" in out["geocode_note"], out
+    assert "Maloja" not in out["geocode_note"], "a 0.72 near miss is not a tie"
+
+
+def t_geocode_non_json_marks_gazet_down_and_falls_through():
+    out, calls = _with_geocoders({}, _NOMINATIM_SALINAS, lambda: tools.geocode("Salinas Valley"), ctype="text/html")
+    assert out["source"] == "nominatim" and calls["nominatim"] == 1, (out, calls)
+
+
 if __name__ == "__main__":
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("t_")):
         check(name, fn)
