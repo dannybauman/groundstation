@@ -1253,6 +1253,8 @@ def t_recommended_handles_sar_and_all_cloudy():
 
 
 class _FakeResp:
+    status_code = 200
+
     def __init__(self, payload, ctype="application/json"):
         self._p, self.headers = payload, {"content-type": ctype}
 
@@ -1329,13 +1331,57 @@ def t_geocode_names_the_tie_it_broke():
     # Two real Lojas score 1.0. Picking one silently is a decision the caller cannot see.
     out, _ = _with_geocoders(_GAZET_LOJA, [], lambda: tools.geocode("Loja"))
     assert out["source"] == "gazet" and out["name"] == "Loja Province (EC, region)", out
-    assert "2 places match 'Loja'" in out["geocode_note"] and "Loja Canton (EC, county)" in out["geocode_note"], out
+    assert "2 places match 'Loja'" in out["geocode_note"] and "Loja Canton (EC, county) at 4.1S 79.3W" in out["geocode_note"], out
     assert "Maloja" not in out["geocode_note"], "a 0.72 near miss is not a tie"
+
+
+_GAZET_HARRIS = {"ids": [
+    {"source": "divisions_area", "id": "tx", "name": "Harris County", "country": "US", "subtype": "county",
+     "bbox": [-95.9608455, 29.497339, -94.9084924, 30.1706958], "similarity": 1.0, "is_substring_match": True},
+    {"source": "divisions_area", "id": "ga", "name": "Harris County", "country": "US", "subtype": "county",
+     "bbox": [-85.0, 32.6, -84.7, 32.9], "similarity": 1.0, "is_substring_match": True},
+]}
+
+
+def t_geocode_tie_note_tells_same_named_places_apart():
+    # Field test No.8: Harris County, Texas and Harris County, Georgia both read
+    # "(US, county)". A note that names them identically has said nothing.
+    out, _ = _with_geocoders(_GAZET_HARRIS, [], lambda: tools.geocode("Harris County"))
+    assert out["source"] == "gazet" and out["bbox"][0] == -95.9608455, out
+    note = out["geocode_note"]
+    assert "at 29.8N 95.4W" in note and "at 32.8N 84.9W" in note, note
 
 
 def t_geocode_non_json_marks_gazet_down_and_falls_through():
     out, calls = _with_geocoders({}, _NOMINATIM_SALINAS, lambda: tools.geocode("Salinas Valley"), ctype="text/html")
     assert out["source"] == "nominatim" and calls["nominatim"] == 1, (out, calls)
+
+
+def _stac_item(id_, bbox, day="2026-08-24"):
+    return {"id": id_, "collection": "sentinel-2-l2a", "bbox": bbox, "links": [], "assets": {"visual": {}},
+            "properties": {"datetime": f"{day}T19:00:00Z", "eo:cloud_cover": 1.0}}
+
+
+def _with_stac_search(features, fn):
+    saved = tools._client.post
+    tools._client.post = lambda url, **kw: _FakeResp({"type": "FeatureCollection", "features": features})
+    try:
+        return fn()
+    finally:
+        tools._client.post = saved
+
+
+def t_recommended_says_when_the_set_is_starved():
+    # Field test No.8, Chelan County: the best single scene covered 49% and no
+    # same-day set covered the county within 10 results. The recommendation
+    # must say that, or the 49% scene is rendered as the answer.
+    slivers = [_stac_item("a", [0, 0, 4, 10]), _stac_item("b", [4, 0, 6, 10])]
+    r = _with_stac_search(slivers, lambda: tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 10, 10]))
+    assert "full_coverage_set" not in r
+    assert "No single scene covers this area" in r["recommended"]["reason"] and "2 results" in r["recommended"]["reason"], r["recommended"]
+    halves = [_stac_item("a", [0, 0, 5, 10]), _stac_item("b", [5, 0, 10, 10])]
+    r = _with_stac_search(halves, lambda: tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 10, 10]))
+    assert "full_coverage_set" in r and "No single scene" not in r["recommended"]["reason"], r["recommended"]
 
 
 if __name__ == "__main__":
