@@ -78,7 +78,7 @@ def stack_instances(
 
     facts: {"catalogs": [...], "collections_by_catalog": {catalog: [...]},
             "tiler_hosts": [...], "maplibre": bool, "terrain": bool,
-            "geocoded": bool, "events": bool, "mosaic_scenes": int}
+            "geocoded": bool | str (geocode's `source`), "events": bool, "mosaic_scenes": int}
     Returns only the components this artifact actually exercised, in
     GROUP_ORDER, each with an `instance` line — specific when facts allow,
     the generic integration line otherwise. A fact that isn't known is
@@ -106,8 +106,12 @@ def stack_instances(
     if facts.get("terrain"):
         # terrain tiles bottom out in a bucket too, even on a raster-only 3D map
         active_names |= {"AWS Terrarium terrain", "Cloud object storage"}
-    if facts.get("geocoded"):
-        active_names |= {"Gazet", "Nominatim"}
+    geo = facts.get("geocoded")
+    if geo:
+        # geocode() returns `source`, so the panel can claim the one that answered.
+        # Field test No.8: every geocoded map credited Gazet, including the ones
+        # Nominatim answered. A bare True is the older form and still claims both
+        active_names |= {"Gazet", "Nominatim"} if geo is True else {"Gazet" if geo == "gazet" else "Nominatim"}
     if facts.get("events"):
         active_names |= {"NASA EONET", "GDACS", "Open-Meteo"}
     if facts.get("passes"):

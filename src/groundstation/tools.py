@@ -1493,7 +1493,7 @@ def render_map(
     the map — the actual collections, tiler, formats, and buckets on screen,
     joined from docs/stack.md. Attribution to projects, never people.
     stack_facts: honest extras the panel can't see from the layers alone —
-    pass {"geocoded": True} if you resolved the place via geocode,
+    pass {"geocoded": <geocode's source, "gazet" or "nominatim">} if you resolved the place via geocode,
     {"events": True} if an events layer came from active_events, and
     {"passes": True} if next_pass informed the answer. Only claim
     what actually happened.
@@ -2239,7 +2239,12 @@ def compare_dates(
     a cloudy scene on either end, or a near-zero baseline that makes delta_pct
     swing on noise. When caveat is present, report it alongside the number.
     """
-    geocoded = bbox is None and bool(place)
+    geocoded: bool | str = False
+    if bbox is None and place:
+        g = geocode(place)
+        if "error" in g:
+            return g
+        bbox, geocoded = g["bbox"], g["source"]  # the panel credits the geocoder that answered
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
         return bbox

@@ -1404,6 +1404,21 @@ def t_recommended_ties_go_to_the_newest_clean_scene():
     assert rec["id"] == "new" and "newest of 2 near-equal scenes" in rec["reason"] and "2026-08-03" in rec["reason"], rec
 
 
+def t_stack_panel_credits_the_geocoder_that_answered():
+    # Field test No.8: every geocoded map credited Gazet, including the ones
+    # Nominatim answered. geocode() returns `source`; the panel claims that one.
+    pat = re.compile(r'class="stack-name">([^<]+)<')
+    lay = [{"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}]
+    with tempfile.TemporaryDirectory() as d:
+        def names(fact):
+            m = tools.render_map("t", [0, 0, 10, 10], lay, out_path=str(Path(d) / "m.html"), stack_layer=True, stack_facts={"geocoded": fact})
+            return {n for n in pat.findall(Path(m["map_path"]).read_text()) if n in ("Gazet", "Nominatim")}
+        assert names("gazet") == {"Gazet"}
+        assert names("nominatim") == {"Nominatim"}
+        assert names(True) == {"Gazet", "Nominatim"}, "the older bare-True form still claims both"
+        assert names(False) == set()
+
+
 if __name__ == "__main__":
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("t_")):
         check(name, fn)
