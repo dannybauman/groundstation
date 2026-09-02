@@ -546,6 +546,12 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
         reason = f"best-covering scene at {cov(best):.1f}% of the area; this collection reports no cloud cover"
     elif clearest["id"] == best["id"]:
         reason = f"clearest ({bc:.1f}% cloud) and best-covering ({cov(best):.1f}% of the area), not a tradeoff"
+    elif cov(clearest) >= cov(best) - RECOMMEND_COVERAGE_TIE and len(near) > 1:
+        # the clearest scene is inside both tie bands, so freshness decided
+        reason = (
+            f"{bc:.1f}% cloud, covers {cov(best):.1f}% of the area, and newest of {len(near)} near-equal scenes; "
+            f"the clearest ({cloud(clearest):.1f}% cloud) is from {(clearest.get('datetime') or '')[:10]}"
+        )
     else:
         own = f"{bc:.1f}% cloud" if bc is not None else "no cloud figure"
         reason = (
