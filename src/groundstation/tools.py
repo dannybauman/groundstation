@@ -511,6 +511,11 @@ def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float
 # of it (field test No.7, Chilika). `recommended` names the scene that balances
 # both axes and says why, so a plausible-but-wrong pick takes deliberate effort
 RECOMMEND_MAX_CLOUD = 30.0  # above this a scene is only recommended when nothing cleaner exists
+# Field test No.8: a strict max on coverage took a 49.7% scene at 19% cloud over a
+# 48.9% scene at 0.6%, and a strict min on cloud took a 25-day-older scene for 0.4
+# points. Within these bands the axes are a tie and the newest scene wins
+RECOMMEND_COVERAGE_TIE = 5.0
+RECOMMEND_CLOUD_TIE = 5.0
 
 
 def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -528,7 +533,12 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     all_cloudy = not usable
     if all_cloudy:
         usable = items
-    best = max(usable, key=lambda it: (cov(it), -(cloud(it) or 0.0), it.get("datetime") or ""))
+    top = max(cov(it) for it in usable)
+    near = [it for it in usable if cov(it) >= top - RECOMMEND_COVERAGE_TIE]
+    least = min((cloud(it) for it in near if cloud(it) is not None), default=None)
+    if least is not None:
+        near = [it for it in near if cloud(it) is None or cloud(it) <= least + RECOMMEND_CLOUD_TIE]
+    best = max(near, key=lambda it: (it.get("datetime") or "", cov(it), -(cloud(it) or 0.0)))
     with_cloud = [it for it in items if cloud(it) is not None]
     clearest = min(with_cloud, key=lambda it: cloud(it) or 0.0) if with_cloud else None
     bc = cloud(best)

@@ -1339,7 +1339,7 @@ _GAZET_HARRIS = {"ids": [
     {"source": "divisions_area", "id": "tx", "name": "Harris County", "country": "US", "subtype": "county",
      "bbox": [-95.9608455, 29.497339, -94.9084924, 30.1706958], "similarity": 1.0, "is_substring_match": True},
     {"source": "divisions_area", "id": "ga", "name": "Harris County", "country": "US", "subtype": "county",
-     "bbox": [-85.0, 32.6, -84.7, 32.9], "similarity": 1.0, "is_substring_match": True},
+     "bbox": [-85.0, 32.6, -84.6, 32.9], "similarity": 1.0, "is_substring_match": True},
 ]}
 
 
@@ -1349,7 +1349,7 @@ def t_geocode_tie_note_tells_same_named_places_apart():
     out, _ = _with_geocoders(_GAZET_HARRIS, [], lambda: tools.geocode("Harris County"))
     assert out["source"] == "gazet" and out["bbox"][0] == -95.9608455, out
     note = out["geocode_note"]
-    assert "at 29.8N 95.4W" in note and "at 32.8N 84.9W" in note, note
+    assert "at 29.8N 95.4W" in note and "at 32.8N 84.8W" in note, note
 
 
 def t_geocode_non_json_marks_gazet_down_and_falls_through():
@@ -1382,6 +1382,25 @@ def t_recommended_says_when_the_set_is_starved():
     halves = [_stac_item("a", [0, 0, 5, 10]), _stac_item("b", [5, 0, 10, 10])]
     r = _with_stac_search(halves, lambda: tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 10, 10]))
     assert "full_coverage_set" in r and "No single scene" not in r["recommended"]["reason"], r["recommended"]
+
+
+def t_recommended_ties_go_to_the_newest_clean_scene():
+    # Field test No.8, Chelan County over 30 days: 49.7% at 19.3% cloud (Aug 9)
+    # vs 48.9% at 0.6% (Aug 24). Coverage within 5 points is a tie, cloud within
+    # 5 points is a tie, and the newest of what is left wins.
+    items = [
+        {"id": "S2B_10UFU_20260809_0_L2A", "datetime": "2026-08-09T19:11:00Z", "cloud_cover": 19.292465, "covers_aoi_pct": 49.7},
+        {"id": "S2C_10UFU_20260824_1_L2A", "datetime": "2026-08-24T19:11:07Z", "cloud_cover": 0.596335, "covers_aoi_pct": 48.9},
+        {"id": "S2C_10TGT_20260824_0_L2A", "datetime": "2026-08-24T19:11:16Z", "cloud_cover": 0.002519, "covers_aoi_pct": 20.9},
+    ]
+    assert tools._recommend(items)["id"] == "S2C_10UFU_20260824_1_L2A"
+    # Loja Canton: two 98.2% scenes, 18.7% cloud on Aug 3 and 19.1% on Aug 28. Freshness wins the tie.
+    loja = [
+        {"id": "old", "datetime": "2026-08-03T15:44:00Z", "cloud_cover": 18.677768, "covers_aoi_pct": 98.2},
+        {"id": "new", "datetime": "2026-08-28T15:44:21Z", "cloud_cover": 19.125262, "covers_aoi_pct": 98.2},
+        {"id": "cloudy", "datetime": "2026-09-02T15:44:21Z", "cloud_cover": 59.815603, "covers_aoi_pct": 98.2},
+    ]
+    assert tools._recommend(loja)["id"] == "new"
 
 
 if __name__ == "__main__":
