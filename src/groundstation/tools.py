@@ -44,6 +44,15 @@ CATALOGS: dict[str, dict[str, str]] = {
 _client = httpx.Client(timeout=30, headers=UA, follow_redirects=True)
 _collections_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _gazet_skip_until = 0.0
+# Gazet's JSON API lives on the Hugging Face Space. The gazet.ds.io domain fronts
+# a static page, which is why every field test through No.7 saw only Nominatim.
+# mode=fuzzy is a Jaro-Winkler match over Overture divisions and Natural Earth,
+# no LLM in the path, and ids_only keeps the payload to bboxes. It always returns
+# a best row, so the similarity gate is what separates a hit from the closest
+# miss: "Salinas Valley" came back as Salinas, Mexico at 0.9
+GAZET_URL = os.environ.get("GAZET_URL", "https://developmentseed-gazet.hf.space/api/search")
+GAZET_MIN_SIMILARITY = 0.95
+GAZET_TIMEOUT_S = 10.0  # geocode is a hot path: a cold Space takes ~8s, a dead one must not hang the tool
 
 
 def slugify(text: str, max_len: int = 60) -> str:
@@ -208,46 +217,60 @@ def _get_json(url: str, **kwargs: Any) -> Any:
 def geocode(query: str) -> dict[str, Any]:
     """Resolve a place name to coordinates and a bounding box.
 
-    Tries Development Seed's Gazet small-model geocoder first, then falls back
-    to OSM Nominatim. Use concise names ("Barotse Floodplain", "Chelan County")
-    rather than long phrases. Returns {name, lat, lon, bbox: [w, s, e, n], source}.
+    Tries Development Seed's Gazet geocoder first: its no-LLM fuzzy index over
+    Overture divisions and Natural Earth answers countries, regions, counties
+    and physical features with their real extent. Everything else (towns,
+    landmarks, descriptive phrases) falls back to OSM Nominatim. Use concise
+    names ("Barotse Floodplain", "Chelan County") rather than long phrases.
+    Returns {name, lat, lon, bbox: [w, s, e, n], source}, plus geocode_note
+    when several places match the name equally well and one was picked.
     """
-    # gazet.ds.io currently fronts the Streamlit demo, not the FastAPI /search;
-    # this branch activates as soon as a JSON endpoint is exposed (or set GAZET_URL).
-    # Once it answers non-JSON we stop asking for a while — geocode is a hot path.
     global _gazet_skip_until
-    gazet = os.environ.get("GAZET_URL", "https://gazet.ds.io/search")
     try:
         if time.time() < _gazet_skip_until:
             raise ValueError("gazet marked down")
-        r = _client.get(gazet, params={"q": query})
+        r = _client.get(
+            GAZET_URL,
+            params={"q": query, "mode": "fuzzy", "limit": 5, "ids_only": "true"},
+            timeout=GAZET_TIMEOUT_S,
+        )
         r.raise_for_status()
         if "json" not in r.headers.get("content-type", ""):
             _gazet_skip_until = time.time() + 900
             raise ValueError("gazet returned non-JSON")
-        data = r.json()
-        feats = data.get("features") or []
-        if feats:
-            f = feats[0]
-            props = f.get("properties", {})
-            geom = f.get("geometry", {})
-            bbox = f.get("bbox") or props.get("bbox")
-            lon, lat = None, None
-            if geom.get("type") == "Point":
-                lon, lat = geom["coordinates"][:2]
-            if bbox and lon is None:
-                lon, lat = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
-            if bbox is None and lon is not None:
-                d = 0.25
-                bbox = [lon - d, lat - d, lon + d, lat + d]
-            if lon is not None:
-                return {
-                    "name": props.get("name") or query,
-                    "lat": lat,
-                    "lon": lon,
-                    "bbox": bbox,
-                    "source": "gazet",
-                }
+        hits = [
+            h for h in (r.json().get("ids") or [])
+            if h.get("bbox") and len(h["bbox"]) == 4
+            and (h.get("similarity") or 0.0) >= GAZET_MIN_SIMILARITY
+        ]
+        if hits:
+            h = hits[0]
+            w, s, e, n = (float(x) for x in h["bbox"])
+            where = ", ".join(x for x in (h.get("country"), h.get("subtype")) if x)
+            name = h.get("name") or query
+            out: dict[str, Any] = {
+                "name": f"{name} ({where})" if where else name,
+                "lat": (s + n) / 2,
+                "lon": (w + e) / 2,
+                "bbox": [w, s, e, n],
+                "source": "gazet",
+            }
+            # Jaro-Winkler ties are real places sharing a name (Loja Province and
+            # Loja Canton both score 1.0). Picking one silently is the geocoder
+            # deciding for the caller, so say which and name the rest
+            ties = [o for o in hits[1:] if o.get("similarity") == h.get("similarity")]
+            if ties:
+                out["geocode_note"] = (
+                    f"{len(ties) + 1} places match {query!r} equally well; using {out['name']}, not "
+                    + ", ".join(
+                        f"{o.get('name')} ({', '.join(x for x in (o.get('country'), o.get('subtype')) if x)})"
+                        for o in ties[:3]
+                    )
+                    + ". Pass the fuller name if another was meant"
+                )
+            return out
+    except httpx.HTTPError:
+        _gazet_skip_until = time.time() + 300  # a slow or dead Space must not tax every geocode
     except Exception:
         pass
 
