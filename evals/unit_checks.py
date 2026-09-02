@@ -1400,7 +1400,8 @@ def t_recommended_ties_go_to_the_newest_clean_scene():
         {"id": "new", "datetime": "2026-08-28T15:44:21Z", "cloud_cover": 19.125262, "covers_aoi_pct": 98.2},
         {"id": "cloudy", "datetime": "2026-09-02T15:44:21Z", "cloud_cover": 59.815603, "covers_aoi_pct": 98.2},
     ]
-    assert tools._recommend(loja)["id"] == "new"
+    rec = tools._recommend(loja)
+    assert rec["id"] == "new" and "newest of 2 near-equal scenes" in rec["reason"] and "2026-08-03" in rec["reason"], rec
 
 
 if __name__ == "__main__":
