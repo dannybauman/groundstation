@@ -214,6 +214,19 @@ def _get_json(url: str, **kwargs: Any) -> Any:
 # ---------------------------------------------------------------- geocoding
 
 
+def _where(o: dict[str, Any]) -> str:
+    return ", ".join(x for x in (o.get("country"), o.get("subtype")) if x)
+
+
+def _at(o: dict[str, Any]) -> str:
+    """A Gazet record's centre as a speakable position, so two same-named places read apart."""
+    b = o.get("bbox") or []
+    if len(b) != 4:
+        return "unknown position"
+    lat, lon = (b[1] + b[3]) / 2, (b[0] + b[2]) / 2
+    return f"{abs(lat):.1f}{'N' if lat >= 0 else 'S'} {abs(lon):.1f}{'E' if lon >= 0 else 'W'}"
+
+
 def geocode(query: str) -> dict[str, Any]:
     """Resolve a place name to coordinates and a bounding box.
 
@@ -257,15 +270,14 @@ def geocode(query: str) -> dict[str, Any]:
             }
             # Jaro-Winkler ties are real places sharing a name (Loja Province and
             # Loja Canton both score 1.0). Picking one silently is the geocoder
-            # deciding for the caller, so say which and name the rest
+            # deciding for the caller, so say which and name the rest. Field test
+            # No.8: two US counties are both "Harris County (US, county)", so each
+            # tie carries where it is, from the bbox the record already has
             ties = [o for o in hits[1:] if o.get("similarity") == h.get("similarity")]
             if ties:
                 out["geocode_note"] = (
-                    f"{len(ties) + 1} places match {query!r} equally well; using {out['name']}, not "
-                    + ", ".join(
-                        f"{o.get('name')} ({', '.join(x for x in (o.get('country'), o.get('subtype')) if x)})"
-                        for o in ties[:3]
-                    )
+                    f"{len(ties) + 1} places match {query!r} equally well; using {out['name']} at {_at(h)}, not "
+                    + ", ".join(f"{o.get('name')} ({_where(o)}) at {_at(o)}" for o in ties[:3])
                     + ". Pass the fuller name if another was meant"
                 )
             return out
@@ -591,7 +603,18 @@ def search_imagery(
         full = find_full_coverage_set(items, bbox)
         if full and len(full["items"]) > 1:
             result["full_coverage_set"] = full
+        elif rec:
+            # Field test No.8: over a county or a province the best single scene
+            # is a fraction of the area, and the same-day set that would cover it
+            # is starved by `limit` and by the cloud filter. Say so in the
+            # recommendation, or a 49% scene gets rendered as the answer
+            rec["reason"] += _starved_note(len(items))
     return result
+
+
+def _starved_note(n: int) -> str:
+    return (f". No single scene covers this area and no same-day set does either within these {n} results; "
+            "raise limit or relax max_cloud_cover to find one")
 
 
 # ---------------------------------------------------------------- rasters
