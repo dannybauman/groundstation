@@ -92,6 +92,9 @@ def _mgrs_tile(item_id: str) -> str:
 # ponytail: "covers the AOI" threshold — bbox math is approximate, 99 avoids
 # float-edge false negatives on genuinely-covering scenes
 FULL_COVERAGE_PCT = 99.0
+# below this a rendered map has a hole big enough to say so: the renderers return
+# coverage_note (docs/adr-caveats.md). At or above it they stay quiet
+PARTIAL_COVERAGE_PCT = 95.0
 
 
 def _union_coverage_pct(aoi: list[float], boxes: list[list[float]]) -> float:
@@ -340,8 +343,8 @@ def search_datasets(keywords: str, catalog: str | None = None) -> list[dict[str,
     Case-insensitive match against collection id, title, description, and
     keywords. Returns up to 20 hits with {catalog, id, title, summary}.
 
-    An empty result means "not in these three catalogs", NOT "no such data
-    exists" — say that rather than telling someone the data is unavailable.
+    An empty result comes back as one record naming the catalogs `searched`,
+    with a `note`: "not in these catalogs" is NOT "no such data exists".
     Himawari is the live example: real, and not here.
     """
     terms = [t.lower() for t in keywords.split() if t]
@@ -370,6 +373,20 @@ def search_datasets(keywords: str, catalog: str | None = None) -> list[dict[str,
                         "summary": (c.get("description") or "")[:240],
                     }
                 )
+    if not hits:
+        # An empty list is the return most likely to be narrated into "no such
+        # data exists". Say what was searched in the return the model cannot
+        # skip, not only in the docstring it might (docs/adr-caveats.md)
+        searched = [catalog] if catalog else list(CATALOGS)
+        return [{
+            "searched": searched,
+            "note": (
+                f"nothing matched {keywords!r} in {len(searched)} catalog(s): "
+                + ", ".join(searched)
+                + ". Absence here does not mean the data does not exist, only that "
+                "these catalogs do not carry it under those words"
+            ),
+        }]
     return hits[:20]
 
 
@@ -454,6 +471,47 @@ def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float
     return round(100.0 * total_overlap / aoi_area, 1)
 
 
+# A ranked list has already made a decision for the model: newest first, the top
+# item may clip the AOI, and sorted on cloud the cleanest scene may see a fifth
+# of it (field test No.7, Chilika). `recommended` names the scene that balances
+# both axes and says why, so a plausible-but-wrong pick takes deliberate effort
+RECOMMEND_MAX_CLOUD = 30.0  # above this a scene is only recommended when nothing cleaner exists
+
+
+def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The scene to start from, with the reason in one speakable sentence."""
+    if not items:
+        return None
+
+    def cloud(it: dict[str, Any]) -> float | None:
+        return it.get("cloud_cover")
+
+    def cov(it: dict[str, Any]) -> float:
+        return it.get("covers_aoi_pct") or 0.0
+
+    usable = [it for it in items if cloud(it) is None or cloud(it) <= RECOMMEND_MAX_CLOUD]
+    all_cloudy = not usable
+    if all_cloudy:
+        usable = items
+    best = max(usable, key=lambda it: (cov(it), -(cloud(it) or 0.0), it.get("datetime") or ""))
+    with_cloud = [it for it in items if cloud(it) is not None]
+    clearest = min(with_cloud, key=lambda it: cloud(it) or 0.0) if with_cloud else None
+    bc = cloud(best)
+    if clearest is None:
+        reason = f"best-covering scene at {cov(best):.1f}% of the area; this collection reports no cloud cover"
+    elif clearest["id"] == best["id"]:
+        reason = f"clearest ({bc:.1f}% cloud) and best-covering ({cov(best):.1f}% of the area), not a tradeoff"
+    else:
+        own = f"{bc:.1f}% cloud" if bc is not None else "no cloud figure"
+        reason = (
+            f"{own} but covers {cov(best):.1f}% of the area; "
+            f"the clearest scene ({cloud(clearest):.1f}% cloud) covers {cov(clearest):.1f}%"
+        )
+    if all_cloudy:
+        reason = f"every scene is over {RECOMMEND_MAX_CLOUD:.0f}% cloud, so this is the least bad: " + reason
+    return {"id": best["id"], "covers_aoi_pct": cov(best), "cloud_cover": bc, "reason": reason}
+
+
 def search_imagery(
     catalog: str,
     collections: list[str],
@@ -474,7 +532,9 @@ def search_imagery(
     so or pick a fuller scene). When no single scene covers the AOI, the
     response also carries full_coverage_set: the newest same-day scene set
     whose union does — render its items as toggleable layers in one
-    render_map call instead of answering with a cropped scene.
+    render_map call instead of answering with a cropped scene. `recommended`
+    names the scene to start from and why: coverage and cloud pull in
+    opposite directions, and sorting on one of them alone picks wrong.
     """
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
@@ -500,6 +560,9 @@ def search_imagery(
     for it in items:
         it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
     result = {"bbox": bbox, "count": len(feats), "items": items}
+    rec = _recommend(items)
+    if rec:
+        result["recommended"] = rec
     best_single = max((it.get("covers_aoi_pct") or 0.0) for it in items) if items else 0.0
     if items and best_single < FULL_COVERAGE_PCT:
         full = find_full_coverage_set(items, bbox)
@@ -1448,7 +1511,7 @@ def render_map(
     if _boxes:
         _cov = _union_coverage_pct(bbox, _boxes)
         out["state"]["coverage_pct"] = _cov
-        if _cov < 95:
+        if _cov < PARTIAL_COVERAGE_PCT:
             out["coverage_note"] = (
                 f"layers cover {_cov:.0f}% of the requested view, so the rest renders blank. "
                 "Pass the whole full_coverage_set from search_imagery, or tighten bbox to what you have"
@@ -1704,7 +1767,7 @@ def render_map_3d(
     if resolved.get("bounds"):
         _cov = _union_coverage_pct(bbox, [resolved["bounds"]])
         out["state"]["coverage_pct"] = _cov
-        if _cov < 95:
+        if _cov < PARTIAL_COVERAGE_PCT:
             _extra_boxes = [e["bounds"] for e in extras if e.get("bounds")]
             if _extra_boxes:
                 _full = _union_coverage_pct(bbox, [resolved["bounds"], *_extra_boxes])

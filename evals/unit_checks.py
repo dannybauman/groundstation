@@ -1183,6 +1183,75 @@ def t_bbox_feature_closes_its_ring():
     assert [85.65, 19.90] in ring, ring
 
 
+def t_partial_coverage_threshold_is_a_named_knob():
+    # tool-honesty 1.2: below the constant a rendered map says it has a hole,
+    # at and above it stays quiet. Pinned at the boundary so an edit to the
+    # threshold cannot move it silently.
+    def run(east):
+        with tempfile.TemporaryDirectory() as d:
+            layer = [{"type": "raster", "name": "r", "tiles": "https://x/{z}/{x}/{y}.png",
+                      "bounds": [0, 0, east, 10]}]
+            return tools.render_map("t", [0, 0, 10, 10], layer, out_path=str(Path(d) / "m.html"))
+    assert tools.PARTIAL_COVERAGE_PCT == 95.0
+    below = run(9.4)
+    assert "coverage_note" in below and "94%" in below["coverage_note"], below
+    assert "coverage_note" not in run(9.5), "exactly at the threshold must stay quiet"
+    assert "coverage_note" not in run(9.6)
+
+
+def t_empty_dataset_search_says_what_it_searched():
+    # tool-honesty 2.1: himawari is real and not in these catalogs. The bare []
+    # was the return most likely to become "no such data exists" in prose.
+    saved = tools._collections
+    tools._collections = lambda cat: [
+        {"id": "sentinel-2-l2a", "title": "Sentinel-2", "description": "", "keywords": []}
+    ]
+    try:
+        out = tools.search_datasets("himawari")
+        assert len(out) == 1 and out[0]["searched"] == list(tools.CATALOGS), out
+        assert "does not mean the data does not exist" in out[0]["note"], out
+        one = tools.search_datasets("himawari", catalog="veda")
+        assert one[0]["searched"] == ["veda"], one
+        hit = tools.search_datasets("sentinel")
+        assert hit == [{"catalog": c, "id": "sentinel-2-l2a", "title": "Sentinel-2", "summary": ""}
+                       for c in tools.CATALOGS], hit
+        assert not any("note" in h for h in hit)
+    finally:
+        tools._collections = saved
+
+
+def t_recommended_is_the_covering_scene_not_the_clearest():
+    # Field test No.7, Chilika: the two cleanest scenes saw a fifth of the lagoon.
+    items = [
+        {"id": "S2B_45QUC_20260605_1_L2A", "datetime": "2026-06-05T04:50:00Z", "cloud_cover": 2.2, "covers_aoi_pct": 24.2},
+        {"id": "S2B_45QTB_20260605_0_L2A", "datetime": "2026-06-05T04:50:00Z", "cloud_cover": 5.0, "covers_aoi_pct": 17.2},
+        {"id": "S2C_45QUB_20260610_0_L2A", "datetime": "2026-06-10T04:50:00Z", "cloud_cover": 21.9, "covers_aoi_pct": 97.9},
+    ]
+    before = [it["id"] for it in items]
+    rec = tools._recommend(items)
+    assert rec["id"] == "S2C_45QUB_20260610_0_L2A", rec
+    assert "21.9% cloud but covers 97.9%" in rec["reason"] and "2.2% cloud" in rec["reason"], rec
+    assert [it["id"] for it in items] == before, "recommended is additive: the list order is untouched"
+
+
+def t_recommended_says_when_it_is_not_a_tradeoff():
+    items = [{"id": "a", "datetime": "2026-01-02", "cloud_cover": 1.0, "covers_aoi_pct": 100.0},
+             {"id": "b", "datetime": "2026-01-01", "cloud_cover": 9.0, "covers_aoi_pct": 100.0}]
+    rec = tools._recommend(items)
+    assert rec["id"] == "a" and "not a tradeoff" in rec["reason"], rec
+
+
+def t_recommended_handles_sar_and_all_cloudy():
+    # Sentinel-1 reports cloud_cover as None; that is not a reason to skip it
+    sar = [{"id": "s1", "datetime": "2026-01-01", "cloud_cover": None, "covers_aoi_pct": 100.0}]
+    assert "no cloud cover" in tools._recommend(sar)["reason"]
+    cloudy = [{"id": "c1", "datetime": "2026-01-01", "cloud_cover": 80.0, "covers_aoi_pct": 100.0},
+              {"id": "c2", "datetime": "2026-01-02", "cloud_cover": 60.0, "covers_aoi_pct": 50.0}]
+    rec = tools._recommend(cloudy)
+    assert rec["id"] == "c1" and "least bad" in rec["reason"], rec
+    assert tools._recommend([]) is None
+
+
 if __name__ == "__main__":
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("t_")):
         check(name, fn)
