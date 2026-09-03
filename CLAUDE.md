@@ -11,6 +11,7 @@ Before building a capability or reaching for a generic dependency, ask: **does a
 ## Working agreements
 
 - one branch + one small PR per change, evals in `evals/unit_checks.py` before the PR, eval output pasted in the PR body
+- a tool that returns a derived number returns, in the same object, the conditions under which it should not be read at face value — the rule and the audit are in `docs/adr-caveats.md`
 - bump `.claude-plugin/plugin.json` in every PR that ships behavior — installs cache per version
 - multi `-m` commits, Claude co-author trailer
 - deliberate shortcuts get a `ponytail:` comment naming the ceiling and the upgrade path
