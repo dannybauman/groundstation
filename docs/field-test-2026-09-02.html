@@ -57,14 +57,14 @@ footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var
 
 <header><div class="wrap">
   <h1><span class="dot"></span>THE FIELD TEST №8</h1>
-  <div class="sub">groundstation · 20 prompts · 12 fixes mid-test · 5 things to build next · September 2, 2026 · Development Seed labs</div>
-  <p class="lede">This edition ran on PRs #31 and #32 before either merged, in-process on the branch rather than through the MCP server (the connected server was still 0.8.0), to find what the checks cannot. Variety on purpose: <b>our own geocoder answering for the first time</b>, the recommendation and the empty-search record from the tool-honesty work, a tropical storm on the Gulf coast on the day, radar through cloud, a dry-season NDWI comparison, a 3D drape, and VEDA burn severity with eoAPI on the panel. Twenty prompts in two sittings. Twelve things broke on a first pass and were fixed, checked and re-run before the page was rebuilt; each card says so. <b>Round 6 is the part this edition was for</b>: five things the run says to build next, and which DevSeed tool already does most of each. Data blocks are verbatim, the prose below them is our reading.</p>
+  <div class="sub">groundstation · 20 prompts · 13 fixes mid-test · 5 things to build next · September 2, 2026 · Development Seed labs</div>
+  <p class="lede">This edition ran on PRs #31 and #32 before either merged, in-process on the branch rather than through the MCP server (the connected server was still 0.8.0), to find what the checks cannot. Variety on purpose: <b>our own geocoder answering for the first time</b>, the recommendation and the empty-search record from the tool-honesty work, a tropical storm on the Gulf coast on the day, radar through cloud, a dry-season NDWI comparison, a 3D drape, and VEDA burn severity with eoAPI on the panel. Twenty prompts in two sittings. Thirteen things broke on a first pass and were fixed, checked and re-run before the page was rebuilt; each card says so. <b>Round 6 is the part this edition was for</b>: five things the run says to build next, and which DevSeed tool already does most of each. Data blocks are verbatim, the prose below them is our reading.</p>
 </div></header>
 
 <div class="stats wrap" style="padding: 0 24px">
   <div class="stat"><b>20/20</b><span>prompts answered against live data</span></div>
   <div class="stat"><b>10 of 19</b><span>geocodes answered by Gazet, the first edition where it fired</span></div>
-  <div class="stat"><b>12</b><span>fixes shipped mid-test, each pinned by a check</span></div>
+  <div class="stat"><b>13</b><span>fixes shipped mid-test, each pinned by a check</span></div>
   <div class="stat"><b>5</b><span>things worth building next, in Round 6</span></div>
 </div>
 
@@ -373,7 +373,7 @@ compute_statistics(after, vv, bbox)   →   vv: p2 128  p98 328  mean 230   clip
 render_map(after + before at rescale 128,328 + GDACS point, stack_layer)   →   swipe, coverage_pct 96.5</div></div>
 <div class="answer"><div class="label">Our read</div>Two ascending passes sixty days apart at the same minute of the day, which is the same relative orbit, so the backscatter is comparable. Same collection and overlapping footprints, so the map is a swipe by default. The stretch comes from the after scene's own percentiles rather than a guess, and open water reads dark on both sides of the divider.</div>
 <a class="fig" href="img/ft8-cambodia-sar-swipe.html" target="_blank" title="open the live artifact"><img src="img/ft8-cambodia-sar-swipe.png" alt="artifact produced by example 15" loading="lazy"><span class="open">live artifact ↗</span></a>
-<div class="learning"><b>Learning →</b> <b>Pass 1 crashed on the statistics shape</b> (the Phoenix card) and <b>TiTiler named the requested band b1</b>, so the caller who asked for vv had to guess which key was theirs. The tool gives the asset its name back when the mapping is one to one. And the GDACS feed turned out to be a current-events list, not a window: days=7 and days=30 both returned 100. The window is applied now and the return counts what the feed listed.</div>
+<div class="learning"><b>Learning →</b> <b>Pass 1 crashed on the statistics shape</b> (the Phoenix card) and <b>TiTiler named the requested band b1</b>, so the caller who asked for vv had to guess which key was theirs. The tool gives the asset its name back when the mapping is one to one. And the GDACS feed turned out to be a current-events list, not a window: days=7 and days=30 both returned 100. The window is applied now and the return counts what the feed listed. <b>And the first still of this card found the biggest thing in the edition:</b> the basemap tiles where no imagery covered read "API KEY REQUIRED". CARTO's free basemap, under every groundstation map, postcard snapshot and the console since July, now watermarks. 2D maps ride OpenFreeMap's key-free positron style now, the 3D style rides OpenStreetMap's tiles, a check refuses cartocdn in any artifact, and every artifact and still on this page was rebuilt.</div>
 <div class="shows">GDACS on the current-events feed, windowed · orbit_state pairing · statistics keyed by asset · auto swipe</div>
 </div>
 
@@ -495,11 +495,11 @@ briefing/state: alert WATCH · 5 event titles · ndvi_mean 0.572 · scene_count 
 <div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
 git checkout gazet-live                     # until #31 and #32 merge, then main
 bash scripts/doctor.sh                      # walks the setup chain, prints the fix
-uv run evals/unit_checks.py                 # 108 offline checks
+uv run evals/unit_checks.py                 # 109 offline checks
 uv run scripts/field_test.py docs/field-test-2026-09-02.cases.json   # rebuild this page</code></div>
 </main>
 
-<footer>field test №8 · September 2, 2026 · run on PRs #31 and #32 before merge · twenty prompts, twelve fixes mid-test, five things to build next · groundstation · Development Seed labs</footer>
+<footer>field test №8 · September 2, 2026 · run on PRs #31 and #32 before merge · twenty prompts, thirteen fixes mid-test, five things to build next · groundstation · Development Seed labs</footer>
 
 </body>
 </html>
