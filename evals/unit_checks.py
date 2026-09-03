@@ -1433,14 +1433,15 @@ def t_wrap_aware_bbox_puts_fiji_back_together():
     # something that genuinely wraps the globe stays as it was
     globe = {"type": "Polygon", "coordinates": [[[-180, -85], [-90, -85], [0, -85], [90, -85], [180, -85], [180, -60], [0, -60], [-180, -60], [-180, -85]]]}
     assert tools._wrap_aware_bbox(globe) is None
-    assert tools._at({"bbox": [-180.0, -21.0, 180.0, -12.5]}) == "across the antimeridian"
+    assert tools._at({"bbox": [-180.0, -21.0, 180.0, -12.5]}) == "spanning the antimeridian"
+    assert tools._at({"bbox": [176.9, -21.0, -178.3, -12.5]}) == "at 16.8S 179.3E", "the centre of a west > east box is across the dateline"
 
 
 def t_statistics_have_one_shape_clipped_or_not():
     # Field test No.8: clipped stats came back as a GeoJSON Feature, unclipped as
     # the band dict, and the first consumer that saw both crashed on it.
     feature = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
-               "properties": {"statistics": {"vv": {"min": 1.0, "max": 900.0, "mean": 120.0, "percentile_2": 20.0, "percentile_98": 400.0, "histogram": [1, 2]}}}}
+               "properties": {"statistics": {"b1": {"min": 1.0, "max": 900.0, "mean": 120.0, "percentile_2": 20.0, "percentile_98": 400.0, "histogram": [1, 2]}}}}
     saved_post, saved_json = tools._client.post, tools._get_json
     tools._client.post = lambda url, **kw: _FakeResp(feature)
     tools._get_json = lambda url, **kw: {"bbox": [0, 0, 1, 1], "assets": {"vv": {"raster:bands": [{"scale": 1.0, "unit": "DN"}]}}}

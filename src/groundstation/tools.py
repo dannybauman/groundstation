@@ -225,9 +225,11 @@ def _at(o: dict[str, Any]) -> str:
     if len(b) != 4:
         return "unknown position"
     if b[2] - b[0] >= 180:
-        return "across the antimeridian"
-    lat, lon = (b[1] + b[3]) / 2, (b[0] + b[2]) / 2
-    return f"{abs(lat):.1f}{'N' if lat >= 0 else 'S'} {abs(lon):.1f}{'E' if lon >= 0 else 'W'}"
+        return "spanning the antimeridian"
+    lat = (b[1] + b[3]) / 2
+    lon = (b[0] + b[2] + (360 if b[0] > b[2] else 0)) / 2  # west > east crosses the dateline
+    lon = lon - 360 if lon > 180 else lon
+    return f"at {abs(lat):.1f}{'N' if lat >= 0 else 'S'} {abs(lon):.1f}{'E' if lon >= 0 else 'W'}"
 
 
 def _wrap_aware_bbox(geometry: dict[str, Any]) -> list[float] | None:
@@ -322,8 +324,8 @@ def geocode(query: str) -> dict[str, Any]:
             ties = [o for o in hits[1:] if o.get("similarity") == h.get("similarity")]
             if ties:
                 out["geocode_note"] = (
-                    f"{len(ties) + 1} places match {query!r} equally well; using {out['name']} at {_at(h)}, not "
-                    + ", ".join(f"{o.get('name')} ({_where(o)}) at {_at(o)}" for o in ties[:3])
+                    f"{len(ties) + 1} places match {query!r} equally well; using {out['name']} {_at(h)}, not "
+                    + ", ".join(f"{o.get('name')} ({_where(o)}) {_at(o)}" for o in ties[:3])
                     + ". Pass the fuller name if another was meant"
                 )
             return out
@@ -877,6 +879,13 @@ def compute_statistics(
     if isinstance(out, dict) and out.get("type") == "Feature":
         out = dict((out.get("properties") or {}).get("statistics") or {})
         out["clipped_to"] = bbox if bbox else "aoi_geojson"
+    # TiTiler names the bands of a plain asset request b1..bN. Field test No.8:
+    # a caller asking for "vv" got "b1" back and had to guess. Give the asset
+    # its name back when the mapping is one to one and no expression is involved
+    if assets and not expression and isinstance(out, dict):
+        for i, a in enumerate(assets, 1):
+            if f"b{i}" in out and a not in out:
+                out[a] = out.pop(f"b{i}")
     try:
         item = _get_json(
             f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
@@ -2410,7 +2419,11 @@ def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 
             w, s, e, n = bbox
             params["bbox"] = f"{w},{n},{e},{s}"  # EONET wants lonmin,latmax,lonmax,latmin
         data = _get_json("https://eonet.gsfc.nasa.gov/api/v3/events", params=params)
-        for ev in data.get("events", [])[:50]:
+        events_all = data.get("events", [])
+        # Field test No.8: the cap was 50 and a 30-day window over a busy fortnight
+        # pushed the icebergs off the list with nothing said. Higher cap, and count
+        out["eonet_note"] = f"EONET listed {len(events_all)} open events in {days} days" + ("; first 500 kept" if len(events_all) > 500 else "")
+        for ev in events_all[:500]:
             geom = (ev.get("geometry") or [{}])[-1]
             out["eonet"].append(
                 {
