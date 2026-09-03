@@ -5,8 +5,8 @@
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
 <style>
   :root { --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --rule: #dedad4; --paper: #f7f4ef;
-    --k-data: #1d4e8f; --k-access: #7a5c2e; --k-tiling: #CF3F02; --k-viz: #2a5c45;
-    --k-standard: #6b4c8f; --k-infra: #4a4440; }
+    --k-place: #7a5c2e; --k-catalog: #1d4e8f; --k-data: #6b4c8f; --k-pixels: #CF3F02; --k-draw: #2a5c45;
+    --k-orbit: #4a4440; }
   html, body, #map { margin: 0; height: 100%; }
   #panel { position: absolute; top: 12px; left: 12px; z-index: 2; background: rgba(247,244,239,.96);
     color: var(--ink); border-top: 3px solid var(--accent);
@@ -38,8 +38,9 @@
 <button id="stack-toggle" aria-expanded="false">Stack</button>
 <aside id="stack" aria-label="Technology stack">
   <h2>The stack behind this map</h2>
-  <p class="stack-sub">what is actually on screen · tap any entry for what it is and what it talks to</p>
-  <div class="stack-group">data</div><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">NASA EONET<span class="role">uses</span></span><span class="inst">the events half of &quot;what&#x27;s happening around X&quot;</span></span></summary><div class="more"><p>NASA&#x27;s open feed of natural events — wildfires, storms, volcanoes, floods</p><div class="spk">speaks to GDACS</div><a href="https://eonet.gsfc.nasa.gov" target="_blank" rel="noopener">eonet.gsfc.nasa.gov</a></div></details><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">GDACS<span class="role">uses</span></span><span class="inst">disaster alert levels alongside EONET events</span></span></summary><div class="more"><p>the UN/EC global disaster alert system</p><div class="spk">speaks to NASA EONET</div><a href="https://www.gdacs.org" target="_blank" rel="noopener">www.gdacs.org</a></div></details><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">Open-Meteo<span class="role">uses</span></span><span class="inst">past and forecast weather for briefs and event context</span></span></summary><div class="more"><p>open weather API, no key required</p><div class="spk">speaks to NASA EONET</div><a href="https://open-meteo.com" target="_blank" rel="noopener">open-meteo.com</a></div></details><div class="stack-group">visualization</div><details class="stack-entry"><summary><span class="dot k-viz"></span><span class="s-head"><span class="stack-name">MapLibre GL<span class="role">uses</span></span><span class="inst">draws every interactive artifact — layers, swipe compares, 3D terrain</span></span></summary><div class="more"><p>the open-source WebGL map renderer</p><div class="spk">speaks to TiTiler, AWS Terrarium</div><a href="https://maplibre.org" target="_blank" rel="noopener">maplibre.org</a></div></details>
+  <p class="stack-sub">5 components on screen · 0 built by Development Seed · islands: Data in the Browser</p>
+  <p class="stack-sub">the pipeline in order · tap any entry for what it is and what it talks to</p>
+  <div class="stack-group">3 · data</div><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">GDACS<span class="role">uses</span></span><span class="inst">disaster alert levels alongside EONET events, from its current-events feed</span></span></summary><div class="more"><p>the UN/EC global disaster alert system</p><div class="spk">speaks to NASA EONET</div><a href="https://www.gdacs.org" target="_blank" rel="noopener">www.gdacs.org</a></div></details><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">NASA EONET<span class="role">uses</span></span><span class="inst">the events half of &quot;what&#x27;s happening around X&quot;</span></span></summary><div class="more"><p>NASA&#x27;s open feed of natural events — wildfires, storms, volcanoes, floods</p><div class="spk">speaks to GDACS</div><a href="https://eonet.gsfc.nasa.gov" target="_blank" rel="noopener">eonet.gsfc.nasa.gov</a></div></details><div class="stack-group">5 · draw</div><details class="stack-entry"><summary><span class="dot k-draw"></span><span class="s-head"><span class="stack-name">MapLibre GL<span class="role">uses</span><span class="island" title="Development Seed island">dib</span></span><span class="inst">draws every interactive artifact — layers, swipe compares, 3D terrain</span></span></summary><div class="more"><p>the open-source WebGL map renderer</p><div class="spk">speaks to TiTiler, OpenFreeMap, AWS Terrarium terrain</div><a href="https://maplibre.org" target="_blank" rel="noopener">maplibre.org</a></div></details><details class="stack-entry"><summary><span class="dot k-draw"></span><span class="s-head"><span class="stack-name">OpenFreeMap<span class="role">uses</span></span><span class="inst">the light basemap under every 2D map and snapshot card</span></span></summary><div class="more"><p>free vector basemap tiles with no API key, built from OpenMapTiles</p><div class="spk">speaks to OpenStreetMap, MapLibre GL</div><a href="https://openfreemap.org" target="_blank" rel="noopener">openfreemap.org</a></div></details><details class="stack-entry"><summary><span class="dot k-draw"></span><span class="s-head"><span class="stack-name">OpenStreetMap<span class="role">uses</span></span><span class="inst">the data under every basemap here, the raster tiles under 3D scenes, and the gazetteer behind Nominatim</span></span></summary><div class="more"><p>the volunteer map of the world</p><div class="spk">speaks to OpenFreeMap, Nominatim</div><a href="https://www.openstreetmap.org" target="_blank" rel="noopener">www.openstreetmap.org</a></div></details>
 </aside>
 <style>
   #stack-toggle { position: absolute; top: 12px; right: 52px; z-index: 4; font: 12px/1 "Roboto", system-ui, sans-serif;
@@ -63,9 +64,12 @@
     font-size: 10px; align-self: center; transition: transform .15s ease; }
   .stack-entry[open] summary::after { transform: rotate(90deg); }
   .stack-entry .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
-  .dot.k-data { background: var(--k-data); } .dot.k-access { background: var(--k-access); }
-  .dot.k-tiling { background: var(--k-tiling); } .dot.k-viz { background: var(--k-viz); }
-  .dot.k-standard { background: var(--k-standard); } .dot.k-infra { background: var(--k-infra); }
+  .dot.k-place { background: var(--k-place); } .dot.k-catalog { background: var(--k-catalog); }
+  .dot.k-data { background: var(--k-data); } .dot.k-pixels { background: var(--k-pixels); }
+  .dot.k-draw { background: var(--k-draw); } .dot.k-orbit { background: var(--k-orbit); }
+  .stack-name .island { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--accent); border: 1px dashed var(--accent); border-radius: 3px; padding: 2px 4px; margin-left: 4px;
+    vertical-align: 1px; }
   .s-head { display: flex; flex-direction: column; min-width: 0; }
   .stack-name { font-weight: 600; }
   .stack-name .role { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
@@ -88,7 +92,7 @@
 </script>
 
 <script>
-const LAYERS = [{"type": "geojson", "name": "GDACS Red/Orange", "data": {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [118.4, 23.4]}, "properties": {"title": "Tropical Cyclone SAUDEL-26", "alert": "Orange"}}]}}];
+const LAYERS = [{"type": "geojson", "name": "GDACS Red/Orange", "data": {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [117.4, 23.8]}, "properties": {"title": "Tropical Cyclone SAUDEL-26"}}]}}];
 const BBOX = [-180, -60, 180, 75];
 // Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
 // watermark tiles under every artifact. OpenFreeMap needs no key and its

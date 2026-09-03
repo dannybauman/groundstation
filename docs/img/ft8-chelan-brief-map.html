@@ -5,8 +5,8 @@
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
 <style>
   :root { --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --rule: #dedad4; --paper: #f7f4ef;
-    --k-data: #1d4e8f; --k-access: #7a5c2e; --k-tiling: #CF3F02; --k-viz: #2a5c45;
-    --k-standard: #6b4c8f; --k-infra: #4a4440; }
+    --k-place: #7a5c2e; --k-catalog: #1d4e8f; --k-data: #6b4c8f; --k-pixels: #CF3F02; --k-draw: #2a5c45;
+    --k-orbit: #4a4440; }
   html, body, #map { margin: 0; height: 100%; }
   #panel { position: absolute; top: 12px; left: 12px; z-index: 2; background: rgba(247,244,239,.96);
     color: var(--ink); border-top: 3px solid var(--accent);
@@ -35,57 +35,6 @@
 <div id="map"></div>
 <div id="panel"><h1>Earth brief: Chelan County, Washington</h1><p>2026-09-02 · latest imagery + active events</p><div id="toggles"></div></div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
-<button id="stack-toggle" aria-expanded="false">Stack</button>
-<aside id="stack" aria-label="Technology stack">
-  <h2>The stack behind this map</h2>
-  <p class="stack-sub">what is actually on screen · tap any entry for what it is and what it talks to</p>
-  <div class="stack-group">data</div><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">Earth Search<span class="role">uses</span></span><span class="inst">source of sentinel-2-l2a</span></span></summary><div class="more"><p>Element 84&#x27;s open STAC catalog of Sentinel-2, Sentinel-1, NAIP, and Copernicus DEM on AWS</p><div class="spk">speaks to STAC, AWS S3</div><a href="https://earth-search.aws.element84.com/v1" target="_blank" rel="noopener">earth-search.aws.element84.com/v1</a></div></details><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">NASA EONET<span class="role">uses</span></span><span class="inst">the events half of &quot;what&#x27;s happening around X&quot;</span></span></summary><div class="more"><p>NASA&#x27;s open feed of natural events — wildfires, storms, volcanoes, floods</p><div class="spk">speaks to GDACS</div><a href="https://eonet.gsfc.nasa.gov" target="_blank" rel="noopener">eonet.gsfc.nasa.gov</a></div></details><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">GDACS<span class="role">uses</span></span><span class="inst">disaster alert levels alongside EONET events</span></span></summary><div class="more"><p>the UN/EC global disaster alert system</p><div class="spk">speaks to NASA EONET</div><a href="https://www.gdacs.org" target="_blank" rel="noopener">www.gdacs.org</a></div></details><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">Open-Meteo<span class="role">uses</span></span><span class="inst">past and forecast weather for briefs and event context</span></span></summary><div class="more"><p>open weather API, no key required</p><div class="spk">speaks to NASA EONET</div><a href="https://open-meteo.com" target="_blank" rel="noopener">open-meteo.com</a></div></details><div class="stack-group">access</div><details class="stack-entry"><summary><span class="dot k-access"></span><span class="s-head"><span class="stack-name">COG + HTTP range requests<span class="role">contributes</span></span><span class="inst">streaming only the bytes each tile needs</span></span></summary><div class="more"><p>Cloud-Optimized GeoTIFF — imagery you can read in pieces, so nobody downloads a whole scene</p><div class="spk">speaks to AWS S3, Azure Blob, TiTiler</div><a href="https://cogeo.org" target="_blank" rel="noopener">cogeo.org</a></div></details><details class="stack-entry"><summary><span class="dot k-access"></span><span class="s-head"><span class="stack-name">Gazet<span class="role ds">created</span></span><span class="inst">first stop for turning &quot;Chelan County&quot; into a bbox — a no-LLM fuzzy match over Overture divisions and Natural Earth, gated on similarity so a near miss falls through to Nominatim</span></span></summary><div class="more"><p>a small-model geocoder that resolves place names without a heavyweight service</p><div class="spk">speaks to Nominatim</div><a href="https://github.com/developmentseed/gazet" target="_blank" rel="noopener">github.com/developmentseed/gazet</a></div></details><details class="stack-entry"><summary><span class="dot k-access"></span><span class="s-head"><span class="stack-name">Nominatim<span class="role">uses</span></span><span class="inst">the geocoding fallback, plus reverse geocoding for map labels</span></span></summary><div class="more"><p>OpenStreetMap&#x27;s geocoder</p><div class="spk">speaks to Gazet</div><a href="https://nominatim.openstreetmap.org" target="_blank" rel="noopener">nominatim.openstreetmap.org</a></div></details><div class="stack-group">tiling</div><details class="stack-entry"><summary><span class="dot k-tiling"></span><span class="s-head"><span class="stack-name">TiTiler<span class="role ds">created</span></span><span class="inst">serving sentinel-2-l2a via titiler.xyz</span></span></summary><div class="more"><p>dynamic tile server — turns COGs into web map tiles on the fly, band math included</p><div class="spk">speaks to STAC, COG + HTTP range requests</div><a href="https://github.com/developmentseed/titiler" target="_blank" rel="noopener">github.com/developmentseed/titiler</a></div></details><div class="stack-group">visualization</div><details class="stack-entry"><summary><span class="dot k-viz"></span><span class="s-head"><span class="stack-name">MapLibre GL<span class="role">uses</span></span><span class="inst">draws every interactive artifact — layers, swipe compares, 3D terrain</span></span></summary><div class="more"><p>the open-source WebGL map renderer</p><div class="spk">speaks to TiTiler, AWS Terrarium</div><a href="https://maplibre.org" target="_blank" rel="noopener">maplibre.org</a></div></details><div class="stack-group">standards</div><details class="stack-entry"><summary><span class="dot k-standard"></span><span class="s-head"><span class="stack-name">STAC<span class="role">contributes</span></span><span class="inst">found sentinel-2-l2a</span></span></summary><div class="more"><p>the open catalog spec that makes satellite archives searchable the same way everywhere</p><div class="spk">speaks to Earth Search, VEDA, Planetary Computer, TiTiler</div><a href="https://stacspec.org" target="_blank" rel="noopener">stacspec.org</a></div></details><div class="stack-group">infrastructure</div><details class="stack-entry"><summary><span class="dot k-infra"></span><span class="s-head"><span class="stack-name">Cloud object storage<span class="role">uses</span></span><span class="inst">streaming from AWS S3 (sentinel-cogs)</span></span></summary><div class="more"><p>the cloud buckets the pixels actually live in</p><div class="spk">speaks to COG + HTTP range requests</div><a href="https://registry.opendata.aws" target="_blank" rel="noopener">registry.opendata.aws</a></div></details>
-</aside>
-<style>
-  #stack-toggle { position: absolute; top: 12px; right: 52px; z-index: 4; font: 12px/1 "Roboto", system-ui, sans-serif;
-    letter-spacing: .08em; text-transform: uppercase; background: var(--paper); color: var(--accent);
-    border: 1px solid var(--accent); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
-  #stack-toggle:hover, #stack-toggle[aria-expanded="true"] { background: var(--accent); color: #fff; }
-  #stack { position: absolute; top: 0; right: 0; bottom: 40px; width: 330px; max-width: 88vw; z-index: 3;
-    background: var(--paper); color: var(--ink); font: 13px/1.5 "Roboto", system-ui, sans-serif;
-    border-left: 3px solid var(--accent); padding: 46px 16px 16px; overflow-y: auto;
-    transform: translateX(105%); transition: transform .22s ease; box-shadow: -2px 0 12px rgba(0,0,0,.12); }
-  #stack.open { transform: none; }
-  @media (prefers-reduced-motion: reduce) { #stack, .stack-entry summary::after { transition: none; } }
-  #stack h2 { font: 700 15px/1.2 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 2px; }
-  #stack .stack-sub { margin: 0 0 12px; color: var(--mid); font-size: 11.5px; font-style: italic; }
-  .stack-group { font: 700 10px/1 "Roboto Mono", monospace; letter-spacing: .14em; text-transform: uppercase;
-    color: var(--mid); border-bottom: 1px solid var(--rule); padding-bottom: 4px; margin: 14px 0 8px; }
-  .stack-entry { margin: 0 0 9px; }
-  .stack-entry summary { display: flex; gap: 8px; cursor: pointer; list-style: none; }
-  .stack-entry summary::-webkit-details-marker { display: none; }
-  .stack-entry summary::after { content: "▸"; flex: none; margin-left: auto; color: var(--mid);
-    font-size: 10px; align-self: center; transition: transform .15s ease; }
-  .stack-entry[open] summary::after { transform: rotate(90deg); }
-  .stack-entry .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
-  .dot.k-data { background: var(--k-data); } .dot.k-access { background: var(--k-access); }
-  .dot.k-tiling { background: var(--k-tiling); } .dot.k-viz { background: var(--k-viz); }
-  .dot.k-standard { background: var(--k-standard); } .dot.k-infra { background: var(--k-infra); }
-  .s-head { display: flex; flex-direction: column; min-width: 0; }
-  .stack-name { font-weight: 600; }
-  .stack-name .role { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
-    color: var(--mid); border: 1px solid var(--rule); border-radius: 3px; padding: 2px 4px; margin-left: 6px;
-    vertical-align: 1px; }
-  .stack-name .role.ds { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .stack-entry .inst { font: 11px/1.5 "Roboto Mono", monospace; color: var(--mid); }
-  .stack-entry .more { margin: 3px 0 2px 16px; }
-  .stack-entry .more p { margin: 2px 0; color: var(--ink); }
-  .stack-entry .spk { font: 10.5px/1.5 "Roboto Mono", monospace; color: var(--mid); margin: 2px 0; }
-  .stack-entry a { color: var(--mid); font-size: 10.5px; text-decoration: none; border-bottom: 1px solid var(--rule); }
-  .stack-entry a:hover { color: var(--accent); border-bottom-color: var(--accent); }
-</style>
-<script>
-  const _sb = document.getElementById("stack-toggle"), _sp = document.getElementById("stack");
-  _sb.addEventListener("click", () => {
-    const open = _sp.classList.toggle("open");
-    _sb.setAttribute("aria-expanded", String(open));
-  });
-</script>
 
 <script>
 const LAYERS = [{"type": "raster", "name": "Sentinel-2 2026-08-24 (0.1% cloud)", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10TFT_20260824_0_L2A&assets=visual", "opacity": 1, "bounds": [-121.6881, 46.832638, -120.197167, 47.845912]}, {"type": "geojson", "name": "Active events (5)", "data": {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [-121.4353, 48.652417]}, "properties": {"title": "Wildfire Electric, Whatcom, Washington", "description": "Wildfires \u00b7 2026-08-22"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-121.052783, 47.458917]}, "properties": {"title": "Wildfire GOAT, Kittitas, Washington", "description": "Wildfires \u00b7 2026-08-22"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-121.0287, 48.549617]}, "properties": {"title": "Wildfire Thunder Creek, Skagit, Washington", "description": "Wildfires \u00b7 2026-08-22"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-121.255867, 47.4708]}, "properties": {"title": "Wildfire KING, Kittitas, Washington", "description": "Wildfires \u00b7 2026-08-19"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.830667, 48.346667]}, "properties": {"title": "Wildfire SISI, Chelan, Washington", "description": "Wildfires \u00b7 2026-08-14"}}]}, "color": "#d63b3b"}];
