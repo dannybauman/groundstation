@@ -9,6 +9,7 @@ that scaffold as a toolset later.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import re
@@ -223,8 +224,38 @@ def _at(o: dict[str, Any]) -> str:
     b = o.get("bbox") or []
     if len(b) != 4:
         return "unknown position"
+    if b[2] - b[0] >= 180:
+        return "across the antimeridian"
     lat, lon = (b[1] + b[3]) / 2, (b[0] + b[2]) / 2
     return f"{abs(lat):.1f}{'N' if lat >= 0 else 'S'} {abs(lon):.1f}{'E' if lon >= 0 else 'W'}"
+
+
+def _wrap_aware_bbox(geometry: dict[str, Any]) -> list[float] | None:
+    """The real extent of a geometry that crosses the antimeridian, west > east per RFC 7946.
+
+    A minimum bounding rectangle over Fiji is [-180, -21, 180, -12], the whole
+    world. Shifting negative longitudes by 360 puts both halves on one side of
+    the dateline, where the extent is honest. If it is still 180 degrees wide
+    the thing genuinely wraps the globe and there is nothing better to say.
+    """
+    t = geometry.get("type")
+    coords = geometry.get("coordinates") or []
+    polys = coords if t == "MultiPolygon" else [coords] if t == "Polygon" else []
+    pts = [pt for poly in polys for ring in poly[:1] for pt in ring]
+    if not pts:
+        return None
+    lats = [pt[1] for pt in pts]
+    plain = [pt[0] for pt in pts]
+    shifted = [x + 360 if x < 0 else x for x in plain]
+    # take whichever frame holds the geometry in the narrower span
+    w, e = min(plain), max(plain)
+    ws, es = min(shifted), max(shifted)
+    if es - ws < e - w:
+        w, e = ws, es
+    if e - w >= 180:
+        return None
+    unwrap = lambda x: x - 360 if x > 180 else x
+    return [unwrap(w), min(lats), unwrap(e), max(lats)]
 
 
 def geocode(query: str) -> dict[str, Any]:
@@ -259,12 +290,27 @@ def geocode(query: str) -> dict[str, Any]:
         if hits:
             h = hits[0]
             w, s, e, n = (float(x) for x in h["bbox"])
+            if e - w >= 180:
+                # Field test No.8: Fiji came back as [-180, -21, 180, -12], the
+                # minimum bounding rectangle of a country that crosses the
+                # dateline. One geometry fetch gives the real extent
+                gr = _client.get(
+                    GAZET_URL.rsplit("/", 1)[0] + f"/geometry/{h['id']}",
+                    params={"simplify": "true", "source": h.get("source")},
+                    timeout=GAZET_TIMEOUT_S * 3,
+                )
+                gr.raise_for_status()
+                fixed = _wrap_aware_bbox(gr.json().get("geometry") or {})
+                if fixed:
+                    w, s, e, n = fixed
+                    h = {**h, "bbox": fixed}
             where = ", ".join(x for x in (h.get("country"), h.get("subtype")) if x)
             name = h.get("name") or query
+            lon_c = (w + (e + 360 if e < w else e)) / 2
             out: dict[str, Any] = {
                 "name": f"{name} ({where})" if where else name,
                 "lat": (s + n) / 2,
-                "lon": (w + e) / 2,
+                "lon": lon_c - 360 if lon_c > 180 else lon_c,
                 "bbox": [w, s, e, n],
                 "source": "gazet",
             }
@@ -289,8 +335,12 @@ def geocode(query: str) -> dict[str, Any]:
     def _nominatim(q: str) -> list:
         return _get_json(
             "https://nominatim.openstreetmap.org/search",
-            params={"q": q, "format": "jsonv2", "limit": 1},
+            params={"q": q, "format": "jsonv2", "limit": 5},
         )
+
+    def _short(dn: str) -> str:
+        parts = [p for p in dn.split(", ") if not p.strip().isdigit()]
+        return ", ".join(parts[:1] + parts[-2:]) if len(parts) > 3 else dn
 
     # descriptive phrases ("the Ashburn data center corridor") fail as-is;
     # retry with capitalized tokens, then with descriptor words stripped
@@ -303,10 +353,11 @@ def geocode(query: str) -> dict[str, Any]:
     kept = [w for w in query.split() if w.lower() not in stop]
     if kept and " ".join(kept) != query:
         attempts.append(" ".join(kept))
-    results = []
+    results, matched = [], query
     for q in dict.fromkeys(attempts):
         results = _nominatim(q)
         if results:
+            matched = q
             break
     if not results:
         return {"error": f"No geocoding result for {query!r}"}
@@ -320,6 +371,17 @@ def geocode(query: str) -> dict[str, Any]:
         "bbox": [w, s, e, n],
         "source": "nominatim",
     }
+    # Field test No.8: "the Ashburn data center corridor" simplified to "Ashburn"
+    # and Nominatim's first hit was Ashburn, Georgia. The fallback took the top
+    # of a list it never showed. Say what was matched and who else shares it
+    others = [_short(r.get("display_name", "")) for r in results[1:4]]
+    if matched != query or others:
+        out["geocode_note"] = (
+            f"matched {matched!r}"
+            + (f" after simplifying {query!r}" if matched != query else "")
+            + (f"; other places share it: {', '.join(others)}" if others else "")
+            + ". Pass a state or country if another was meant"
+        )
     # Nominatim returns a NODE for peaks and landmarks, so the bbox collapses to
     # a point (Mount Rainier came back 0.0001 deg wide). A degenerate bbox makes
     # a useless imagery search and an empty 3D scene, so widen it and say so.
@@ -755,7 +817,10 @@ def compute_statistics(
     aoi_geojson: dict[str, Any] | None = None,
     bbox: list[float] | None = None,
 ) -> dict[str, Any]:
-    """Compute pixel statistics (min/max/mean/std/histogram) for a STAC item.
+    """Compute pixel statistics (min/max/mean/std/percentiles) for a STAC item.
+
+    Same shape clipped or not: {band_or_expression: {min, max, mean, std, ...}},
+    plus clipped_to when an AOI was applied and extent_note when it was not.
 
     expression is band math over asset names, e.g. "(nir-red)/(nir+red)" for
     NDVI on Sentinel-2 (Earth Search asset names; Planetary Computer uses band
@@ -805,14 +870,21 @@ def compute_statistics(
         return node
 
     out = _slim(stats)
-    if not aoi_geojson:
-        # Unclipped stats cover the WHOLE item. For a MODIS tile that is most of
-        # a continent, so the mean is real and meaningless — this is how a demo
-        # ships a confident wrong number. Say what was actually measured.
-        try:
-            item = _get_json(
-                f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
-            )
+    # Field test No.8: a clipped call came back as a GeoJSON Feature with the
+    # numbers under properties.statistics, an unclipped one as the bare band
+    # dict, and the first thing that consumed both broke on the difference.
+    # One shape: band -> stats, plus what it was clipped to
+    if isinstance(out, dict) and out.get("type") == "Feature":
+        out = dict((out.get("properties") or {}).get("statistics") or {})
+        out["clipped_to"] = bbox if bbox else "aoi_geojson"
+    try:
+        item = _get_json(
+            f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
+        )
+        if not aoi_geojson:
+            # Unclipped stats cover the WHOLE item. For a MODIS tile that is most of
+            # a continent, so the mean is real and meaningless — this is how a demo
+            # ships a confident wrong number. Say what was actually measured.
             bb = item.get("bbox")
             if bb:
                 w, h = bb[2] - bb[0], bb[3] - bb[1]
@@ -825,17 +897,18 @@ def compute_statistics(
                         else ". Pass aoi_geojson to clip to your subject"
                     )
                 )
-            # scale/offset live in STAC, so pass them through rather than
-            # teaching this tool any one collection's units (MODIS LST is
-            # 0.02 K per DN — the caller cannot guess that from raw values)
-            for a in item.get("assets", {}).values():
-                for band in a.get("raster:bands", []) or []:
-                    if band.get("scale") is not None or band.get("offset") is not None:
-                        out.setdefault("band_scaling", []).append(
-                            {k: band[k] for k in ("name", "scale", "offset", "unit") if k in band}
-                        )
-        except Exception:
-            pass
+        # scale/offset live in STAC, so pass them through rather than
+        # teaching this tool any one collection's units (MODIS LST is
+        # 0.02 K per DN — the caller cannot guess that from raw values).
+        # Both paths: a clipped number in the wrong unit is still wrong
+        for a in item.get("assets", {}).values():
+            for band in a.get("raster:bands", []) or []:
+                if band.get("scale") is not None or band.get("offset") is not None:
+                    out.setdefault("band_scaling", []).append(
+                        {k: band[k] for k in ("name", "scale", "offset", "unit") if k in band}
+                    )
+    except Exception:
+        pass
     return out
 
 
@@ -2355,6 +2428,11 @@ def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 
         # returns per-episode track points. EVENTS4APP is the current-events feed:
         # one Point per event, every type except drought
         data = _get_json("https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP")
+        # Field test No.8: the feed returned 100 events for days=7 and days=30
+        # alike. It is a current-events list, not a window, so the window is
+        # applied here and the return says how many the feed listed
+        cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+        listed = len(data.get("features") or [])
         for f in data.get("features", [])[:200]:
             p = f.get("properties", {})
             geom = f.get("geometry") or {}
@@ -2368,6 +2446,8 @@ def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 
                 w, s, e, n = bbox
                 if not (w <= coords[0] <= e and s <= coords[1] <= n):
                     continue
+            if (p.get("todate") or p.get("fromdate") or "9999") < cutoff:
+                continue
             out["gdacs"].append(
                 {
                     "title": p.get("name") or p.get("eventname"),
@@ -2379,6 +2459,7 @@ def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 
                     "link": (p.get("url") or {}).get("report"),
                 }
             )
+        out["gdacs_note"] = f"GDACS current-events feed listed {listed}; {len(out['gdacs'])} active within {days} days" + (" inside the bbox" if bbox else "")
     except Exception as e:
         out["gdacs_error"] = str(e)
     return out
