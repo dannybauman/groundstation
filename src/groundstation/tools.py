@@ -192,6 +192,10 @@ def find_full_coverage_set(
 _pc_mosaic_cache: dict[str, str] = {}
 
 
+PC_REGISTER_TIMEOUT_S = 15.0  # field test No.8: registration hung 30s three times and took the whole render down
+_PC_FALLBACKS: set[str] = set()  # items whose mosaic registration failed and got item tiles instead
+
+
 def _pc_mosaic_id(collection_id: str, item_id: str) -> str:
     # PC's registered-mosaic tiler is its canonical rendering path; registered
     # searches persist server-side, so map artifacts built on them stay shareable
@@ -200,6 +204,7 @@ def _pc_mosaic_id(collection_id: str, item_id: str) -> str:
         r = _client.post(
             "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/register",
             json={"collections": [collection_id], "ids": [item_id]},
+            timeout=PC_REGISTER_TIMEOUT_S,
         )
         r.raise_for_status()
         _pc_mosaic_cache[key] = r.json()["id"]
@@ -376,12 +381,14 @@ def geocode(query: str) -> dict[str, Any]:
     # Field test No.8: "the Ashburn data center corridor" simplified to "Ashburn"
     # and Nominatim's first hit was Ashburn, Georgia. The fallback took the top
     # of a list it never showed. Say what was matched and who else shares it
-    others = [_short(r.get("display_name", "")) for r in results[1:4]]
+    mine = _short(r0.get("display_name", ""))
+    others = list(dict.fromkeys(_short(r.get("display_name", "")) for r in results[1:]))
+    others = [o for o in others if o != mine][:3]
     if matched != query or others:
         out["geocode_note"] = (
             f"matched {matched!r}"
             + (f" after simplifying {query!r}" if matched != query else "")
-            + (f"; other places share it: {', '.join(others)}" if others else "")
+            + (f"; other places share it: {' / '.join(others)}" if others else "")
             + ". Pass a state or country if another was meant"
         )
     # Nominatim returns a NODE for peaks and landmarks, so the bbox collapses to
@@ -946,12 +953,19 @@ def tile_url_template(
         # item-tiles render empty for reprojection-heavy sources (MODIS
         # sinusoidal, GOES geostationary); the registered mosaic handles all
         # collections. Costs one registration POST per unique item (cached).
-        mid = _pc_mosaic_id(collection_id, item_id)
         params = [("collection", collection_id)] + [("assets", a) for a in assets]
         if rescale:
             params.append(("rescale", rescale))
         if colormap_name:
             params.append(("colormap_name", colormap_name))
+        try:
+            mid = _pc_mosaic_id(collection_id, item_id)
+        except httpx.HTTPError:
+            # A slow registration endpoint must not cost the whole map. Item
+            # tiles need no registration; the render says which path it took
+            _PC_FALLBACKS.add(item_id)
+            q = str(httpx.QueryParams(params + [("item", item_id)]))
+            return "https://planetarycomputer.microsoft.com/api/data/v1/item/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?" + q
         q = str(httpx.QueryParams(params))
         return (
             f"https://planetarycomputer.microsoft.com/api/data/v1/mosaic/{mid}"
@@ -1212,6 +1226,7 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
         ),
         "opacity": l.get("opacity", 1),
         **({"bounds": item_bounds} if item_bounds else {}),
+        **({"pc_fallback": True} if l.get("item_id") in _PC_FALLBACKS else {}),
     }
 
 
@@ -1639,6 +1654,12 @@ def render_map(
     }
     if stack_note:
         out["note"] = stack_note
+    fb = [l["name"] for l in resolved if l.get("pc_fallback")]
+    if fb:
+        out["note"] = (out["note"] + ". " if out.get("note") else "") + (
+            f"Planetary Computer mosaic registration timed out for {', '.join(fb)}; item tiles are used "
+            "instead, which may render empty for reprojection-heavy sources (MODIS, GOES)"
+        )
     # A map whose layers do not fill the view has a hole in it, and the hole is
     # invisible from the caller's side — the render "succeeded". Say it here, or
     # it ships in a demo. search_imagery already hands back full_coverage_set
