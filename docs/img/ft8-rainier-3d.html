@@ -1,0 +1,166 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mount Rainier — 3D</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js" integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj" crossorigin="anonymous"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V" crossorigin="anonymous">
+<style>
+  :root { --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --rule: #dedad4; --paper: #f7f4ef;
+    --k-place: #7a5c2e; --k-catalog: #1d4e8f; --k-data: #6b4c8f; --k-pixels: #CF3F02; --k-draw: #2a5c45;
+    --k-orbit: #4a4440; }
+  html, body, #map { margin: 0; height: 100%; }
+  #panel { position: absolute; top: 12px; left: 12px; z-index: 2; background: rgba(247,244,239,.96);
+    color: var(--ink); border-top: 3px solid var(--accent);
+    padding: 12px 16px; border-radius: 0 0 10px 10px; font: 14px/1.45 "Roboto", system-ui, sans-serif; max-width: 340px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+  #panel h1 { font: 700 15px/1.25 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 4px; }
+  #panel p { margin: 4px 0 8px; color: var(--mid); }
+  #panel label { display: block; margin: 6px 0 2px; color: var(--mid); }
+  #exaggeration { width: 100%; accent-color: var(--accent); }
+  #panel button { font: 13px "Roboto", system-ui, sans-serif; background: var(--accent); color: #fff; border: 0;
+    border-radius: 6px; padding: 6px 12px; margin: 6px 6px 0 0; cursor: pointer; }
+  #panel button:hover { background: var(--ink); }
+  #panel button:disabled { background: var(--mid); cursor: default; }
+  #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
+    color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
+  .clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack,
+  .clean .maplibregl-ctrl-top-right { display: none !important; }
+</style>
+<script>if (location.hash === "#clean") document.documentElement.classList.add("clean");</script>
+</head><body>
+<div id="map"></div>
+<div id="panel"><h1>Mount Rainier — 3D</h1><p></p>
+  <label>Terrain exaggeration: <span id="exagValue">1.6</span>&times;</label>
+  <input id="exaggeration" type="range" min="1" max="3" step="0.1" value="1.6">
+  <button id="flythrough">Fly through</button><button id="reset">Reset view</button>
+<button id="loadmore">Load full coverage (1 more)</button>
+<script>
+  const EXTRAS = [{"tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10TET_20260824_0_L2A&assets=visual", "opacity": 1, "bounds": [-123.000251, 46.856649, -121.532736, 47.853511]}];
+  document.getElementById("loadmore").addEventListener("click", (ev) => {
+    // the button is the progress indicator: tiles can arrive slowly from a
+    // busy tiler, and a silently vanishing button reads as "nothing happened"
+    const btn = ev.target;
+    btn.disabled = true;
+    btn.textContent = "Loading " + EXTRAS.length + " scene" + (EXTRAS.length > 1 ? "s" : "") + "…";
+    EXTRAS.forEach((e, i) => {
+      const id = "extra" + i;
+      map.addSource(id, { type: "raster", tiles: [e.tiles], tileSize: 256,
+        ...(e.bounds ? { bounds: e.bounds } : {}) });
+      // beneath the main drape: gap fillers must never cover the best scene
+      map.addLayer({ id, type: "raster", source: id,
+        paint: { "raster-opacity": e.opacity } }, "imagery");
+      if (e.bounds) {
+        // dashed outline = where pixels are about to land; cleared on idle
+        const [w, s, x, n] = e.bounds;
+        map.addLayer({ id: id + "-pending", type: "line",
+          source: { type: "geojson", data: { type: "Feature", properties: {}, geometry: {
+            type: "Polygon", coordinates: [[[w, s], [x, s], [x, n], [w, n], [w, s]]] } } },
+          paint: { "line-color": "#CF3F02", "line-width": 1.5, "line-dasharray": [2, 2] } });
+      }
+    });
+    map.once("idle", () => {
+      EXTRAS.forEach((e, i) => {
+        if (map.getLayer("extra" + i + "-pending")) map.removeLayer("extra" + i + "-pending");
+      });
+      btn.remove();
+    });
+  });
+</script>
+
+</div>
+<div id="credit">groundstation · Development Seed labs · STAC + TiTiler · terrain: AWS Terrarium (open)</div>
+<button id="stack-toggle" aria-expanded="false">Stack</button>
+<aside id="stack" aria-label="Technology stack">
+  <h2>The stack behind this map</h2>
+  <p class="stack-sub">12 components on screen · 1 built by Development Seed · islands: Cloud Native Geospatial, Data in the Browser</p>
+  <p class="stack-sub">the pipeline in order · tap any entry for what it is and what it talks to</p>
+  <div class="stack-group">1 · place</div><details class="stack-entry"><summary><span class="dot k-place"></span><span class="s-head"><span class="stack-name">Nominatim<span class="role">uses</span></span><span class="inst">the fallback for towns, landmarks and phrases Gazet&#x27;s index does not carry, plus reverse geocoding for map labels</span></span></summary><div class="more"><p>OpenStreetMap&#x27;s geocoder</p><div class="spk">speaks to OpenStreetMap</div><a href="https://nominatim.openstreetmap.org" target="_blank" rel="noopener">nominatim.openstreetmap.org</a></div></details><div class="stack-group">2 · catalog</div><details class="stack-entry"><summary><span class="dot k-catalog"></span><span class="s-head"><span class="stack-name">Earth Search<span class="role">uses</span></span><span class="inst">source of sentinel-2-l2a</span></span></summary><div class="more"><p>Element 84&#x27;s open STAC catalog of Sentinel-2, Sentinel-1, NAIP, and Copernicus DEM on AWS</p><div class="spk">speaks to STAC, stac-server, Cloud object storage</div><a href="https://earth-search.aws.element84.com/v1" target="_blank" rel="noopener">earth-search.aws.element84.com/v1</a></div></details><details class="stack-entry"><summary><span class="dot k-catalog"></span><span class="s-head"><span class="stack-name">STAC<span class="role">contributes</span><span class="island" title="Development Seed island">cng</span></span><span class="inst">found sentinel-2-l2a</span></span></summary><div class="more"><p>the open catalog spec that makes satellite archives searchable the same way everywhere</p><div class="spk">speaks to Earth Search, NASA VEDA, Planetary Computer, stac-fastapi, stac-server</div><a href="https://stacspec.org" target="_blank" rel="noopener">stacspec.org</a></div></details><details class="stack-entry"><summary><span class="dot k-catalog"></span><span class="s-head"><span class="stack-name">stac-server<span class="role">uses</span></span><span class="inst">the search endpoint behind every Earth Search query here</span></span></summary><div class="more"><p>Element 84&#x27;s serverless STAC API, the one Earth Search runs on</p><div class="spk">speaks to STAC, Earth Search</div><a href="https://github.com/stac-utils/stac-server" target="_blank" rel="noopener">github.com/stac-utils/stac-server</a></div></details><div class="stack-group">3 · data</div><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">AWS Terrarium terrain<span class="role">uses</span></span><span class="inst">the raster-dem source behind 3D fly-throughs</span></span></summary><div class="more"><p>free, keyless global elevation tiles (Mapzen legacy, hosted on AWS Open Data)</p><div class="spk">speaks to MapLibre GL, Cloud object storage</div><a href="https://registry.opendata.aws/terrain-tiles" target="_blank" rel="noopener">registry.opendata.aws/terrain-tiles</a></div></details><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">Copernicus Sentinel<span class="role">uses</span></span><span class="inst">the scenes behind every sentinel-2-l2a and sentinel-1-grd layer</span></span></summary><div class="more"><p>ESA&#x27;s Sentinel-1 radar and Sentinel-2 optical missions, free and open, revisiting every few days</p><div class="spk">speaks to Earth Search</div><a href="https://dataspace.copernicus.eu" target="_blank" rel="noopener">dataspace.copernicus.eu</a></div></details><details class="stack-entry"><summary><span class="dot k-data"></span><span class="s-head"><span class="stack-name">Open-Meteo<span class="role">uses</span></span><span class="inst">past and forecast weather for briefs and conditions</span></span></summary><div class="more"><p>open weather API, no key required</p><div class="spk">speaks to NASA EONET</div><a href="https://open-meteo.com" target="_blank" rel="noopener">open-meteo.com</a></div></details><div class="stack-group">4 · pixels</div><details class="stack-entry"><summary><span class="dot k-pixels"></span><span class="s-head"><span class="stack-name">TiTiler<span class="role ds">created</span><span class="island" title="Development Seed island">cng</span></span><span class="inst">serving sentinel-2-l2a via titiler.xyz</span></span></summary><div class="more"><p>dynamic tile server — turns COGs into web map tiles on the fly, band math included</p><div class="spk">speaks to STAC, COG + HTTP range requests, rio-tiler</div><a href="https://github.com/developmentseed/titiler" target="_blank" rel="noopener">github.com/developmentseed/titiler</a></div></details><details class="stack-entry"><summary><span class="dot k-pixels"></span><span class="s-head"><span class="stack-name">Cloud object storage<span class="role">uses</span></span><span class="inst">streaming from AWS S3 (sentinel-cogs, terrain tiles)</span></span></summary><div class="more"><p>the cloud buckets the pixels actually live in</p><div class="spk">speaks to COG + HTTP range requests</div><a href="https://registry.opendata.aws" target="_blank" rel="noopener">registry.opendata.aws</a></div></details><details class="stack-entry"><summary><span class="dot k-pixels"></span><span class="s-head"><span class="stack-name">COG + HTTP range requests<span class="role">contributes</span><span class="island" title="Development Seed island">cng</span></span><span class="inst">streaming only the bytes each tile needs</span></span></summary><div class="more"><p>Cloud-Optimized GeoTIFF — imagery you can read in pieces, so nobody downloads a whole scene</p><div class="spk">speaks to Cloud object storage, TiTiler, rio-tiler</div><a href="https://cogeo.org" target="_blank" rel="noopener">cogeo.org</a></div></details><div class="stack-group">5 · draw</div><details class="stack-entry"><summary><span class="dot k-draw"></span><span class="s-head"><span class="stack-name">MapLibre GL<span class="role">uses</span><span class="island" title="Development Seed island">dib</span></span><span class="inst">draws every interactive artifact — layers, swipe compares, 3D terrain</span></span></summary><div class="more"><p>the open-source WebGL map renderer</p><div class="spk">speaks to TiTiler, OpenFreeMap, AWS Terrarium terrain</div><a href="https://maplibre.org" target="_blank" rel="noopener">maplibre.org</a></div></details><details class="stack-entry"><summary><span class="dot k-draw"></span><span class="s-head"><span class="stack-name">OpenStreetMap<span class="role">uses</span></span><span class="inst">the data under every basemap here, the raster tiles under 3D scenes, and the gazetteer behind Nominatim</span></span></summary><div class="more"><p>the volunteer map of the world</p><div class="spk">speaks to OpenFreeMap, Nominatim</div><a href="https://www.openstreetmap.org" target="_blank" rel="noopener">www.openstreetmap.org</a></div></details>
+</aside>
+<style>
+  #stack-toggle { position: absolute; top: 12px; right: 52px; z-index: 4; font: 12px/1 "Roboto", system-ui, sans-serif;
+    letter-spacing: .08em; text-transform: uppercase; background: var(--paper); color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+  #stack-toggle:hover, #stack-toggle[aria-expanded="true"] { background: var(--accent); color: #fff; }
+  #stack { position: absolute; top: 0; right: 0; bottom: 40px; width: 330px; max-width: 88vw; z-index: 3;
+    background: var(--paper); color: var(--ink); font: 13px/1.5 "Roboto", system-ui, sans-serif;
+    border-left: 3px solid var(--accent); padding: 46px 16px 16px; overflow-y: auto;
+    transform: translateX(105%); transition: transform .22s ease; box-shadow: -2px 0 12px rgba(0,0,0,.12); }
+  #stack.open { transform: none; }
+  @media (prefers-reduced-motion: reduce) { #stack, .stack-entry summary::after { transition: none; } }
+  #stack h2 { font: 700 15px/1.2 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 2px; }
+  #stack .stack-sub { margin: 0 0 12px; color: var(--mid); font-size: 11.5px; font-style: italic; }
+  .stack-group { font: 700 10px/1 "Roboto Mono", monospace; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--mid); border-bottom: 1px solid var(--rule); padding-bottom: 4px; margin: 14px 0 8px; }
+  .stack-entry { margin: 0 0 9px; }
+  .stack-entry summary { display: flex; gap: 8px; cursor: pointer; list-style: none; }
+  .stack-entry summary::-webkit-details-marker { display: none; }
+  .stack-entry summary::after { content: "▸"; flex: none; margin-left: auto; color: var(--mid);
+    font-size: 10px; align-self: center; transition: transform .15s ease; }
+  .stack-entry[open] summary::after { transform: rotate(90deg); }
+  .stack-entry .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
+  .dot.k-place { background: var(--k-place); } .dot.k-catalog { background: var(--k-catalog); }
+  .dot.k-data { background: var(--k-data); } .dot.k-pixels { background: var(--k-pixels); }
+  .dot.k-draw { background: var(--k-draw); } .dot.k-orbit { background: var(--k-orbit); }
+  .stack-name .island { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--accent); border: 1px dashed var(--accent); border-radius: 3px; padding: 2px 4px; margin-left: 4px;
+    vertical-align: 1px; }
+  .s-head { display: flex; flex-direction: column; min-width: 0; }
+  .stack-name { font-weight: 600; }
+  .stack-name .role { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--mid); border: 1px solid var(--rule); border-radius: 3px; padding: 2px 4px; margin-left: 6px;
+    vertical-align: 1px; }
+  .stack-name .role.ds { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .stack-entry .inst { font: 11px/1.5 "Roboto Mono", monospace; color: var(--mid); }
+  .stack-entry .more { margin: 3px 0 2px 16px; }
+  .stack-entry .more p { margin: 2px 0; color: var(--ink); }
+  .stack-entry .spk { font: 10.5px/1.5 "Roboto Mono", monospace; color: var(--mid); margin: 2px 0; }
+  .stack-entry a { color: var(--mid); font-size: 10.5px; text-decoration: none; border-bottom: 1px solid var(--rule); }
+  .stack-entry a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+</style>
+<script>
+  const _sb = document.getElementById("stack-toggle"), _sp = document.getElementById("stack");
+  _sb.addEventListener("click", () => {
+    const open = _sp.classList.toggle("open");
+    _sb.setAttribute("aria-expanded", String(open));
+  });
+</script>
+
+<script>
+const STYLE = {"version": 8, "sources": {"basemap": {"type": "raster", "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], "tileSize": 256, "attribution": "&copy; OpenStreetMap contributors"}, "imagery": {"type": "raster", "tiles": ["https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10TES_20260824_0_L2A&assets=visual"], "tileSize": 256, "bounds": [-123.00025, 45.956779, -121.557505, 46.9537]}, "dem": {"type": "raster-dem", "tiles": ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"], "tileSize": 256, "encoding": "terrarium", "maxzoom": 15}}, "layers": [{"id": "basemap", "type": "raster", "source": "basemap"}, {"id": "imagery", "type": "raster", "source": "imagery", "paint": {"raster-opacity": 1}}]};
+const BBOX = [-121.9075158, 46.7022029, -121.60751579999999, 47.0022029];
+const CENTER = [(BBOX[0] + BBOX[2]) / 2, (BBOX[1] + BBOX[3]) / 2];
+const BOUNDS = [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]];
+let exaggeration = 1.6;
+
+const map = new maplibregl.Map({ container: "map", style: STYLE, bounds: BOUNDS,
+  fitBoundsOptions: { padding: 40 }, maxPitch: 85 });
+window.gsMaps = [map];  // exposed for scripted screenshots and checks
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
+map.on("load", () => {
+  map.setTerrain({ source: "dem", exaggeration });
+  map.easeTo({ center: CENTER, pitch: 60, duration: 0 });
+});
+
+const slider = document.getElementById("exaggeration");
+slider.addEventListener("input", () => {
+  exaggeration = parseFloat(slider.value);
+  document.getElementById("exagValue").textContent = exaggeration.toFixed(1);
+  map.setTerrain({ source: "dem", exaggeration });
+});
+
+// orbit by nudging bearing each frame — easeTo/flyTo per step fights the
+// user's own camera input and stutters on tile loads
+const btn = document.getElementById("flythrough");
+let frame = null;
+const step = () => { map.setBearing(map.getBearing() + 0.08); frame = requestAnimationFrame(step); };
+const stop = () => { if (frame) cancelAnimationFrame(frame); frame = null; btn.textContent = "Fly through"; };
+btn.addEventListener("click", () => {
+  if (frame) return stop();
+  map.easeTo({ center: CENTER, pitch: 60, duration: 1500 });
+  btn.textContent = "Stop";
+  frame = requestAnimationFrame(step);
+});
+document.getElementById("reset").addEventListener("click", () => {
+  stop();
+  map.fitBounds(BOUNDS, { padding: 40, pitch: 60, bearing: 0 });
+});
+</script></body></html>

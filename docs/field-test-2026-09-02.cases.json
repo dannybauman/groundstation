@@ -1,0 +1,288 @@
+{
+  "title": "groundstation field test №8 — the variety edition, run on two PRs before they merged",
+  "heading": "THE FIELD TEST №8",
+  "sub": "groundstation · 20 prompts · 13 fixes mid-test · 5 things to build next · September 2, 2026 · Development Seed labs",
+  "lede": "This edition ran on PRs #31 and #32 before either merged, in-process on the branch rather than through the MCP server (the connected server was still 0.8.0), to find what the checks cannot. Variety on purpose: <b>our own geocoder answering for the first time</b>, the recommendation and the empty-search record from the tool-honesty work, a tropical storm on the Gulf coast on the day, radar through cloud, a dry-season NDWI comparison, a 3D drape, and VEDA burn severity with eoAPI on the panel. Twenty prompts in two sittings. Thirteen things broke on a first pass and were fixed, checked and re-run before the page was rebuilt; each card says so. <b>Round 6 is the part this edition was for</b>: five things the run says to build next, and which DevSeed tool already does most of each. Data blocks are verbatim, the prose below them is our reading.",
+  "stats": [
+    {
+      "value": "20/20",
+      "label": "prompts answered against live data"
+    },
+    {
+      "value": "10 of 19",
+      "label": "geocodes answered by Gazet, the first edition where it fired"
+    },
+    {
+      "value": "13",
+      "label": "fixes shipped mid-test, each pinned by a check"
+    },
+    {
+      "value": "5",
+      "label": "things worth building next, in Round 6"
+    }
+  ],
+  "rounds": [
+    {
+      "name": "Round 1 — our own geocoder, answering for the first time (PR #32)",
+      "cases": [
+        {
+          "tag": "geocode",
+          "who": "roadshow demo",
+          "prompt": "Where is Chelan County, and what is the freshest usable Sentinel-2 look at the whole county?",
+          "returned": "geocode(\"Chelan County\")\n  source: gazet   name: Chelan County (US, county)\n  bbox: [-121.181, 47.261, -119.860, 48.551]\n\nsearch_imagery(sentinel-2-l2a, 20 days, cloud ≤40, limit 10)\n  recommended: S2C_10UFU_20260824_1_L2A   cloud 0.6   covers_aoi_pct 48.9\n  reason: \"0.6% cloud but covers 48.9% of the area; the clearest scene (0.0% cloud) covers 17.1%.\n           No single scene covers this area and no same-day set does either within these 10 results;\n           raise limit or relax max_cloud_cover to find one\"\n\nsearch_imagery(sentinel-2-l2a, 30 days, cloud ≤60, limit 40)\n  full_coverage_set: 2026-08-24 · 10UFU + 10TFT + 10UGU + 10TGT + 10UGU   (5 scenes)\nrender_map(coverage_set, stack_layer)   →   state.coverage_pct 100.0, no coverage_note\n  stack panel: Earth Search · TiTiler · Gazet",
+          "answer": "For the first time in eight field tests the place came from <b>our own index</b>: Gazet returned the county's real boundary extent, not a Nominatim point or a guess. That extent is also what made the second half honest. A county is bigger than any Sentinel-2 scene, and the first search said so in the return rather than leaving a 49% scene to be rendered as the answer. Forty results and a looser cloud filter found the same-day set, and the map covers the whole county with the panel crediting the geocoder that actually answered.",
+          "artifact": "img/ft8-chelan-coverage-set.html",
+          "learning": "<b>Pass 1 rendered the 49% scene.</b> The map carried a coverage_note, but the recommendation ended at \"covers 17.1%\" and said nothing about why no set existed. The sentence after it was added mid-test. The bigger lesson is in Round 4: over a county the answer is a set, not a scene, and the client-side bbox set is starved by limit and by cloud.",
+          "shows": "geocode source: gazet · recommended with the starved-set sentence · full_coverage_set · the panel credits one geocoder"
+        },
+        {
+          "tag": "geocode",
+          "who": "someone who typed one word",
+          "prompt": "Show me Loja.",
+          "returned": "geocode(\"Loja\")\n  source: gazet   name: Loja Province (EC, region)   bbox: [-80.485, -4.749, -79.101, -3.330]\n  geocode_note: \"2 places match 'Loja' equally well; using Loja Province (EC, region) at 4.0S 79.8W,\n                 not Loja Canton (EC, county) at 4.1S 79.3W. Pass the fuller name if another was meant\"\n\ngeocode(\"Loja Canton\")\n  source: gazet   bbox: [-79.546, -4.511, -79.101, -3.673]\nsearch_imagery(sentinel-2-l2a, 45 days, cloud ≤60, limit 20)\n  recommended: S2C_17MPR_20260828_0_L2A   cloud 19.1   covers_aoi_pct 98.2\n  reason: \"19.1% cloud, covers 98.2% of the area, and newest of 3 near-equal scenes;\n           the clearest (18.7% cloud) is from 2026-08-03\"\n  full_coverage_set: 2026-08-28 · 17MPR + 17MQR\nrender_postcard(bbox = canton, fill_item_ids = [17MQR])   →   mosaic_scenes 2",
+          "answer": "Two real Lojas score identically, and the tool says which one it took and where the other is. We took its advice: the province is 150 km across and the best scene saw a quarter of it, the canton is one scene and a sliver. The card is the recommended scene framed to the canton's Gazet extent, with the same-day neighbour filling the sliver as a rio-tiler mosaic.",
+          "artifact": "img/ft8-loja-canton-postcard.html",
+          "learning": "<b>Two things were wrong on pass 1, both ours.</b> We ignored our own note and made a card of a 24% scene. And the recommender took an Aug 3 scene over Aug 28 for 0.4 points of cloud. Coverage and cloud now have 5-point tie bands, the newest scene wins inside them, and the reason says when freshness decided.",
+          "shows": "geocode_note on ties, with positions · recommended with tie bands · postcard mosaic via fill_item_ids"
+        },
+        {
+          "tag": "live event",
+          "who": "insurance analyst, Sep 2",
+          "prompt": "Harris County, with Edouard coming ashore: conditions right now, when radar next sees it, and put the storm on the latest radar.",
+          "returned": "geocode(\"Harris County\")\n  source: gazet   bbox: [-95.961, 29.497, -94.908, 30.171]\n  geocode_note: \"2 places match 'Harris County' equally well; using Harris County (US, county) at 29.8N 95.4W,\n                 not Harris County (US, county) at 32.7N 84.9W. Pass the fuller name if another was meant\"\n\nconditions_brief(\"Harris County\")\n  signals: \"last rain ≥1mm was 0 days ago\"\n           \"peak wind today 20 km/h from the SW\"\n           \"2 active storms within ~150 km\"\n  events:  EONET  Tropical Storm Edouard        2026-09-02 09:00Z   (-95.0, 30.8)\n           GDACS  Tropical Cyclone EDOUARD-26   alert Green         (-94.6, 30.5)\n  latest_look: S2B_15RTN_20260830_0_L2A   cloud 7.1   covers_aoi_pct 34.9\n  next_looks:  SENTINEL-2C   2026-09-04 17:05 UTC   optical   (144 km off track)\n               SENTINEL-1C   2026-09-05 12:38 UTC   radar, sees through cloud\n  note: \"current conditions from live sources — not a risk model, not a prediction\"\n\nsearch_imagery(sentinel-1-grd, 12 days)\n  S1D_IW_GRDH_1SDV_20260901T122224…   2026-09-01   descending   covers_aoi_pct 100\nrender_map(S1 vv + storm positions, stack_layer)   →   coverage_pct 100.0\n  stack panel: Earth Search · TiTiler · Gazet · NASA EONET · GDACS · eo-predictor",
+          "answer": "The county under a tropical storm on the day, from live feeds. The conditions brief refuses the inference the numbers invite: rain today, 20 km/h wind, two storm records within 150 km, and a note that this is not a risk model. Optical is useless in this weather, so the map is yesterday's Sentinel-1 pass with both storm positions on it, and the next radar look is Friday.",
+          "artifact": "img/ft8-harris-s1-edouard.html",
+          "learning": "<b>The tie note named two places identically.</b> Texas and Georgia both have a Harris County and both read \"(US, county)\", so pass 1 said \"using Harris County, not Harris County\". Each tie now carries its centre. Which one got picked was Gazet's row order, which happened to be Texas: without the position the caller could not have known. Also: the Sentinel-2 pass on Sep 4 sits 144 km off track, in the brief and not in next_pass from a point 1 km away. The swath edge is the edge.",
+          "shows": "conditions_brief · active_events, GDACS on the current-events feed since Aug 24 · Sentinel-1 orbit_state · next_pass · geocode_note with positions"
+        },
+        {
+          "tag": "geocode",
+          "who": "the field test №4 prompt, again",
+          "prompt": "Latest clear look at the Salinas Valley, with any active fires.",
+          "returned": "geocode(\"Salinas Valley\")              →   nominatim   Salinas, Nueva Vizcaya, Cagayan Valley, Philippines\ngeocode(\"Salinas Valley California\")   →   nominatim   Salinas Court, Indian Meadows, Simi Valley, Ventura County\n                                            bbox_note: \"geocoder returned a point, not an extent — widened to a 0.3 deg box…\"\ngeocode(\"Monterey County\")             →   gazet       Monterey County (US, county)   bbox: [-121.979, 35.789, -120.214, 36.919]\n\nactive_events(bbox, 14 days)   →   EONET: Wildfire Plaskett, Monterey, California (2026-08-26)\nsearch_imagery(sentinel-2-l2a, 30 days, cloud ≤40, limit 40)\n  recommended: S2B_10SFF_20260826_0_L2A   cloud 0.2   covers_aoi_pct 55.3\n  reason: \"0.2% cloud but covers 55.3% of the area; the clearest scene (0.0% cloud) covers 2.4%.\n           No single scene covers this area and no same-day set does either within these 40 results;\n           raise limit or relax max_cloud_cover to find one\"\nrender_map(scene + wildfires, stack_layer)   →   coverage_pct 55.3\n  coverage_note: \"layers cover 55% of the requested view, so the rest renders blank. …\"",
+          "answer": "Gazet's best match for \"Salinas Valley\" was Salinas, a county in Mexico, at 0.90, and the gate held: below 0.95 the tool does not answer. Nominatim's two answers are the same two wrong ones field test №4 found, a town in the Philippines and a residential street in Simi Valley, both with confident boxes. \"Monterey County\" is a name our index knows, so it answered with the real extent, the Plaskett fire showed up inside it, and the map says twice that it covers 55%: once in the coverage note and once in the recommendation's reason.",
+          "artifact": "img/ft8-monterey-plaskett.html",
+          "learning": "<b>The gate is the whole safety, and it only stops our own near misses.</b> The failures that matter here are Nominatim's, and they stand. The fix on this card was knowing which admin unit to ask for. A valley is a physical feature Gazet's Natural Earth layer does not carry at this scale, and a coastal county with a marine layer had no same-day full set in 30 days at 40% cloud. Round 4 has both.",
+          "shows": "GAZET_MIN_SIMILARITY · Nominatim fallback · active_events on the map · coverage_note below PARTIAL_COVERAGE_PCT"
+        }
+      ]
+    },
+    {
+      "name": "Round 2 — what a tool says when the list would lie (PR #31)",
+      "cases": [
+        {
+          "tag": "absence",
+          "who": "dataset discovery",
+          "prompt": "Do we have any Himawari data? And anything geostationary at all?",
+          "returned": "search_datasets(\"himawari\")\n  [{\"searched\": [\"earth-search\", \"veda\", \"planetary-computer\"],\n    \"note\": \"nothing matched 'himawari' in 3 catalog(s): earth-search, veda, planetary-computer.\n             Absence here does not mean the data does not exist, only that these catalogs do not carry it under those words\"}]\n\nsearch_datasets(\"himawari\", catalog=\"veda\")   →   searched: [\"veda\"]\n\nsearch_datasets(\"goes\")\n  veda                 blizzard-goes-bombogenesis   GOES Imagery - Bombogenesis (Select Event)\n  planetary-computer   goes-cmi                     GOES-R Cloud & Moisture Imagery\n  planetary-computer   goes-glm                     GOES-R Lightning Detection",
+          "answer": "An empty list is the return most likely to become \"that data does not exist\" in prose, and field test №7 noted the honesty lived in a docstring the model may or may not read. Now the empty result is a record: which catalogs were searched and what absence means. A matching keyword returns exactly what it did before, so nothing downstream moved. Himawari is real, sits in NOAA and AWS Open Data, and is not in these three catalogs. GOES is.",
+          "shows": "search_datasets empty-result record · unchanged shape on a hit"
+        },
+        {
+          "tag": "ranking",
+          "who": "the field test №7 prompt, three weeks on",
+          "prompt": "A clear, useful scene of Chilika Lake.",
+          "returned": "geocode(\"Chilika Lake\")   →   nominatim   (no Gazet row above the gate for a lagoon)\nsearch_imagery(sentinel-2-l2a, 45 days, cloud ≤60)   count 3\n  S2C_45QUB_20260819_0_L2A   cloud 25.8   covers_aoi_pct 97.9\n  S2C_45QUC_20260819_0_L2A   cloud 54.8   covers_aoi_pct 24.2\n  S2C_45QUB_20260809_0_L2A   cloud 51.7   covers_aoi_pct 97.9\n  recommended: S2C_45QUB_20260819_0_L2A\n  reason: \"clearest (25.8% cloud) and best-covering (97.9% of the area), not a tradeoff\"\nrender_map(recommended, stack_layer)   →   state.coverage_pct 97.9, no coverage_note\n  stack panel: Earth Search · TiTiler · Nominatim",
+          "answer": "Three weeks ago this prompt was the trap card: the two cleanest scenes saw a fifth of the lagoon. Today the monsoon left three scenes in 45 days, the recommendation is the same tile as before, and the tool says plainly that it is not a tradeoff this time. The 51.7%-cloud scene that produced №7's backwards delta is still in the list, ranked where it belongs. At 97.9% the map is under the 99 that counts as full and above the 95 that earns a note, so it stays quiet. That gap is the named constant doing its job.",
+          "artifact": "img/ft8-chilika-recommended.html",
+          "shows": "recommended, not-a-tradeoff form · PARTIAL_COVERAGE_PCT vs FULL_COVERAGE_PCT · the panel credits Nominatim only"
+        },
+        {
+          "tag": "coverage",
+          "who": "the field test №2 prompt",
+          "prompt": "The most recent image that covers the entire city of Calgary.",
+          "returned": "geocode(\"Calgary\")   →   gazet   Calgary (CA, county)   bbox: [-114.316, 50.843, -113.860, 51.213]\n\nsearch_imagery(sentinel-2-l2a, 30 days, cloud ≤30, limit 12)\n  newest: S2C_11UPS_20260828_0_L2A   cloud 29.0   covers_aoi_pct 73.0\n  full_coverage_set: (none)\n  recommended.reason: \"1.5% cloud but covers 71.2% of the area; the clearest scene (0.1% cloud) covers 3.6%.\n                       No single scene covers this area and no same-day set does either within these 12 results;\n                       raise limit or relax max_cloud_cover to find one\"\nrender_map(newest alone)   →   coverage_pct 73.0\n  coverage_note: \"layers cover 73% of the requested view, so the rest renders blank. Pass the whole full_coverage_set…\"\n\nsearch_imagery(sentinel-2-l2a, 30 days, cloud ≤70, limit 20)\n  full_coverage_set: 2026-08-28 · 11UPS (cloud 29.0, 73.0%) + 11UQS (cloud 48.0, 71.2%)\nrender_map(coverage_set, stack_layer)   →   coverage_pct 100.0, no coverage_note",
+          "answer": "Calgary straddles two UTM zones, so no single scene ever covers it, which is what made this the auto-mosaic case in July. Under a 30% cloud filter there was no same-day pair in 30 days, and the tool said so in the recommendation. Relaxing the filter found the Aug 28 pair, and the honest price of whole-city coverage that day is a 48%-cloud eastern tile. The newest-alone map exists too, with its note. The recommendation itself preferred a 1.5% cloud scene at 71% over the 29% cloud scene at 73%, which is the tie band choosing cloud when coverage is near-equal.",
+          "artifact": "img/ft8-calgary-coverage-set.html",
+          "learning": "<b>The coverage set is only as good as the cloud filter.</b> The set is built from the results the filter let through, so a strict filter can starve it for weeks over a two-zone city. An agent's move is to relax the filter for the set and keep it strict for the scene. Round 4 argues the set should be found server-side instead.",
+          "shows": "coverage_note · starved-set sentence · full_coverage_set under a relaxed filter · tie bands preferring cloud at near-equal coverage"
+        }
+      ]
+    },
+    {
+      "name": "Round 3 — the rest of the stack, on the day",
+      "cases": [
+        {
+          "tag": "change",
+          "who": "hydrology, dry season",
+          "prompt": "How much surface water is on the Barotse Floodplain now versus June? NDWI, numbers and a swipe.",
+          "returned": "geocode(\"Barotse Floodplain\")   →   nominatim   Barotse Floodplain, Western Province, Zambia\n\ncompare_dates(bbox, June 2026 vs last 30 days, (green-nir)/(green+nir), cloud ≤30, stack_layer)\n  tile:    34LGJ\n  before:  S2B_34LGJ_20260628_0_L2A   2026-06-28   cloud 0.0   mean -0.4979\n  after:   S2A_34LGJ_20260827_1_L2A   2026-08-27   cloud 0.0   mean -0.4170\n  delta:   +0.0809      delta_pct: +16.2\n  caveat:  (none)\n  stack panel: Earth Search · TiTiler · Nominatim\n\nactive_events(bbox, pad 2°, 14 days)   →   0 EONET, 0 GDACS",
+          "answer": "Two cloud-free scenes on the same tile, two months apart, and no caveat fires: the baseline is nowhere near zero and neither scene is cloudy. The number is clean. It is also the answer to a question nobody asked. The mean is over MGRS tile 34LGJ, a hundred kilometres square, not the floodplain, and NDWI rising from -0.50 toward -0.42 in the Zambian dry season is vegetation browning as its near-infrared drops, not water arriving. Read naively as \"water up 16%\" it is exactly backwards, and the caveat convention is silent because every condition it checks is fine.",
+          "artifact": "img/ft8-barotse-ndwi.html",
+          "learning": "<b>Clean caveats, wrong question.</b> This is the live evidence for the one honesty epic still unshipped: clip statistics to the AOI by default. A tile-wide mean is stable and answers the tile, a clipped mean answers the place. That is a product call, and this card is what it costs to leave it open.",
+          "shows": "compare_dates with an empty caveat list · same-tile matching · the Epic 4 question"
+        },
+        {
+          "tag": "terrain",
+          "who": "the fly-through ask",
+          "prompt": "Fly me over Mount Rainier and tell me what the weather is up there.",
+          "returned": "geocode(\"Mount Rainier\")   →   nominatim, a point\n  bbox_note: \"geocoder returned a point, not an extent — widened to a 0.3 deg box around it. Pass your own bbox if the subject is bigger\"\n\nweather_summary(46.852, -121.758)\n  grid_cell: 4337 m at (46.841, -121.777)\n  elevation_note: \"readings are for a grid cell at 4337 m … say so if the place spans a big elevation range, the valley is warmer than this\"\n\nsearch_imagery(sentinel-2-l2a, 30 days, cloud ≤25)\n  recommended: S2C_10TES_20260824_0_L2A   cloud 12.8   covers_aoi_pct 83.8\n  reason: \"12.8% cloud but covers 83.8% of the area; the clearest scene (0.1% cloud) covers 15.2%\"\n\nrender_map_3d(recommended, extra_layers = [10TET same day], exaggeration 1.6, stack_layer)\n  state: terrain true · coverage_pct 83.8 · coverage_pct_loaded 100.0 · 10TET deferred\n  coverage_note: \"the drape covers 84% of the view on load, the rest is terrain with no imagery\n                  until someone clicks Load full coverage, which takes it to 100%\"",
+          "answer": "A peak is a point to Nominatim, so the tool widens the box and says it did. The weather comes from a grid cell at 4,337 m and the tool says that too, because a summit reading quoted for Paradise would be wrong by a season. The 3D state reports coverage twice, on load and after the button, in 3D terms: uncovered here is terrain without imagery, not blank.",
+          "artifact": "img/ft8-rainier-3d.html",
+          "learning": "Gazet did not answer for a mountain. Its physical layer is Natural Earth 10m, which carries ranges and islands, not peaks. Nominatim's point plus the widening note is the right fallback, and the panel credits Nominatim alone.",
+          "shows": "bbox_note · weather elevation_note · render_map_3d state with deferred layers"
+        },
+        {
+          "tag": "our stack",
+          "who": "what does NASA have on it",
+          "prompt": "What does VEDA have on Caldor burn severity? Put it over this month's imagery and show what served it.",
+          "returned": "search_datasets(\"burn severity\", catalog=\"veda\")\n  caldor-fire-behavior · caldor-fire-burn-severity · mtbs-burn-severity\ndescribe_collection(veda, caldor-fire-burn-severity)   →   renders: none\nsearch_imagery(veda, caldor-fire-burn-severity, Eldorado NF)\n  bs_to_save   2021-08-15   covers_aoi_pct 36.5\n  recommended.reason: \"best-covering scene at 36.5% of the area; this collection reports no cloud cover\"\nitem JSON, assets.cog_default.raster:bands[0]:   statistics min 1, max 4   nodata -100   →   rescale \"1,4\"\n\nsearch_imagery(earth-search, sentinel-2-l2a, 30 days, cloud ≤20)\n  full_coverage_set: 2026-08-31 · 10SGH + 10SGJ\nrender_map(coverage_set + severity at rescale 1,4 inferno_r, opacity 0.75, stack_layer)   →   coverage_pct 100.0\n  stack panel: Earth Search · NASA VEDA · eoAPI · TiTiler · Nominatim",
+          "answer": "The severity layer over this week's imagery, with the panel saying eoAPI served it, because VEDA's catalog and raster APIs are an eoAPI deployment. The recommendation handles a collection with no cloud field without inventing one. The rescale that makes the layer visible, classes 1 to 4, was not in a renders block. It was in the asset's raster:bands statistics, three levels down in the item.",
+          "artifact": "img/ft8-caldor-severity.html",
+          "learning": "<b>The instance knowledge was there and the tool did not surface it.</b> search_imagery's compact item carries assets by name, not their raster:bands, so an agent has to fetch the item JSON to find the rescale. That is the labs#496 \"instance knowledge\" layer showing up as a round trip. Round 4.",
+          "shows": "VEDA on eoAPI, credited · recommended on a collection with no cloud cover · rescale from raster:bands"
+        }
+      ]
+    },
+    {
+      "name": "Round 4 — data DevSeed does not host, and the handoffs",
+      "cases": [
+        {
+          "tag": "geocode",
+          "who": "the field test №1 prompt, a phrase",
+          "prompt": "Newest NAIP aerial imagery of the Ashburn data center corridor, with land cover as a toggle.",
+          "returned": "geocode(\"the Ashburn data center corridor\")   →   nominatim   Ashburn, Turner County, Georgia\n  geocode_note: \"matched 'Ashburn' after simplifying 'the Ashburn data center corridor'; other places share it:\n                 Ashburn, Virginia, United States / Ashburn, Illinois, United States / Ashburn, Missouri, United States.\n                 Pass a state or country if another was meant\"\ngeocode(\"Ashburn, Virginia\")   →   nominatim   Ashburn, Loudoun County, Virginia   bbox: [-77.523, 38.988, -77.431, 39.071]\n\nsearch_imagery(planetary-computer, naip, limit 8)\n  va_m_3907761_sw_18_060_20231011_20240103   2023-10-11   covers_aoi_pct 64.6\n  va_m_3907761_nw / _se / _ne   same day   11.4 / 9.7 / 1.7\n  recommended.reason: \"best-covering scene at 64.6% of the area; this collection reports no cloud cover.\n                       No single scene covers this area and no same-day set does either within these 8 results; …\"\nsearch_imagery(planetary-computer, esa-worldcover)   →   ESA_WorldCover_10m_2021_v200_N30W078\nrender_map(NAIP + WorldCover at 0.6, stack_layer)   →   coverage_pct 88.8\n  coverage_note: \"layers cover 89% of the requested view, so the rest renders blank. …\"",
+          "answer": "Pass 1 rendered a confident, fully covered map of <b>Ashburn, Georgia</b>. The phrase simplified to one word, Nominatim's top hit was the wrong state, and nothing in the return said a list had been ranked. The fallback now says what it matched, that it simplified first, and who else shares the name, which is enough for an agent to ask for the state. With the state named, the newest NAIP is October 2023 in four quarter-quads that together cover 87%, and the tool says no set reaches full coverage.",
+          "artifact": "img/ft8-ashburn-naip.html",
+          "learning": "<b>Two things, one of them ours.</b> Nominatim's ranking is not a decision the tool should hide, and Gazet has no row for a census-designated place, so the fallback carried the whole question. And Planetary Computer's mosaic registration hung for 30 seconds three runs in a row and took the whole render down with it. Registration now has its own timeout and falls back to item tiles with a note on the map. By the fourth run PC was fast again, and the map above is the registered path.",
+          "shows": "Nominatim geocode_note · NAIP and WorldCover on Planetary Computer · PC mosaic registration with a fallback"
+        },
+        {
+          "tag": "statistics",
+          "who": "urban heat",
+          "prompt": "Landsat surface temperature over Phoenix this month, in degrees, for the city and not the whole scene.",
+          "returned": "geocode(\"Phoenix\")   →   nominatim   Phoenix, Maricopa County, Arizona   bbox: [-112.324, 33.290, -111.926, 33.918]\nsearch_imagery(planetary-computer, landsat-c2-l2, 40 days, cloud ≤10)\n  recommended: LC09_L2SP_037037_20260817_02_T1   cloud 0.0   covers_aoi_pct 100.0   \"not a tradeoff\"\n\ncompute_statistics(lwir11*0.00341802+149-273.15, bbox = Phoenix)\n  mean 59.4 °C   median 60.0   p2 49.1   p98 65.3   valid 100%   clipped_to: [-112.324, 33.290, -111.926, 33.918]\ncompute_statistics(same, no bbox)\n  mean 59.4 °C   min 11.3   max 69.1   valid 67%\n  extent_note: \"stats cover the full item extent (2.5 x 2.2 deg). Pass aoi_geojson to clip to your subject\"\n  band_scaling: lwir11 scale 0.00341802 offset 149 kelvin, …\nrender_map(LST °C, rescale 25,60, inferno)   →   coverage_pct 100.0",
+          "answer": "Landsat's thermal band arrives as digital numbers, the catalog declares the scale and offset, and the tool passes them through so the expression can turn them into degrees. Clipped to the city, a 60 °C median surface temperature at 11 am on August 17 is Phoenix in August. Whole-scene, the mean happens to match and the minimum does not: 11 °C is somewhere in the mountains 100 km away, and the extent note says so.",
+          "artifact": "img/ft8-phoenix-lst.html",
+          "learning": "<b>Clipped and unclipped statistics came back in two different shapes.</b> A clipped call returned a GeoJSON Feature with the numbers under properties, an unclipped one the bare band dict, and the next case's code broke on the difference. One shape now, with clipped_to when an AOI was applied, and band scaling on both paths.",
+          "shows": "Landsat on Planetary Computer · expression with band_scaling · compute_statistics clipped vs whole, one shape"
+        },
+        {
+          "tag": "handoff",
+          "who": "a QGIS user",
+          "prompt": "Give me an NDVI tile URL I can paste into QGIS for that Chelan scene, and a PNG to check it first.",
+          "returned": "describe_collection(earth-search, sentinel-2-l2a)   →   36 assets: blue, green, red, nir, nir08, swir16, swir22, scl, visual, … (and -jp2 twins)\ntile_url_template(S2C_10UFU_20260824_1_L2A, (nir-red)/(nir+red), rescale -1,1, rdylgn)\n  https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=…S2C_10UFU_20260824_1_L2A\n    &expression=(b1-b2)/(b1+b2)&assets=nir&assets=red&rescale=-1,1&colormap_name=rdylgn\npreview_item(same, bbox = Chelan County, max_size 512)   →   backend titiler-xyz\n  GET   →   200   image/png   208,531 bytes",
+          "answer": "The other door out of groundstation is a URL. The expression the user wrote in asset names goes out in TiTiler's positional form, with the asset order pinned in the same query string, which is the gotcha the titiler skill exists to carry. The preview is the same recipe as a single PNG framed to the county, fetched here to prove the URL is not a guess.",
+          "artifact": "img/ft8-chelan-ndvi-preview.png",
+          "image": "img/ft8-chelan-ndvi-preview.png",
+          "artifact_label": "the PNG ↗",
+          "shows": "describe_collection asset layout · tile_url_template · preview_item, fetched"
+        },
+        {
+          "tag": "change",
+          "who": "drought, year over year",
+          "prompt": "Lake Mead, July 2025 versus July 2026. NDWI, same tile, and a swipe.",
+          "returned": "geocode(\"Lake Mead\")   →   gazet   Mead (reservoir)   bbox: [-114.859, 35.831, -113.632, 36.590]\n\ncompare_dates(place, Jul 2025 vs Jul 2026, (green-nir)/(green+nir), cloud ≤10, stack_layer)\n  tile:    11SQA\n  before:  S2B_11SQA_20250730_0_L2A   2025-07-30   cloud 0.0   mean -0.3088\n  after:   S2B_11SQA_20260725_0_L2A   2026-07-25   cloud 2.0   mean -0.2928\n  delta:   +0.0160      delta_pct: +5.2\n  caveat:  (none)\n  stack panel: Earth Search · TiTiler · Gazet",
+          "answer": "The reservoir came from our own index this time, Natural Earth's physical layer through Gazet, with a real extent. A year apart on the same tile, five days off in the calendar, both clean, no caveat. And the number is small because the tile is mostly desert: at 100 km the lake is a sliver of the mean, and a shoreline moving a few hundred metres is invisible in it. The swipe shows what the number cannot.",
+          "artifact": "img/ft8-lake-mead-ndwi.html",
+          "learning": "Second live number for the clip-by-default call, from the other direction: Barotse's tile-wide mean read backwards, Mead's reads as nothing happened. Both are the tile answering for the place.",
+          "shows": "Gazet Natural Earth layer · compare_dates across a year · the Epic 4 question again"
+        }
+      ]
+    },
+    {
+      "name": "Round 5 — live Earth, again, and the product",
+      "cases": [
+        {
+          "tag": "live event",
+          "who": "humanitarian analyst",
+          "prompt": "GDACS has a flood in Cambodia. Show me radar before and after, same orbit.",
+          "returned": "active_events(14 days)   →   GDACS  Flood in Cambodia   Green   2026-08-28 to 2026-09-02   (103.20, 13.09)\n  gdacs_note: \"GDACS current-events feed listed 100; 100 active within 14 days\"\nsearch_imagery(sentinel-1-grd, last 20 days)     →  S1D_IW_GRDH_1SDV_20260829T111939…   ascending   covers_aoi_pct 96.5\nsearch_imagery(sentinel-1-grd, 60 to 105 days ago)   →  S1D_IW_GRDH_1SDV_20260630T111936…   ascending   covers_aoi_pct 96.4\ncompute_statistics(after, vv, bbox)   →   vv: p2 128  p98 328  mean 230   clipped_to: bbox\nrender_map(after + before at rescale 128,328 + GDACS point, stack_layer)   →   swipe, coverage_pct 96.5",
+          "answer": "Two ascending passes sixty days apart at the same minute of the day, which is the same relative orbit, so the backscatter is comparable. Same collection and overlapping footprints, so the map is a swipe by default. The stretch comes from the after scene's own percentiles rather than a guess, and open water reads dark on both sides of the divider.",
+          "artifact": "img/ft8-cambodia-sar-swipe.html",
+          "learning": "<b>Pass 1 crashed on the statistics shape</b> (the Phoenix card) and <b>TiTiler named the requested band b1</b>, so the caller who asked for vv had to guess which key was theirs. The tool gives the asset its name back when the mapping is one to one. And the GDACS feed turned out to be a current-events list, not a window: days=7 and days=30 both returned 100. The window is applied now and the return counts what the feed listed. <b>And the first still of this card found the biggest thing in the edition:</b> the basemap tiles where no imagery covered read \"API KEY REQUIRED\". CARTO's free basemap, under every groundstation map, postcard snapshot and the console since July, now watermarks. 2D maps ride OpenFreeMap's key-free positron style now, the 3D style rides OpenStreetMap's tiles, a check refuses cartocdn in any artifact, and every artifact and still on this page was rebuilt.",
+          "shows": "GDACS on the current-events feed, windowed · orbit_state pairing · statistics keyed by asset · auto swipe"
+        },
+        {
+          "tag": "geocode",
+          "who": "a country across the dateline",
+          "prompt": "Newest usable Sentinel-2 over Fiji.",
+          "returned": "geocode(\"Fiji\"), pass 1\n  bbox: [-180.0, -21.04, 180.0, -12.46]   lon 0.0\n  geocode_note: \"… using Fiji (FJ, country) at 16.8S 0.0E, not Fiji (island group) at 16.5S 0.0E\"\n  search over that box: 12 scenes, every one covers_aoi_pct 0.0\n\ngeocode(\"Fiji\"), fixed\n  bbox: [176.910, -21.039, -178.231, -12.462]   lon 179.34\n  geocode_note: \"2 places match 'Fiji' equally well; using Fiji (FJ, country) at 16.8S 179.3E,\n                 not Fiji (island group) spanning the antimeridian. Pass the fuller name if another was meant\"\nsearch_imagery(sentinel-2-l2a, 15 days, cloud ≤40, limit 20)\n  20 scenes, covers_aoi_pct 0.1 to 2.6 each   recommended: S2C_1KCU_20260901_0_L2A at 1.2%\n  reason ends: \"No single scene covers this area and no same-day set does either within these 20 results; …\"\nrender_map(recommended)   →   coverage_pct 1.2   coverage_note: \"layers cover 1% of the requested view …\"",
+          "answer": "Gazet's record for Fiji is the minimum bounding rectangle of a country that crosses the dateline, which is the whole world, and the tie note placed both Fijis at 0.0E. A world-spanning hit now costs one geometry fetch, and the real extent comes back in the west-greater-than-east form the coverage math already reads. What that exposes is the next honest limit: an archipelago's box is mostly ocean, so no scene covers more than a few percent of it and no set ever will. The map is right, the note is right, and the question was wrong.",
+          "artifact": "img/ft8-fiji.html",
+          "learning": "<b>Cover the land, not the box.</b> For an archipelago the useful ask is the scenes that cover the islands, which needs a land mask the tool does not have. Gazet's geometry is that mask, one fetch away. Filed under the coverage-set item in Round 6.",
+          "shows": "antimeridian extent from Gazet geometry · tie note across the dateline · coverage math on a west > east box"
+        },
+        {
+          "tag": "triage",
+          "who": "the morning sweep",
+          "prompt": "Anything Red or Orange on GDACS this week, and where?",
+          "returned": "active_events(7 days)\n  GDACS: 100 listed   Green 99, Orange 1   →   Tropical Cyclone SAUDEL-26 (Orange, TC)\n  EONET: 26 open   Wildfires 12, Severe Storms 8, Sea and Lake Ice 6\nrender_map(one point, no imagery)\n  coverage_note: \"no imagery layer on this map, so it renders as vectors on a blank background.\n                  Add a scene, or say plainly that none is available for this area\"",
+          "answer": "One Orange alert in the world this week, a typhoon near Taiwan, and 99 Greens. The map of it is one dot on nothing and the tool says so rather than letting a blank ship as an answer. That is what a quiet week looks like, and it should look like this.",
+          "artifact": "img/ft8-gdacs-triage.html",
+          "learning": "EONET was capped at 50 events with nothing said, and a busy fortnight of storms and fires pushed the six icebergs off the list between two runs an hour apart. The cap is 500 and the return now says how many the feed listed.",
+          "shows": "GDACS alert levels · EONET counted · the no-imagery coverage_note"
+        },
+        {
+          "tag": "the honest zero",
+          "who": "the field test №2 prompt, on radar",
+          "prompt": "A radar postcard of iceberg A76C.",
+          "returned": "active_events(30 days)   →   EONET  Iceberg A76C   Sea and Lake Ice   2026-08-27   (-29.5, -53.73)\nsearch_imagery(sentinel-1-grd, 30 days, ±0.9° box)   →   count 0\nsearch_imagery(sentinel-2-l2a, 30 days)                →   count 0\nnext_pass(-53.73, -29.5, 4 days)\n  SENTINEL-1A   2026-09-03 07:12 UTC   radar\n  SENTINEL-1A   2026-09-03 20:42 UTC   radar\n  SENTINEL-2B   2026-09-04 11:36 UTC   optical\n  note: \"swath geometry from live TLEs, not the acquisition plan — a pass is a possible capture …\"",
+          "answer": "Field test №2 learned that Sentinel-2 does not acquire open ocean and the honest empty card beat a wrong one. Radar was supposed to be the answer, and over the South Atlantic at 53°S it is not either: no Sentinel-1 scene in 30 days in a 200 km box. What the tools can say is when a satellite could pass, and the note is careful that a pass is a possible capture, not a promise. No artifact on this card, on purpose.",
+          "shows": "EONET with the cap lifted · two empty searches · next_pass over open ocean"
+        },
+        {
+          "tag": "the product",
+          "who": "Earth briefs you",
+          "prompt": "brief.py --place \"Chelan County, Washington\" --days 10, run twice.",
+          "returned": "run 1   1m08s   [1/5] geocoding → [2/5] events + weather → [3/5] fresh imagery → [3.5/5] NDVI change → [4/5] map → [5/5] Claude\nrun 2   1m37s   same pipeline, per-AOI memory read from briefing/state\nrun 3   1m19s   after the stack panel rewrite, so the linked artifact carries the new panel\n\nbrief-chelan-county--washington-2026-09-02.md, run 3, TL;DR:\n  \"WATCH — unchanged since the previous run earlier today (2026-09-02). The same five wildfires are still\n   burning in and around Chelan County, and the vegetation signal already flagged this morning still holds:\n   NDVI over the MGRS 10TFT tile fell 19% (0.706 → 0.572) between Aug 17 and Aug 24, consistent with fire\n   impact rather than noise. The thing to watch is a light rain system moving in today through Sep 5 that\n   should ease fire risk without changing today's alert level.\"\n  weather caveat, verbatim from the tool: \"readings are for a 671m grid cell … valley floors run warmer than shown here\"\n  floods/storms: \"GDACS checked 100 current global events, 0 active within 30 days inside the bbox\"\n\nevals/brief_checks.py demo   →   PASS brief-chelan-county--washington-2026-09-02.md   (sections, alert, dates, every event grounded)\nbriefing/state: alert WATCH · 5 event titles · ndvi_mean 0.572 · scene_count 8",
+          "answer": "This is the part of groundstation nobody else has, and it ran on the same fixed code as the other nineteen cards. Five named fires, one inside the county, a 19% NDVI drop on the western tile since mid August, rain arriving, and the elevation caveat and the GDACS window note both carried through from the tools into the prose. The second and third runs both opened with <b>unchanged since the previous run earlier today</b>, which is the memory doing its job, and the grounding checks passed before anything would have been posted. SISI is the fire whose smoke sits on the Aug 24 mosaic in card 1.",
+          "artifact": "img/ft8-chelan-brief.html",
+          "learning": "The checks also fail an older Chelan brief from July 22 that cited no dates and no NDVI change. The rules got stricter after it was written, and the failure stands in the demo folder rather than being deleted: a check that never fails is decoration.",
+          "shows": "briefing/brief.py · per-AOI memory · evals/brief_checks.py as the gate · claude -p synthesis"
+        },
+        {
+          "tag": "share",
+          "who": "\"make me a postcard of that\"",
+          "prompt": "Make me a postcard of the Chelan mosaic, 3:2, with the smoke.",
+          "returned": "render_map(Chelan County, coverage_set of 5, stack_layer,\n           postcard = {place, caption, aspect 3:2})\n  map_path      …/map-chelan-county---aug-24-mosaic.html\n  postcard_path …/postcard-chelan-county--washington.html\n  state.coverage_pct 100.0",
+          "answer": "A snapshot card of the actual map view rather than a re-render of one scene: the five-scene mosaic, framed 3:2, the plume from the SISI fire drifting east over the Cascades, with the stack listing inherited from the map's real facts. This is the artifact that gets sent on.",
+          "artifact": "img/ft8-chelan-postcard.html",
+          "shows": "render_map postcard snapshot via playwright · stack listing from stack_facts"
+        }
+      ]
+    },
+    {
+      "name": "Round 6 — what this edition says to build next",
+      "cases": [
+        {
+          "tag": "build next",
+          "who": "cards 1, 4, 7, 11, 16",
+          "prompt": "A coverage set should be a server-side object, not client-side bbox math.",
+          "answer": "Four county-scale places and an archipelago in one edition, and in each the honest answer was a set of scenes, not a scene. The set is built on the client from whatever `limit` and the cloud filter let through, over bboxes that overstate a tilted swath, and it was starved twice, absent once, and meaningless over Fiji, where the box is ocean and the useful ask is the scenes that cover the islands. <b>DevSeed already builds the object this wants.</b> A MosaicJSON from cogeo-mosaic is exactly \"the scenes that cover an area\", titiler-pgstac registers a STAC search and tiles it as one layer, and an eoAPI on the solar box makes that local. Kyle's stac-geoparquet lane lets a client page through a whole month without API limits. The change: a `cover_aoi` tool that returns a mosaic (MosaicJSON, or a registered search id where a pgstac tiler exists) rendered as one layer, with the current `full_coverage_set` as its fallback rather than its ceiling. Gazet's geometry is the land mask that last case needs, one fetch away.",
+          "shows": "cogeo-mosaic · titiler-pgstac · eoAPI · stac-geoparquet"
+        },
+        {
+          "tag": "build next",
+          "who": "cards 1, 2, 4, 6, 9, 11, 14",
+          "prompt": "Gazet needs localities and physical features, and Geodini for the rest.",
+          "answer": "Ten of nineteen geocodes came from our own index, admin units plus two Natural Earth water bodies (Lake Mead, Tonlé Sap). The six that did not were a valley, a lagoon, a floodplain, a peak and two phrasings of the same valley, and Nominatim got the valley wrong twice and put the Ashburn data center corridor in Georgia, all with confident boxes. The fallback now says what it matched and who else shares the name, which is honesty, not accuracy. <b>The fix is in data DevSeed already loads.</b> Overture divisions carries locality polygons Gazet could index alongside country, region and county, which is one ask to Soumya. Sunu's Geodini is natural-language geocoding over Overture places and already ships an MCP server, which is the middle leg Story 1.3 planned and never wired. Natural Earth 10m physical has the lagoons and floodplains at the scale a brief needs. The gate stays where it is; what changes is how often it has something to gate.",
+          "shows": "Gazet (Overture divisions, Natural Earth) · Geodini · Story 1.3"
+        },
+        {
+          "tag": "build next",
+          "who": "cards 10, 12, 15",
+          "prompt": "Surface instance knowledge in the item, not in a round trip.",
+          "answer": "The rescale that made the Caldor layer visible lived in the asset's raster:bands statistics, and search_imagery's compact item does not carry them, so the agent had to fetch the item JSON. That is the labs#496 \"instance knowledge\" layer arriving as an extra call: which bands, what units, what stretch, what nodata. <b>The STAC raster extension already says it, and eoAPI serves it.</b> The change: compact items carry raster:bands statistics and nodata when present, and `renders` blocks from the collection or item when a publisher declares them, so the same map draws itself on a catalog the model has never seen. This is also the concrete case for the well-known-URL proposal: a deployment telling an agent its own quirks, served next to the data. The second ten added three more quirks of the same kind: TiTiler names a single requested asset b1, Planetary Computer's mosaic registration can hang, and the GDACS feed is a list rather than a window. Each got a fix in the tool; each is something the service could have said.",
+          "shows": "STAC raster extension · eoAPI collection renders · the selfdoc prototype"
+        },
+        {
+          "tag": "build next",
+          "who": "cards 8, 14",
+          "prompt": "Clip statistics to the AOI by default.",
+          "answer": "Barotse is the live number: a clean, caveat-free NDWI delta that describes a hundred-kilometre MGRS tile and reads backwards for the floodplain inside it. `compute_statistics` already warns about the default; `compare_dates` calls it unclipped. The story is written to acceptance criteria in the tool-honesty plan and blocked on one product call: whether compare_dates should clip. This edition's read is yes. \"What changed here\" is the question people ask, the tile-wide mean answers \"what changed in this square\", and whole-scene stays the explicit opt-in for a percentile stretch. Lake Mead is the second number: a year of drought reads as +5% on a tile that is mostly desert.",
+          "shows": "TiTiler statistics with a feature · tool-honesty Epic 4"
+        },
+        {
+          "tag": "build next",
+          "who": "cards 1, 3, 10, 15",
+          "prompt": "Large payloads should not travel through the model.",
+          "answer": "A five-scene coverage set, a storm-positions geojson and a two-scene set with a severity item each went from one tool into the transcript and back into render_map. That is tokens spent on bboxes and, for a small local model, context it cannot afford. <b>Ciaran's mcp-toolsets-runtime solves exactly this.</b> Its session state captures a tool's published values and lets the next tool be pointed at them by key, so a geometry moves between tools without passing through the model, and `NotAuthored` keeps a model from writing values it should only reference. The change is the port already planned: groundstation as a toolset alongside geo-assistant's two, sharing state, with MCP Apps views so the map appears in the conversation instead of as a path.",
+          "shows": "mcp-toolsets-runtime session state · MCP Apps views · the toolset port"
+        }
+      ]
+    }
+  ],
+  "repro": "git clone https://github.com/dannybauman/groundstation && cd groundstation\ngit checkout gazet-live                     # until #31 and #32 merge, then main\nbash scripts/doctor.sh                      # walks the setup chain, prints the fix\nuv run evals/unit_checks.py                 # 109 offline checks\nuv run scripts/field_test.py docs/field-test-2026-09-02.cases.json   # rebuild this page",
+  "footer": "field test №8 · September 2, 2026 · run on PRs #31 and #32 before merge · twenty prompts, thirteen fixes mid-test, five things to build next · groundstation · Development Seed labs"
+}
