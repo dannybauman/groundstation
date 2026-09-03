@@ -90,10 +90,10 @@
 <script>
 const LAYERS = [{"type": "raster", "name": "LST \u00b0C LC09_L2SP_037037_20260817_02_T1", "tiles": "https://planetarycomputer.microsoft.com/api/data/v1/mosaic/391002d7af89d0d6be31f3dcf053519b/tiles/WebMercatorQuad/{z}/{x}/{y}@1x.png?collection=landsat-c2-l2&rescale=25%2C60&colormap_name=inferno", "opacity": 1, "bounds": [-113.80929890253537, 32.08533479927767, -111.27862720773734, 34.24731520072233]}];
 const BBOX = [-112.3240289, 33.2904827, -111.9255304, 33.9183794];
-const BASE_STYLE = () => ({ version: 8, sources: { basemap: { type: "raster",
-    tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
-    attribution: "&copy; OpenStreetMap &copy; CARTO" } },
-  layers: [{ id: "basemap", type: "raster", source: "basemap" }] });
+// Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
+// watermark tiles under every artifact. OpenFreeMap needs no key and its
+// positron style is the same light look; raster layers stack on it unchanged
+const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 

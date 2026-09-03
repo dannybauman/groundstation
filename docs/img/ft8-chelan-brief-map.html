@@ -90,10 +90,10 @@
 <script>
 const LAYERS = [{"type": "raster", "name": "Sentinel-2 2026-08-24 (0.1% cloud)", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10TFT_20260824_0_L2A&assets=visual", "opacity": 1, "bounds": [-121.6881, 46.832638, -120.197167, 47.845912]}, {"type": "geojson", "name": "Active events (5)", "data": {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [-121.4353, 48.652417]}, "properties": {"title": "Wildfire Electric, Whatcom, Washington", "description": "Wildfires \u00b7 2026-08-22"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-121.052783, 47.458917]}, "properties": {"title": "Wildfire GOAT, Kittitas, Washington", "description": "Wildfires \u00b7 2026-08-22"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-121.0287, 48.549617]}, "properties": {"title": "Wildfire Thunder Creek, Skagit, Washington", "description": "Wildfires \u00b7 2026-08-22"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-121.255867, 47.4708]}, "properties": {"title": "Wildfire KING, Kittitas, Washington", "description": "Wildfires \u00b7 2026-08-19"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-120.830667, 48.346667]}, "properties": {"title": "Wildfire SISI, Chelan, Washington", "description": "Wildfires \u00b7 2026-08-14"}}]}, "color": "#d63b3b"}];
 const BBOX = [-121.58091, 46.8609433, -119.45970799999999, 48.9509464];
-const BASE_STYLE = () => ({ version: 8, sources: { basemap: { type: "raster",
-    tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
-    attribution: "&copy; OpenStreetMap &copy; CARTO" } },
-  layers: [{ id: "basemap", type: "raster", source: "basemap" }] });
+// Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
+// watermark tiles under every artifact. OpenFreeMap needs no key and its
+// positron style is the same light look; raster layers stack on it unchanged
+const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 

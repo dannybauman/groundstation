@@ -90,10 +90,10 @@
 <script>
 const LAYERS = [{"type": "raster", "name": "after 2026-08-29 (ascending)", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-1-grd%2Fitems%2FS1D_IW_GRDH_1SDV_20260829T111939_20260829T112004_004340_008021&assets=vv&rescale=128%2C328", "opacity": 1, "bounds": [101.6356271, 11.5112874, 104.2095048, 13.4619501]}, {"type": "raster", "name": "before 2026-06-30 (ascending)", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-1-grd%2Fitems%2FS1D_IW_GRDH_1SDV_20260630T111936_20260630T112001_003465_0061EE&assets=vv&rescale=128%2C328", "opacity": 1, "bounds": [101.6352563, 11.5104643, 104.2093813, 13.4615807]}, {"type": "geojson", "name": "GDACS flood", "data": {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [103.1983, 13.09]}, "properties": {"title": "Flood in Cambodia"}}]}}];
 const BBOX = [102.6983, 12.69, 103.6983, 13.49];
-const BASE_STYLE = () => ({ version: 8, sources: { basemap: { type: "raster",
-    tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
-    attribution: "&copy; OpenStreetMap &copy; CARTO" } },
-  layers: [{ id: "basemap", type: "raster", source: "basemap" }] });
+// Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
+// watermark tiles under every artifact. OpenFreeMap needs no key and its
+// positron style is the same light look; raster layers stack on it unchanged
+const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 
