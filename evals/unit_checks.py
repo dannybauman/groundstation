@@ -1419,6 +1419,81 @@ def t_stack_panel_credits_the_geocoder_that_answered():
         assert names(False) == set()
 
 
+def t_wrap_aware_bbox_puts_fiji_back_together():
+    # Field test No.8: Gazet's bbox for Fiji is the whole world, because the
+    # country crosses the dateline. The real extent is 176.9E to 178.2W.
+    geom = {"type": "MultiPolygon", "coordinates": [
+        [[[177.0, -18.0], [180.0, -18.0], [180.0, -17.0], [177.0, -17.0], [177.0, -18.0]]],
+        [[[-180.0, -17.5], [-178.2, -17.5], [-178.2, -16.5], [-180.0, -16.5], [-180.0, -17.5]]],
+    ]}
+    b = tools._wrap_aware_bbox(geom)
+    assert b == [177.0, -18.0, -178.2, -16.5], b
+    assert b[0] > b[2], "west > east is the RFC 7946 antimeridian form the coverage math reads"
+    assert tools._bbox_coverage_pct(b, [176.0, -19.0, 180.0, -16.0]) is not None
+    # something that genuinely wraps the globe stays as it was
+    globe = {"type": "Polygon", "coordinates": [[[-180, -85], [-90, -85], [0, -85], [90, -85], [180, -85], [180, -60], [0, -60], [-180, -60], [-180, -85]]]}
+    assert tools._wrap_aware_bbox(globe) is None
+    assert tools._at({"bbox": [-180.0, -21.0, 180.0, -12.5]}) == "across the antimeridian"
+
+
+def t_statistics_have_one_shape_clipped_or_not():
+    # Field test No.8: clipped stats came back as a GeoJSON Feature, unclipped as
+    # the band dict, and the first consumer that saw both crashed on it.
+    feature = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
+               "properties": {"statistics": {"vv": {"min": 1.0, "max": 900.0, "mean": 120.0, "percentile_2": 20.0, "percentile_98": 400.0, "histogram": [1, 2]}}}}
+    saved_post, saved_json = tools._client.post, tools._get_json
+    tools._client.post = lambda url, **kw: _FakeResp(feature)
+    tools._get_json = lambda url, **kw: {"bbox": [0, 0, 1, 1], "assets": {"vv": {"raster:bands": [{"scale": 1.0, "unit": "DN"}]}}}
+    try:
+        out = tools.compute_statistics("earth-search", "sentinel-1-grd", "S1X", assets=["vv"], bbox=[0.2, 0.2, 0.8, 0.8])
+    finally:
+        tools._client.post, tools._get_json = saved_post, saved_json
+    assert out["vv"]["percentile_98"] == 400.0 and "histogram" not in out["vv"], out
+    assert out["clipped_to"] == [0.2, 0.2, 0.8, 0.8] and "extent_note" not in out, out
+    assert out["band_scaling"] == [{"scale": 1.0, "unit": "DN"}], "scaling travels on the clipped path too"
+
+
+def t_nominatim_fallback_says_what_it_matched():
+    # Field test No.8: "the Ashburn data center corridor" simplified to "Ashburn"
+    # and the top hit was Ashburn, Georgia. The note names the match and the rest.
+    ga = {"boundingbox": ["31.69", "31.74", "-83.67", "-83.63"], "lat": "31.71", "lon": "-83.65",
+          "display_name": "Ashburn, Turner County, Georgia, 31714, United States"}
+    va = {"boundingbox": ["39.0", "39.1", "-77.5", "-77.4"], "lat": "39.04", "lon": "-77.49",
+          "display_name": "Ashburn, Loudoun County, Virginia, United States"}
+    saved_get, saved_json, saved_skip = tools._client.get, tools._get_json, tools._gazet_skip_until
+    tools._client.get = lambda url, **kw: _FakeResp({"ids": []})
+    tools._get_json = lambda url, **kw: [ga, va] if kw["params"]["q"] == "Ashburn" else []
+    tools._gazet_skip_until = 0.0
+    try:
+        out = tools.geocode("the Ashburn data center corridor")
+    finally:
+        tools._client.get, tools._get_json, tools._gazet_skip_until = saved_get, saved_json, saved_skip
+    assert out["source"] == "nominatim" and out["bbox"][0] == -83.67, out
+    note = out["geocode_note"]
+    assert "matched 'Ashburn' after simplifying 'the Ashburn data center corridor'" in note, note
+    assert "Ashburn, Virginia, United States" in note, note
+
+
+def t_gdacs_feed_is_windowed_and_counted():
+    # Field test No.8: days=7 and days=30 both returned 100 GDACS events. The
+    # feed is a current-events list; the window is applied here and reported.
+    now = tools.dt.datetime.now(tools.dt.timezone.utc)
+    fresh = (now - tools.dt.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S")
+    stale = (now - tools.dt.timedelta(days=40)).strftime("%Y-%m-%dT%H:%M:%S")
+    feed = {"features": [
+        {"geometry": {"type": "Point", "coordinates": [10.0, 10.0]}, "properties": {"name": "new", "eventtype": "FL", "alertlevel": "Green", "todate": fresh}},
+        {"geometry": {"type": "Point", "coordinates": [11.0, 11.0]}, "properties": {"name": "old", "eventtype": "EQ", "alertlevel": "Green", "todate": stale}},
+    ]}
+    saved = tools._get_json
+    tools._get_json = lambda url, **kw: feed if "gdacs" in url else {"events": []}
+    try:
+        out = tools.active_events(days=7)
+    finally:
+        tools._get_json = saved
+    assert [e["title"] for e in out["gdacs"]] == ["new"], out
+    assert out["gdacs_note"] == "GDACS current-events feed listed 2; 1 active within 7 days", out
+
+
 if __name__ == "__main__":
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("t_")):
         check(name, fn)
