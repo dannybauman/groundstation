@@ -90,10 +90,10 @@
 <script>
 const LAYERS = [{"type": "raster", "name": "S1 2026-09-01 (descending)", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-1-grd%2Fitems%2FS1D_IW_GRDH_1SDV_20260901T122224_20260901T122253_004384_0081A7&assets=vv&rescale=0%2C300", "opacity": 1, "bounds": [-97.4542478, 28.9663837, -94.5157795, 30.9198203]}, {"type": "geojson", "name": "storm positions (EONET + GDACS)", "data": {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [-95, 30.8]}, "properties": {"title": "Tropical Storm Edouard"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-95.2, 31.6]}, "properties": {"title": "Tropical Cyclone EDOUARD-26"}}]}}];
 const BBOX = [-95.9608455, 29.497339, -94.9084924, 30.1706958];
-const BASE_STYLE = () => ({ version: 8, sources: { basemap: { type: "raster",
-    tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
-    attribution: "&copy; OpenStreetMap &copy; CARTO" } },
-  layers: [{ id: "basemap", type: "raster", source: "basemap" }] });
+// Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
+// watermark tiles under every artifact. OpenFreeMap needs no key and its
+// positron style is the same light look; raster layers stack on it unchanged
+const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 

@@ -90,10 +90,10 @@
 <script>
 const LAYERS = [{"type": "raster", "name": "2026-07-25 (after)", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2B_11SQA_20260725_0_L2A&expression=%28b1-b2%29%2F%28b1%2Bb2%29&assets=green&assets=nir&rescale=-1%2C1&colormap_name=rdylgn", "opacity": 1, "bounds": [-113.964788, 36.00746, -113.519426, 37.000366]}, {"type": "raster", "name": "2025-07-30 (before)", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2B_11SQA_20250730_0_L2A&expression=%28b1-b2%29%2F%28b1%2Bb2%29&assets=green&assets=nir&rescale=-1%2C1&colormap_name=rdylgn", "opacity": 1, "bounds": [-113.951489, 36.00746, -113.519426, 37.000023]}];
 const BBOX = [-114.85867066394715, 35.830704060793124, -113.63161379999879, 36.589574780538555];
-const BASE_STYLE = () => ({ version: 8, sources: { basemap: { type: "raster",
-    tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
-    attribution: "&copy; OpenStreetMap &copy; CARTO" } },
-  layers: [{ id: "basemap", type: "raster", source: "basemap" }] });
+// Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
+// watermark tiles under every artifact. OpenFreeMap needs no key and its
+// positron style is the same light look; raster layers stack on it unchanged
+const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 

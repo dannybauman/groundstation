@@ -90,10 +90,10 @@
 <script>
 const LAYERS = [{"type": "raster", "name": "2026-08-24 \u00b7 10UFU", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10UFU_20260824_1_L2A&assets=visual", "opacity": 1, "bounds": [-121.665655, 47.731054, -120.164358, 48.673544]}, {"type": "raster", "name": "2026-08-24 \u00b7 10TFT", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10TFT_20260824_0_L2A&assets=visual", "opacity": 1, "bounds": [-121.6881, 46.832638, -120.197167, 47.845912]}, {"type": "raster", "name": "2026-08-24 \u00b7 10UGU", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10UGU_20260824_1_L2A&assets=visual", "opacity": 1, "bounds": [-120.332977, 47.690861, -118.836415, 48.442499]}, {"type": "raster", "name": "2026-08-24 \u00b7 10TGT", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10TGT_20260824_0_L2A&assets=visual", "opacity": 1, "bounds": [-120.377747, 46.803401, -118.864756, 47.822598]}, {"type": "raster", "name": "2026-08-24 \u00b7 10UGU", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10UGU_20260824_0_L2A&assets=visual", "opacity": 1, "bounds": [-120.305306, 47.956173, -118.79173, 48.720918]}];
 const BBOX = [-121.18091, 47.2609433, -119.859708, 48.5509464];
-const BASE_STYLE = () => ({ version: 8, sources: { basemap: { type: "raster",
-    tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
-    attribution: "&copy; OpenStreetMap &copy; CARTO" } },
-  layers: [{ id: "basemap", type: "raster", source: "basemap" }] });
+// Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
+// watermark tiles under every artifact. OpenFreeMap needs no key and its
+// positron style is the same light look; raster layers stack on it unchanged
+const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 

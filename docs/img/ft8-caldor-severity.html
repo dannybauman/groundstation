@@ -90,10 +90,10 @@
 <script>
 const LAYERS = [{"type": "raster", "name": "2026-08-31 \u00b7 10SGH", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10SGH_20260831_0_L2A&assets=visual", "opacity": 1, "bounds": [-120.727597, 37.824548, -119.760991, 38.826272]}, {"type": "raster", "name": "2026-08-31 \u00b7 10SGJ", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10SGJ_20260831_0_L2A&assets=visual", "opacity": 1, "bounds": [-120.699322, 38.717793, -119.451708, 39.726806]}, {"type": "raster", "name": "Caldor burn severity 2021 (VEDA)", "tiles": "https://openveda.cloud/api/raster/collections/caldor-fire-burn-severity/items/bs_to_save/tiles/WebMercatorQuad/{z}/{x}/{y}.png?assets=cog_default&rescale=1%2C4&colormap_name=inferno_r", "opacity": 0.75, "bounds": [-120.61338752166166, 38.54940283865057, -119.91905658168675, 38.90577651328637]}];
 const BBOX = [-120.61338752166166, 38.54940283865057, -119.91905658168675, 38.90577651328637];
-const BASE_STYLE = () => ({ version: 8, sources: { basemap: { type: "raster",
-    tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
-    attribution: "&copy; OpenStreetMap &copy; CARTO" } },
-  layers: [{ id: "basemap", type: "raster", source: "basemap" }] });
+// Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
+// watermark tiles under every artifact. OpenFreeMap needs no key and its
+// positron style is the same light look; raster layers stack on it unchanged
+const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 
