@@ -61,6 +61,8 @@ claude mcp add groundstation -- uv --directory "$PWD" run groundstation
 uv run --group web groundstation-web   # open http://127.0.0.1:8765
 ```
 
+**Or just ask.** With the plugin installed (or the repo's `skills/` linked into `~/.claude/skills`), "demo groundstation", "is groundstation running", "open the field tests" and "brief me on Lisbon" all run through the `groundstation` skill, no commands to remember.
+
 **A brief, or the morning sweep:**
 
 ```bash
