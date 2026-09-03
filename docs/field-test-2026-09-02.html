@@ -430,18 +430,20 @@ next_pass(-53.73, -29.5, 4 days)
 <div><div class="label">Input</div><div class="prompt">brief.py --place "Chelan County, Washington" --days 10, run twice.</div></div>
 <div><div class="label">What the tools returned</div><div class="returned">run 1   1m08s   [1/5] geocoding → [2/5] events + weather → [3/5] fresh imagery → [3.5/5] NDVI change → [4/5] map → [5/5] Claude
 run 2   1m37s   same pipeline, per-AOI memory read from briefing/state
+run 3   1m19s   after the stack panel rewrite, so the linked artifact carries the new panel
 
-brief-chelan-county--washington-2026-09-02.md, run 2, TL;DR:
-  "WATCH — unchanged since the previous run earlier today (2026-09-02): the same five wildfires (Electric, GOAT,
-   Thunder Creek, KING, SISI) are still active in or within ~14 mi of Chelan County, with SISI burning inside the
-   county itself. Vegetation over the western county tile remains down 19% (NDVI 0.706→0.572, Aug 17→Aug 24) …
-   Rain moving in Sept 2–5 (up to 10.4mm Sept 3) should ease fire weather after a hot, dry stretch."
+brief-chelan-county--washington-2026-09-02.md, run 3, TL;DR:
+  "WATCH — unchanged since the previous run earlier today (2026-09-02). The same five wildfires are still
+   burning in and around Chelan County, and the vegetation signal already flagged this morning still holds:
+   NDVI over the MGRS 10TFT tile fell 19% (0.706 → 0.572) between Aug 17 and Aug 24, consistent with fire
+   impact rather than noise. The thing to watch is a light rain system moving in today through Sep 5 that
+   should ease fire risk without changing today's alert level."
   weather caveat, verbatim from the tool: "readings are for a 671m grid cell … valley floors run warmer than shown here"
   floods/storms: "GDACS checked 100 current global events, 0 active within 30 days inside the bbox"
 
 evals/brief_checks.py demo   →   PASS brief-chelan-county--washington-2026-09-02.md   (sections, alert, dates, every event grounded)
 briefing/state: alert WATCH · 5 event titles · ndvi_mean 0.572 · scene_count 8</div></div>
-<div class="answer"><div class="label">Our read</div>This is the part of groundstation nobody else has, and it ran on the same fixed code as the other nineteen cards. Five named fires, one inside the county, a 19% NDVI drop on the western tile since mid August, rain arriving, and the elevation caveat and the GDACS window note both carried through from the tools into the prose. The second run opened with <b>unchanged since the previous run earlier today</b>, which is the memory doing its job, and the grounding checks passed before anything would have been posted. SISI is the fire whose smoke sits on the Aug 24 mosaic in card 1.</div>
+<div class="answer"><div class="label">Our read</div>This is the part of groundstation nobody else has, and it ran on the same fixed code as the other nineteen cards. Five named fires, one inside the county, a 19% NDVI drop on the western tile since mid August, rain arriving, and the elevation caveat and the GDACS window note both carried through from the tools into the prose. The second and third runs both opened with <b>unchanged since the previous run earlier today</b>, which is the memory doing its job, and the grounding checks passed before anything would have been posted. SISI is the fire whose smoke sits on the Aug 24 mosaic in card 1.</div>
 <a class="fig" href="img/ft8-chelan-brief.html" target="_blank" title="open the live artifact"><img src="img/ft8-chelan-brief.png" alt="artifact produced by example 19" loading="lazy"><span class="open">live artifact ↗</span></a>
 <div class="learning"><b>Learning →</b> The checks also fail an older Chelan brief from July 22 that cited no dates and no NDVI change. The rules got stricter after it was written, and the failure stands in the demo folder rather than being deleted: a check that never fails is decoration.</div>
 <div class="shows">briefing/brief.py · per-AOI memory · evals/brief_checks.py as the gate · claude -p synthesis</div>
