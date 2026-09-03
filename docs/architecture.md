@@ -43,7 +43,7 @@ Everything important lives in `src/groundstation/tools.py` as plain functions wi
 ## What is deliberately not built
 
 - **A STAC browser or raster renderer** — deep exploration hands off to [stac-map](https://github.com/developmentseed/stac-map) (which brings [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster) client-side COG rendering), via `?href=` deep links and an embedded panel.
-- **A geocoder** — Gazet is Development Seed's small-model geocoder; `GAZET_URL` activates it the moment a JSON endpoint is exposed. Nominatim (with descriptive-phrase retries) is the fallback, not the destination.
+- **A geocoder** — Gazet is Development Seed's geocoder and answers first, through the JSON API on its Hugging Face Space (`GAZET_URL` to point elsewhere): a no-LLM fuzzy match over Overture divisions and Natural Earth, gated on similarity so a near miss falls through. Nominatim (with descriptive-phrase retries) is the fallback for towns, landmarks and phrases, not the destination.
 - **Hosted deployment** — the tool functions follow the `developmentseed/mcp-toolsets` shape (typed args, docstrings as descriptions, JSON returns) so they can drop into that scaffold's streamable-HTTP runtime when it's time.
 - **Auth** — all endpoints are public by design for the prototype; protected-data support is a planned follow-on using per-user credential passthrough.
 

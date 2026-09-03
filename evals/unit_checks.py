@@ -635,7 +635,7 @@ def t_stack_parse_all_fields():
     comps = gstack.parse_stack()
     assert len(comps) >= 12
     for c in comps:
-        for field in ("name", "kind", "what", "ds-role", "integration", "speaks-to", "link"):
+        for field in ("name", "stage", "what", "ds-role", "integration", "speaks-to", "link", "when"):
             assert c.get(field), f"{c.get('name')} missing {field}"
         assert c["ds-role"] in gstack.DS_ROLES
 
@@ -651,13 +651,15 @@ def _bad_stack(body: str) -> str:
             return str(e)
 
 
-_OK_BLOCK = "- kind: data\n- what: x\n- ds-role: uses\n- integration: x\n- speaks-to: x\n- link: https://x\n"
+_OK_BLOCK = "- stage: data\n- what: x\n- ds-role: uses\n- integration: x\n- speaks-to: x\n- link: https://x\n- when: always\n"
 
 
 def t_stack_parse_curation_mistakes_fail_loudly():
-    err = _bad_stack("## Quantum\n" + _OK_BLOCK.replace("kind: data", "kind: quantum"))
+    err = _bad_stack("## Quantum\n" + _OK_BLOCK.replace("stage: data", "stage: quantum"))
     assert "Quantum" in err and "quantum" in err
-    assert "missing" in _bad_stack("## Thin\n- kind: data\n- ds-role: uses\n")
+    assert "missing" in _bad_stack("## Thin\n- stage: data\n- ds-role: uses\n")
+    assert "unknown fact" in _bad_stack("## Typo\n" + _OK_BLOCK.replace("when: always", "when: catalgs"))
+    assert "unknown island" in _bad_stack("## Atlantis\n" + _OK_BLOCK + "- island: atlantis\n")
     assert "duplicate" in _bad_stack(f"## Twin\n{_OK_BLOCK}\n## Twin\n{_OK_BLOCK}")
     assert "empty" in _bad_stack("## \n" + _OK_BLOCK)
 
@@ -685,28 +687,67 @@ def t_stack_join_names_the_real_render():
 
 def t_stack_join_understates_without_rasters():
     # a geojson-only map exercised no catalog, tiler, or bucket — claiming
-    # them would fabricate provenance
+    # them would fabricate provenance. It did draw, on a basemap
     entries = gstack.stack_instances(gstack.parse_stack(), {"catalogs": [], "maplibre": True})
-    assert [e["name"] for e in entries] == ["MapLibre GL"]
+    assert [e["name"] for e in entries] == ["MapLibre GL", "OpenFreeMap", "OpenStreetMap"]
     # even the renderer is a fact: a static artifact (postcard) claims no engine
     assert gstack.stack_instances(gstack.parse_stack(), {"catalogs": []}) == []
 
 
-def t_stack_active_names_exist_in_stack_md():
-    # the join string-matches component names; a stack.md heading rename must
-    # fail here instead of silently vanishing from every panel
-    names = {c["name"] for c in gstack.parse_stack()}
-    wired = {"MapLibre GL", "STAC", "COG + HTTP range requests", "TiTiler", "rio-tiler",
-             "Cloud object storage", "AWS Terrarium terrain", "Gazet", "Nominatim",
-             "NASA EONET", "GDACS", "Open-Meteo", *gstack._CATALOG_COMPONENT.values()}
-    assert wired <= names, f"wired names missing from stack.md: {sorted(wired - names)}"
+def t_stack_when_rules_activate_the_right_components():
+    # activation is data in stack.md, not code: each artifact shape below must
+    # light the components that really served it and none that did not
+    comps = gstack.parse_stack()
+    def names(facts):
+        return {e["name"] for e in gstack.stack_instances(comps, facts)}
+    veda = names({"catalogs": ["veda"], "collections_by_catalog": {"veda": ["caldor-fire-burn-severity"]}, "tiler_hosts": ["openveda.cloud"], "maplibre": True})
+    assert {"eoAPI", "stac-fastapi", "pgstac", "titiler-pgstac", "NASA VEDA", "TiTiler"} <= veda and "stac-server" not in veda
+    pc = names({"catalogs": ["planetary-computer"], "collections_by_catalog": {"planetary-computer": ["naip"]}, "tiler_hosts": ["planetarycomputer.microsoft.com"], "maplibre": True})
+    assert {"stac-fastapi", "pgstac", "titiler-pgstac", "NAIP", "Planetary Computer"} <= pc and "eoAPI" not in pc
+    es = names({"catalogs": ["earth-search"], "collections_by_catalog": {"earth-search": ["sentinel-1-grd"]}, "tiler_hosts": ["titiler.xyz"], "maplibre": True})
+    assert {"stac-server", "Copernicus Sentinel", "Earth Search", "TiTiler", "COG + HTTP range requests"} <= es and "pgstac" not in es
+    three_d = names({"catalogs": ["earth-search"], "collections_by_catalog": {"earth-search": ["sentinel-2-l2a"]}, "tiler_hosts": ["titiler.xyz"], "maplibre": True, "terrain": True})
+    assert {"AWS Terrarium terrain", "OpenStreetMap"} <= three_d and "OpenFreeMap" not in three_d
+    assert {"Gazet", "Overture Maps", "Natural Earth"} <= names({"geocoded": "gazet"}) and "Nominatim" not in names({"geocoded": "gazet"})
+    assert {"Nominatim", "OpenStreetMap"} <= names({"geocoded": "nominatim"}) and "Gazet" not in names({"geocoded": "nominatim"})
+    assert names({"events": True}) == {"NASA EONET", "GDACS"} and names({"weather": True}) == {"Open-Meteo"}
+    assert names({"passes": True}) == {"eo-predictor", "Celestrak"}
+    assert names({"snapshot": True}) == {"Playwright"} and names({"mosaic_scenes": 3}) == {"rio-tiler"}
+
+
+def t_stack_when_grammar():
+    rule = "catalog=veda,planetary-computer & !terrain | snapshot"
+    assert gstack.matches(rule, {"catalogs": ["veda"], "terrain": False})
+    assert not gstack.matches(rule, {"catalogs": ["veda"], "terrain": True})
+    assert gstack.matches(rule, {"catalogs": ["earth-search"], "terrain": True, "snapshot": True})
+    assert gstack.matches("geocoded=gazet", {"geocoded": True}), "the older bare True claims every geocoder"
+    assert not gstack.matches("geocoded=gazet", {"geocoded": "nominatim"})
+    try:
+        gstack.matches("catalgs", {})
+        raise AssertionError("an unknown fact must fail loudly")
+    except ValueError as e:
+        assert "unknown fact" in str(e)
+
+
+def t_stack_islands_and_summary():
+    comps = gstack.parse_stack()
+    entries = gstack.stack_instances(comps, {"catalogs": ["veda"], "collections_by_catalog": {"veda": ["x"]}, "tiler_hosts": ["openveda.cloud"], "maplibre": True, "geocoded": "gazet"})
+    assert gstack.islands_exercised(entries) == ["Cloud Native Geospatial", "Data in the Browser", "Agentic"]
+    line = gstack.summary(entries)
+    assert "built by Development Seed" in line and "islands: Cloud Native Geospatial, Data in the Browser, Agentic" in line
+    # Development Seed's own components lead their stage
+    by_stage = {}
+    for e in entries:
+        by_stage.setdefault(e["stage"], []).append(e)
+    assert by_stage["pixels"][0]["ds-role"] in gstack.DS_OWN and by_stage["catalog"][0]["ds-role"] in gstack.DS_OWN
 
 
 def t_stack_group_order_and_attribution_shape():
     entries = gstack.stack_instances(gstack.parse_stack(), _STACK_FACTS)
-    # literal expected pipeline order for this fixture (geocoded=True adds the
-    # two access-kind geocoders), not a re-derivation
-    assert [e["kind"] for e in entries] == ["data", "access", "access", "access", "tiling", "viz", "standard", "infra"]
+    # literal expected pipeline order for this fixture (geocoded=True is the
+    # older form and claims both geocoders and their data), not a re-derivation
+    assert [e["stage"] for e in entries] == ["place"] * 4 + ["catalog"] * 3 + ["data"] + ["pixels"] * 3 + ["draw"] * 3, [e["name"] for e in entries]
+    assert entries[0]["name"] == "Gazet" and [e["name"] for e in entries if e["stage"] == "pixels"][0] == "TiTiler"
     html = tools._stack_panel_html(entries)
     assert 'class="stack-group"' in html and "TiTiler" in html
     for role in {e["ds-role"] for e in entries}:
@@ -716,7 +757,7 @@ def t_stack_group_order_and_attribution_shape():
 
 
 def t_stack_panel_escapes_untrusted_values():
-    entries = [{"name": "x", "kind": "data", "what": "<script>alert(1)</script>",
+    entries = [{"name": "x", "kind": "data", "stage": "data", "what": "<script>alert(1)</script>",
                 "ds-role": "uses", "instance": 'onerror="x" <img>', "link": 'https://x/"><script>'}]
     html = tools._stack_panel_html(entries)
     assert "<script>" not in html and "<img>" not in html
@@ -791,17 +832,17 @@ def t_stack_3d_claims_terrain():
 def t_stack_postcard_listing_static_and_honest():
     listing = tools._stack_credit_for("earth-search", "sentinel-2-l2a", "titiler.xyz")
     html = _postcard(stack_html=listing)
-    assert "the stack behind this card:" in html
+    assert "the stack behind this card (Cloud Native Geospatial):" in html
     assert "serving sentinel-2-l2a via titiler.xyz" in html
     assert "MapLibre" not in html  # a still image runs no map engine
     assert "https://" not in html  # the no-live-URLs guarantee survives the listing
-    assert "the stack behind this card:" not in _postcard()  # off by default
+    assert "the stack behind this card" not in _postcard()  # off by default
 
 
 def t_stack_map_honest_extra_facts():
     # callers that geocoded / fetched events say so; the panel only then claims it
-    html, _ = _render_stack_map(stack_layer=True, stack_facts={"geocoded": True, "events": True})
-    for name in ("Gazet", "Nominatim", "NASA EONET", "GDACS", "Open-Meteo"):
+    html, _ = _render_stack_map(stack_layer=True, stack_facts={"geocoded": True, "events": True, "weather": True})
+    for name in ("Gazet", "Nominatim", "NASA EONET", "GDACS", "Open-Meteo", "Overture Maps"):
         assert name in html, f"{name} missing despite honest facts"
     base, _ = _render_stack_map(stack_layer=True)
     assert "Gazet" not in base and "NASA EONET" not in base
@@ -1250,6 +1291,286 @@ def t_recommended_handles_sar_and_all_cloudy():
     rec = tools._recommend(cloudy)
     assert rec["id"] == "c1" and "least bad" in rec["reason"], rec
     assert tools._recommend([]) is None
+
+
+class _FakeResp:
+    status_code = 200
+
+    def __init__(self, payload, ctype="application/json"):
+        self._p, self.headers = payload, {"content-type": ctype}
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._p
+
+
+_GAZET_CHELAN = {"ids": [
+    {"source": "divisions_area", "id": "4017061d", "name": "Chelan County", "matched_name": "Chelan County",
+     "country": "US", "subtype": "county", "admin_level": 2,
+     "bbox": [-121.18091, 47.2609433, -119.859708, 48.5509464], "similarity": 1.0, "is_substring_match": True},
+    {"source": "divisions_area", "id": "597dabcd", "name": "McLean County", "country": "US", "subtype": "county",
+     "bbox": [-102.386505, 47.157902, -100.58461, 47.849483], "similarity": 0.9209, "is_substring_match": False},
+]}
+_GAZET_SALINAS = {"ids": [
+    {"source": "divisions_area", "id": "5a372c80", "name": "Salinas", "country": "MX", "subtype": "county",
+     "bbox": [-101.9460654, 22.4650338, -101.3759004, 23.1814428], "similarity": 0.9, "is_substring_match": False},
+]}
+_GAZET_LOJA = {"ids": [
+    {"source": "divisions_area", "id": "4ad73a51", "name": "Loja Province", "country": "EC", "subtype": "region",
+     "bbox": [-80.4846769, -4.7488756, -79.1006936, -3.3295641], "similarity": 1.0, "is_substring_match": True},
+    {"source": "divisions_area", "id": "d6082edf", "name": "Loja Canton", "country": "EC", "subtype": "county",
+     "bbox": [-79.5457957, -4.5114788, -79.1006936, -3.6728594], "similarity": 1.0, "is_substring_match": True},
+    {"source": "divisions_area", "id": "fdd5690f", "name": "Maloja", "country": "CH", "subtype": "county",
+     "bbox": [9.4558, 46.2939, 10.1003, 46.6987], "similarity": 0.7222, "is_substring_match": True},
+]}
+_NOMINATIM_SALINAS = [{"boundingbox": ["36.2", "36.8", "-121.9", "-121.3"], "lat": "36.5", "lon": "-121.6",
+                       "display_name": "Salinas Valley, Monterey County, California"}]
+
+
+def _with_geocoders(gazet_payload, nominatim_payload, fn, ctype="application/json"):
+    saved_get, saved_json, saved_skip = tools._client.get, tools._get_json, tools._gazet_skip_until
+    calls = {"gazet": 0, "nominatim": 0}
+
+    def fake_get(url, **kw):
+        calls["gazet"] += 1
+        assert url == tools.GAZET_URL and kw["params"]["mode"] == "fuzzy" and kw["params"]["ids_only"] == "true", kw
+        return _FakeResp(gazet_payload, ctype)
+
+    def fake_json(url, **kw):
+        calls["nominatim"] += 1
+        return nominatim_payload
+
+    tools._client.get, tools._get_json, tools._gazet_skip_until = fake_get, fake_json, 0.0
+    try:
+        return fn(), calls
+    finally:
+        tools._client.get, tools._get_json, tools._gazet_skip_until = saved_get, saved_json, saved_skip
+
+
+def t_geocode_gazet_answers_first_with_the_real_extent():
+    # Field tests No.4 to No.7 all filed "our own geocoder never fires". The JSON API
+    # was live on the Space the whole time; the ds.io domain fronts a static page.
+    out, calls = _with_geocoders(_GAZET_CHELAN, [], lambda: tools.geocode("Chelan County"))
+    assert out["source"] == "gazet" and out["name"] == "Chelan County (US, county)", out
+    assert out["bbox"] == [-121.18091, 47.2609433, -119.859708, 48.5509464], out
+    assert "geocode_note" not in out, out
+    assert calls == {"gazet": 1, "nominatim": 0}, calls
+
+
+def t_geocode_similarity_gate_sends_near_misses_to_nominatim():
+    # Jaro-Winkler always returns a best row. "Salinas Valley" scored 0.9 as
+    # Salinas, Mexico — the gate is what stops a confident wrong continent.
+    out, calls = _with_geocoders(_GAZET_SALINAS, _NOMINATIM_SALINAS, lambda: tools.geocode("Salinas Valley"))
+    assert out["source"] == "nominatim" and out["bbox"] == [-121.9, 36.2, -121.3, 36.8], out
+    assert calls == {"gazet": 1, "nominatim": 1}, calls
+    assert tools.GAZET_MIN_SIMILARITY > 0.9
+
+
+def t_geocode_names_the_tie_it_broke():
+    # Two real Lojas score 1.0. Picking one silently is a decision the caller cannot see.
+    out, _ = _with_geocoders(_GAZET_LOJA, [], lambda: tools.geocode("Loja"))
+    assert out["source"] == "gazet" and out["name"] == "Loja Province (EC, region)", out
+    assert "2 places match 'Loja'" in out["geocode_note"] and "Loja Canton (EC, county) at 4.1S 79.3W" in out["geocode_note"], out
+    assert "Maloja" not in out["geocode_note"], "a 0.72 near miss is not a tie"
+
+
+_GAZET_HARRIS = {"ids": [
+    {"source": "divisions_area", "id": "tx", "name": "Harris County", "country": "US", "subtype": "county",
+     "bbox": [-95.9608455, 29.497339, -94.9084924, 30.1706958], "similarity": 1.0, "is_substring_match": True},
+    {"source": "divisions_area", "id": "ga", "name": "Harris County", "country": "US", "subtype": "county",
+     "bbox": [-85.0, 32.6, -84.6, 32.9], "similarity": 1.0, "is_substring_match": True},
+]}
+
+
+def t_geocode_tie_note_tells_same_named_places_apart():
+    # Field test No.8: Harris County, Texas and Harris County, Georgia both read
+    # "(US, county)". A note that names them identically has said nothing.
+    out, _ = _with_geocoders(_GAZET_HARRIS, [], lambda: tools.geocode("Harris County"))
+    assert out["source"] == "gazet" and out["bbox"][0] == -95.9608455, out
+    note = out["geocode_note"]
+    assert "at 29.8N 95.4W" in note and "at 32.8N 84.8W" in note, note
+
+
+def t_geocode_non_json_marks_gazet_down_and_falls_through():
+    out, calls = _with_geocoders({}, _NOMINATIM_SALINAS, lambda: tools.geocode("Salinas Valley"), ctype="text/html")
+    assert out["source"] == "nominatim" and calls["nominatim"] == 1, (out, calls)
+
+
+def _stac_item(id_, bbox, day="2026-08-24"):
+    return {"id": id_, "collection": "sentinel-2-l2a", "bbox": bbox, "links": [], "assets": {"visual": {}},
+            "properties": {"datetime": f"{day}T19:00:00Z", "eo:cloud_cover": 1.0}}
+
+
+def _with_stac_search(features, fn):
+    saved = tools._client.post
+    tools._client.post = lambda url, **kw: _FakeResp({"type": "FeatureCollection", "features": features})
+    try:
+        return fn()
+    finally:
+        tools._client.post = saved
+
+
+def t_recommended_says_when_the_set_is_starved():
+    # Field test No.8, Chelan County: the best single scene covered 49% and no
+    # same-day set covered the county within 10 results. The recommendation
+    # must say that, or the 49% scene is rendered as the answer.
+    slivers = [_stac_item("a", [0, 0, 4, 10]), _stac_item("b", [4, 0, 6, 10])]
+    r = _with_stac_search(slivers, lambda: tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 10, 10]))
+    assert "full_coverage_set" not in r
+    assert "No single scene covers this area" in r["recommended"]["reason"] and "2 results" in r["recommended"]["reason"], r["recommended"]
+    halves = [_stac_item("a", [0, 0, 5, 10]), _stac_item("b", [5, 0, 10, 10])]
+    r = _with_stac_search(halves, lambda: tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 10, 10]))
+    assert "full_coverage_set" in r and "No single scene" not in r["recommended"]["reason"], r["recommended"]
+
+
+def t_recommended_ties_go_to_the_newest_clean_scene():
+    # Field test No.8, Chelan County over 30 days: 49.7% at 19.3% cloud (Aug 9)
+    # vs 48.9% at 0.6% (Aug 24). Coverage within 5 points is a tie, cloud within
+    # 5 points is a tie, and the newest of what is left wins.
+    items = [
+        {"id": "S2B_10UFU_20260809_0_L2A", "datetime": "2026-08-09T19:11:00Z", "cloud_cover": 19.292465, "covers_aoi_pct": 49.7},
+        {"id": "S2C_10UFU_20260824_1_L2A", "datetime": "2026-08-24T19:11:07Z", "cloud_cover": 0.596335, "covers_aoi_pct": 48.9},
+        {"id": "S2C_10TGT_20260824_0_L2A", "datetime": "2026-08-24T19:11:16Z", "cloud_cover": 0.002519, "covers_aoi_pct": 20.9},
+    ]
+    assert tools._recommend(items)["id"] == "S2C_10UFU_20260824_1_L2A"
+    # Loja Canton: two 98.2% scenes, 18.7% cloud on Aug 3 and 19.1% on Aug 28. Freshness wins the tie.
+    loja = [
+        {"id": "old", "datetime": "2026-08-03T15:44:00Z", "cloud_cover": 18.677768, "covers_aoi_pct": 98.2},
+        {"id": "new", "datetime": "2026-08-28T15:44:21Z", "cloud_cover": 19.125262, "covers_aoi_pct": 98.2},
+        {"id": "cloudy", "datetime": "2026-09-02T15:44:21Z", "cloud_cover": 59.815603, "covers_aoi_pct": 98.2},
+    ]
+    rec = tools._recommend(loja)
+    assert rec["id"] == "new" and "newest of 2 near-equal scenes" in rec["reason"] and "2026-08-03" in rec["reason"], rec
+
+
+def t_stack_panel_credits_the_geocoder_that_answered():
+    # Field test No.8: every geocoded map credited Gazet, including the ones
+    # Nominatim answered. geocode() returns `source`; the panel claims that one.
+    pat = re.compile(r'class="stack-name">([^<]+)<')
+    lay = [{"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}]
+    with tempfile.TemporaryDirectory() as d:
+        def names(fact):
+            m = tools.render_map("t", [0, 0, 10, 10], lay, out_path=str(Path(d) / "m.html"), stack_layer=True, stack_facts={"geocoded": fact})
+            return {n for n in pat.findall(Path(m["map_path"]).read_text()) if n in ("Gazet", "Nominatim")}
+        assert names("gazet") == {"Gazet"}
+        assert names("nominatim") == {"Nominatim"}
+        assert names(True) == {"Gazet", "Nominatim"}, "the older bare-True form still claims both"
+        assert names(False) == set()
+
+
+def t_wrap_aware_bbox_puts_fiji_back_together():
+    # Field test No.8: Gazet's bbox for Fiji is the whole world, because the
+    # country crosses the dateline. The real extent is 176.9E to 178.2W.
+    geom = {"type": "MultiPolygon", "coordinates": [
+        [[[177.0, -18.0], [180.0, -18.0], [180.0, -17.0], [177.0, -17.0], [177.0, -18.0]]],
+        [[[-180.0, -17.5], [-178.2, -17.5], [-178.2, -16.5], [-180.0, -16.5], [-180.0, -17.5]]],
+    ]}
+    b = tools._wrap_aware_bbox(geom)
+    assert b == [177.0, -18.0, -178.2, -16.5], b
+    assert b[0] > b[2], "west > east is the RFC 7946 antimeridian form the coverage math reads"
+    assert tools._bbox_coverage_pct(b, [176.0, -19.0, 180.0, -16.0]) is not None
+    # something that genuinely wraps the globe stays as it was
+    globe = {"type": "Polygon", "coordinates": [[[-180, -85], [-90, -85], [0, -85], [90, -85], [180, -85], [180, -60], [0, -60], [-180, -60], [-180, -85]]]}
+    assert tools._wrap_aware_bbox(globe) is None
+    assert tools._at({"bbox": [-180.0, -21.0, 180.0, -12.5]}) == "spanning the antimeridian"
+    assert tools._at({"bbox": [176.9, -21.0, -178.3, -12.5]}) == "at 16.8S 179.3E", "the centre of a west > east box is across the dateline"
+
+
+def t_statistics_have_one_shape_clipped_or_not():
+    # Field test No.8: clipped stats came back as a GeoJSON Feature, unclipped as
+    # the band dict, and the first consumer that saw both crashed on it.
+    feature = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
+               "properties": {"statistics": {"b1": {"min": 1.0, "max": 900.0, "mean": 120.0, "percentile_2": 20.0, "percentile_98": 400.0, "histogram": [1, 2]}}}}
+    saved_post, saved_json = tools._client.post, tools._get_json
+    tools._client.post = lambda url, **kw: _FakeResp(feature)
+    tools._get_json = lambda url, **kw: {"bbox": [0, 0, 1, 1], "assets": {"vv": {"raster:bands": [{"scale": 1.0, "unit": "DN"}]}}}
+    try:
+        out = tools.compute_statistics("earth-search", "sentinel-1-grd", "S1X", assets=["vv"], bbox=[0.2, 0.2, 0.8, 0.8])
+    finally:
+        tools._client.post, tools._get_json = saved_post, saved_json
+    assert out["vv"]["percentile_98"] == 400.0 and "histogram" not in out["vv"], out
+    assert out["clipped_to"] == [0.2, 0.2, 0.8, 0.8] and "extent_note" not in out, out
+    assert out["band_scaling"] == [{"scale": 1.0, "unit": "DN"}], "scaling travels on the clipped path too"
+
+
+def t_nominatim_fallback_says_what_it_matched():
+    # Field test No.8: "the Ashburn data center corridor" simplified to "Ashburn"
+    # and the top hit was Ashburn, Georgia. The note names the match and the rest.
+    ga = {"boundingbox": ["31.69", "31.74", "-83.67", "-83.63"], "lat": "31.71", "lon": "-83.65",
+          "display_name": "Ashburn, Turner County, Georgia, 31714, United States"}
+    va = {"boundingbox": ["39.0", "39.1", "-77.5", "-77.4"], "lat": "39.04", "lon": "-77.49",
+          "display_name": "Ashburn, Loudoun County, Virginia, United States"}
+    saved_get, saved_json, saved_skip = tools._client.get, tools._get_json, tools._gazet_skip_until
+    tools._client.get = lambda url, **kw: _FakeResp({"ids": []})
+    va2 = dict(va, display_name="Ashburn, Loudoun County, Virginia, 20147, United States")
+    tools._get_json = lambda url, **kw: [ga, va, va2] if kw["params"]["q"] == "Ashburn" else []
+    tools._gazet_skip_until = 0.0
+    try:
+        out = tools.geocode("the Ashburn data center corridor")
+    finally:
+        tools._client.get, tools._get_json, tools._gazet_skip_until = saved_get, saved_json, saved_skip
+    assert out["source"] == "nominatim" and out["bbox"][0] == -83.67, out
+    note = out["geocode_note"]
+    assert "matched 'Ashburn' after simplifying 'the Ashburn data center corridor'" in note, note
+    assert note.count("Ashburn, Virginia, United States") == 1, ("the same place twice is not two other places", note)
+
+
+def t_gdacs_feed_is_windowed_and_counted():
+    # Field test No.8: days=7 and days=30 both returned 100 GDACS events. The
+    # feed is a current-events list; the window is applied here and reported.
+    now = tools.dt.datetime.now(tools.dt.timezone.utc)
+    fresh = (now - tools.dt.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%S")
+    stale = (now - tools.dt.timedelta(days=40)).strftime("%Y-%m-%dT%H:%M:%S")
+    feed = {"features": [
+        {"geometry": {"type": "Point", "coordinates": [10.0, 10.0]}, "properties": {"name": "new", "eventtype": "FL", "alertlevel": "Green", "todate": fresh}},
+        {"geometry": {"type": "Point", "coordinates": [11.0, 11.0]}, "properties": {"name": "old", "eventtype": "EQ", "alertlevel": "Green", "todate": stale}},
+    ]}
+    saved = tools._get_json
+    tools._get_json = lambda url, **kw: feed if "gdacs" in url else {"events": []}
+    try:
+        out = tools.active_events(days=7)
+    finally:
+        tools._get_json = saved
+    assert [e["title"] for e in out["gdacs"]] == ["new"], out
+    assert out["gdacs_note"] == "GDACS current-events feed listed 2; 1 active within 7 days", out
+
+
+def t_pc_registration_timeout_falls_back_to_item_tiles():
+    # Field test No.8: Planetary Computer's mosaic registration hung for 30s
+    # three runs in a row and the whole render died with it. Item tiles need no
+    # registration, and the map says which path it took.
+    import httpx as _hx
+    saved_post = tools._client.post
+    def boom(url, **kw):
+        raise _hx.ReadTimeout("slow")
+    tools._client.post = boom
+    tools._pc_mosaic_cache.pop("naip:X", None)
+    try:
+        url = tools.tile_url_template("planetary-computer", "naip", "X", assets=["image"])
+        assert "/item/tiles/" in url and "item=X" in url, url
+        with tempfile.TemporaryDirectory() as d:
+            m = tools.render_map("t", [-77.6, 39.0, -77.4, 39.1],
+                                 [{"type": "item", "name": "NAIP X", "catalog": "planetary-computer", "collection_id": "naip", "item_id": "X",
+                                   "bbox": [-77.6, 39.0, -77.4, 39.1], "assets": ["image"]}], out_path=str(Path(d) / "m.html"))
+        assert "mosaic registration timed out for NAIP X" in m["note"], m
+    finally:
+        tools._client.post = saved_post
+        tools._PC_FALLBACKS.discard("X")
+
+
+def t_no_artifact_rides_the_watermarked_basemap():
+    # Field test No.8: CARTO's free basemap began returning "API KEY REQUIRED"
+    # tiles under every map. No artifact may reference it again.
+    with tempfile.TemporaryDirectory() as d:
+        lay = [{"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}]
+        m = tools.render_map("t", [0, 0, 10, 10], lay, out_path=str(Path(d) / "m.html"))
+        html = Path(m["map_path"]).read_text()
+        assert "cartocdn" not in html and "tiles.openfreemap.org/styles/positron" in html
+        m3 = tools.render_map_3d("t", [0, 0, 10, 10], {"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}, out_path=str(Path(d) / "m3.html"))
+        html3 = Path(m3["path"]).read_text()
+        assert "cartocdn" not in html3 and "tile.openstreetmap.org" in html3
 
 
 if __name__ == "__main__":
