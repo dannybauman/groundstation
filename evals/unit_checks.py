@@ -1463,7 +1463,8 @@ def t_nominatim_fallback_says_what_it_matched():
           "display_name": "Ashburn, Loudoun County, Virginia, United States"}
     saved_get, saved_json, saved_skip = tools._client.get, tools._get_json, tools._gazet_skip_until
     tools._client.get = lambda url, **kw: _FakeResp({"ids": []})
-    tools._get_json = lambda url, **kw: [ga, va] if kw["params"]["q"] == "Ashburn" else []
+    va2 = dict(va, display_name="Ashburn, Loudoun County, Virginia, 20147, United States")
+    tools._get_json = lambda url, **kw: [ga, va, va2] if kw["params"]["q"] == "Ashburn" else []
     tools._gazet_skip_until = 0.0
     try:
         out = tools.geocode("the Ashburn data center corridor")
@@ -1472,7 +1473,7 @@ def t_nominatim_fallback_says_what_it_matched():
     assert out["source"] == "nominatim" and out["bbox"][0] == -83.67, out
     note = out["geocode_note"]
     assert "matched 'Ashburn' after simplifying 'the Ashburn data center corridor'" in note, note
-    assert "Ashburn, Virginia, United States" in note, note
+    assert note.count("Ashburn, Virginia, United States") == 1, ("the same place twice is not two other places", note)
 
 
 def t_gdacs_feed_is_windowed_and_counted():
@@ -1493,6 +1494,29 @@ def t_gdacs_feed_is_windowed_and_counted():
         tools._get_json = saved
     assert [e["title"] for e in out["gdacs"]] == ["new"], out
     assert out["gdacs_note"] == "GDACS current-events feed listed 2; 1 active within 7 days", out
+
+
+def t_pc_registration_timeout_falls_back_to_item_tiles():
+    # Field test No.8: Planetary Computer's mosaic registration hung for 30s
+    # three runs in a row and the whole render died with it. Item tiles need no
+    # registration, and the map says which path it took.
+    import httpx as _hx
+    saved_post = tools._client.post
+    def boom(url, **kw):
+        raise _hx.ReadTimeout("slow")
+    tools._client.post = boom
+    tools._pc_mosaic_cache.pop("naip:X", None)
+    try:
+        url = tools.tile_url_template("planetary-computer", "naip", "X", assets=["image"])
+        assert "/item/tiles/" in url and "item=X" in url, url
+        with tempfile.TemporaryDirectory() as d:
+            m = tools.render_map("t", [-77.6, 39.0, -77.4, 39.1],
+                                 [{"type": "item", "name": "NAIP X", "catalog": "planetary-computer", "collection_id": "naip", "item_id": "X",
+                                   "bbox": [-77.6, 39.0, -77.4, 39.1], "assets": ["image"]}], out_path=str(Path(d) / "m.html"))
+        assert "mosaic registration timed out for NAIP X" in m["note"], m
+    finally:
+        tools._client.post = saved_post
+        tools._PC_FALLBACKS.discard("X")
 
 
 if __name__ == "__main__":
