@@ -1,8 +1,8 @@
 {
   "title": "groundstation field test №8 — the variety edition, run on two PRs before they merged",
   "heading": "THE FIELD TEST №8",
-  "sub": "groundstation · 20 prompts · 12 fixes mid-test · 5 things to build next · September 2, 2026 · Development Seed labs",
-  "lede": "This edition ran on PRs #31 and #32 before either merged, in-process on the branch rather than through the MCP server (the connected server was still 0.8.0), to find what the checks cannot. Variety on purpose: <b>our own geocoder answering for the first time</b>, the recommendation and the empty-search record from the tool-honesty work, a tropical storm on the Gulf coast on the day, radar through cloud, a dry-season NDWI comparison, a 3D drape, and VEDA burn severity with eoAPI on the panel. Twenty prompts in two sittings. Twelve things broke on a first pass and were fixed, checked and re-run before the page was rebuilt; each card says so. <b>Round 6 is the part this edition was for</b>: five things the run says to build next, and which DevSeed tool already does most of each. Data blocks are verbatim, the prose below them is our reading.",
+  "sub": "groundstation · 20 prompts · 13 fixes mid-test · 5 things to build next · September 2, 2026 · Development Seed labs",
+  "lede": "This edition ran on PRs #31 and #32 before either merged, in-process on the branch rather than through the MCP server (the connected server was still 0.8.0), to find what the checks cannot. Variety on purpose: <b>our own geocoder answering for the first time</b>, the recommendation and the empty-search record from the tool-honesty work, a tropical storm on the Gulf coast on the day, radar through cloud, a dry-season NDWI comparison, a 3D drape, and VEDA burn severity with eoAPI on the panel. Twenty prompts in two sittings. Thirteen things broke on a first pass and were fixed, checked and re-run before the page was rebuilt; each card says so. <b>Round 6 is the part this edition was for</b>: five things the run says to build next, and which DevSeed tool already does most of each. Data blocks are verbatim, the prose below them is our reading.",
   "stats": [
     {
       "value": "20/20",
@@ -13,7 +13,7 @@
       "label": "geocodes answered by Gazet, the first edition where it fired"
     },
     {
-      "value": "12",
+      "value": "13",
       "label": "fixes shipped mid-test, each pinned by a check"
     },
     {
@@ -190,7 +190,7 @@
           "returned": "active_events(14 days)   →   GDACS  Flood in Cambodia   Green   2026-08-28 to 2026-09-02   (103.20, 13.09)\n  gdacs_note: \"GDACS current-events feed listed 100; 100 active within 14 days\"\nsearch_imagery(sentinel-1-grd, last 20 days)     →  S1D_IW_GRDH_1SDV_20260829T111939…   ascending   covers_aoi_pct 96.5\nsearch_imagery(sentinel-1-grd, 60 to 105 days ago)   →  S1D_IW_GRDH_1SDV_20260630T111936…   ascending   covers_aoi_pct 96.4\ncompute_statistics(after, vv, bbox)   →   vv: p2 128  p98 328  mean 230   clipped_to: bbox\nrender_map(after + before at rescale 128,328 + GDACS point, stack_layer)   →   swipe, coverage_pct 96.5",
           "answer": "Two ascending passes sixty days apart at the same minute of the day, which is the same relative orbit, so the backscatter is comparable. Same collection and overlapping footprints, so the map is a swipe by default. The stretch comes from the after scene's own percentiles rather than a guess, and open water reads dark on both sides of the divider.",
           "artifact": "img/ft8-cambodia-sar-swipe.html",
-          "learning": "<b>Pass 1 crashed on the statistics shape</b> (the Phoenix card) and <b>TiTiler named the requested band b1</b>, so the caller who asked for vv had to guess which key was theirs. The tool gives the asset its name back when the mapping is one to one. And the GDACS feed turned out to be a current-events list, not a window: days=7 and days=30 both returned 100. The window is applied now and the return counts what the feed listed.",
+          "learning": "<b>Pass 1 crashed on the statistics shape</b> (the Phoenix card) and <b>TiTiler named the requested band b1</b>, so the caller who asked for vv had to guess which key was theirs. The tool gives the asset its name back when the mapping is one to one. And the GDACS feed turned out to be a current-events list, not a window: days=7 and days=30 both returned 100. The window is applied now and the return counts what the feed listed. <b>And the first still of this card found the biggest thing in the edition:</b> the basemap tiles where no imagery covered read \"API KEY REQUIRED\". CARTO's free basemap, under every groundstation map, postcard snapshot and the console since July, now watermarks. 2D maps ride OpenFreeMap's key-free positron style now, the 3D style rides OpenStreetMap's tiles, a check refuses cartocdn in any artifact, and every artifact and still on this page was rebuilt.",
           "shows": "GDACS on the current-events feed, windowed · orbit_state pairing · statistics keyed by asset · auto swipe"
         },
         {
@@ -283,6 +283,6 @@
       ]
     }
   ],
-  "repro": "git clone https://github.com/dannybauman/groundstation && cd groundstation\ngit checkout gazet-live                     # until #31 and #32 merge, then main\nbash scripts/doctor.sh                      # walks the setup chain, prints the fix\nuv run evals/unit_checks.py                 # 108 offline checks\nuv run scripts/field_test.py docs/field-test-2026-09-02.cases.json   # rebuild this page",
-  "footer": "field test №8 · September 2, 2026 · run on PRs #31 and #32 before merge · twenty prompts, twelve fixes mid-test, five things to build next · groundstation · Development Seed labs"
+  "repro": "git clone https://github.com/dannybauman/groundstation && cd groundstation\ngit checkout gazet-live                     # until #31 and #32 merge, then main\nbash scripts/doctor.sh                      # walks the setup chain, prints the fix\nuv run evals/unit_checks.py                 # 109 offline checks\nuv run scripts/field_test.py docs/field-test-2026-09-02.cases.json   # rebuild this page",
+  "footer": "field test №8 · September 2, 2026 · run on PRs #31 and #32 before merge · twenty prompts, thirteen fixes mid-test, five things to build next · groundstation · Development Seed labs"
 }
