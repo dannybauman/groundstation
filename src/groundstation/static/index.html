@@ -319,10 +319,7 @@ const state = { g: null, scenes: [], activeScene: null, ndviCache: {} };
 
 const map = new maplibregl.Map({
   container: "map",
-  style: { version: 8, sources: { basemap: { type: "raster",
-      tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
-      attribution: "© OpenStreetMap © CARTO" } },
-    layers: [{ id: "basemap", type: "raster", source: "basemap" }] },
+  style: "https://tiles.openfreemap.org/styles/positron",  // CARTO free tiles now watermark, see tools.py
   center: [10, 20], zoom: 1.6
 });
 map.addControl(new maplibregl.NavigationControl());

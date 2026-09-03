@@ -1100,10 +1100,10 @@ __STACK__
 <script>
 const LAYERS = __LAYERS__;
 const BBOX = __BBOX__;
-const BASE_STYLE = () => ({ version: 8, sources: { basemap: { type: "raster",
-    tiles: ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], tileSize: 256,
-    attribution: "&copy; OpenStreetMap &copy; CARTO" } },
-  layers: [{ id: "basemap", type: "raster", source: "basemap" }] });
+// Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
+// watermark tiles under every artifact. OpenFreeMap needs no key and its
+// positron style is the same light look; raster layers stack on it unchanged
+const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 
@@ -1854,11 +1854,13 @@ def render_map_3d(
     style = {
         "version": 8,
         "sources": {
+            # the 3D style is built here rather than fetched, so it keeps a raster
+            # basemap; CARTO's now watermarks, OSM's standard tiles do not (light use)
             "basemap": {
                 "type": "raster",
-                "tiles": ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"],
+                "tiles": ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
                 "tileSize": 256,
-                "attribution": "&copy; OpenStreetMap &copy; CARTO",
+                "attribution": "&copy; OpenStreetMap contributors",
             },
             "imagery": {
                 "type": "raster",

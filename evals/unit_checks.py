@@ -1519,6 +1519,19 @@ def t_pc_registration_timeout_falls_back_to_item_tiles():
         tools._PC_FALLBACKS.discard("X")
 
 
+def t_no_artifact_rides_the_watermarked_basemap():
+    # Field test No.8: CARTO's free basemap began returning "API KEY REQUIRED"
+    # tiles under every map. No artifact may reference it again.
+    with tempfile.TemporaryDirectory() as d:
+        lay = [{"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}]
+        m = tools.render_map("t", [0, 0, 10, 10], lay, out_path=str(Path(d) / "m.html"))
+        html = Path(m["map_path"]).read_text()
+        assert "cartocdn" not in html and "tiles.openfreemap.org/styles/positron" in html
+        m3 = tools.render_map_3d("t", [0, 0, 10, 10], {"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}, out_path=str(Path(d) / "m3.html"))
+        html3 = Path(m3["path"]).read_text()
+        assert "cartocdn" not in html3 and "tile.openstreetmap.org" in html3
+
+
 if __name__ == "__main__":
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("t_")):
         check(name, fn)
