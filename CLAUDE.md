@@ -6,7 +6,7 @@ A Development Seed labs prototype. Full architecture in `docs/architecture.md`, 
 
 Before building a capability or reaching for a generic dependency, ask: **does a DevSeed tool already do this?** Prefer it, even when a generic option looks marginally easier — this project exists to show the DS/open-source stack working, so using our own tools IS the product. The family to check first: TiTiler, rio-tiler, titiler-pgstac, cogeo-mosaic/MosaicJSON, rio-cogeo, eoAPI, stac-fastapi, pgstac, Gazet, stactools, lonboard/deck.gl-raster (viz). When unsure, search the developmentseed and cogeotiff GitHub orgs before adding anything.
 
-**And attribute it.** Any tool that ends up in an artifact's render path gets an entry in `docs/stack.md` (the curated attribution source) in the same PR — the stack layer can only credit what the file lists. Attribution is to projects, never people.
+**And attribute it.** Any tool that ends up in an artifact's render path gets an entry in `docs/stack.md` (the curated attribution source) in the same PR, with a `when` rule saying which render facts put it on screen, a pipeline `stage`, and its `island` when it has one — the stack layer can only credit what the file lists, and it reads no code to do it. Attribution is to projects, never people.
 
 ## Working agreements
 

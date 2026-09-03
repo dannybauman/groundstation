@@ -1003,15 +1003,16 @@ def tile_url_template(
 # viz forest green, standard violet, infra gray — same semantics as the
 # terminal colors in scripts/doctor.sh.
 _BRAND_CSS = """  :root { --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --rule: #dedad4; --paper: #f7f4ef;
-    --k-data: #1d4e8f; --k-access: #7a5c2e; --k-tiling: #CF3F02; --k-viz: #2a5c45;
-    --k-standard: #6b4c8f; --k-infra: #4a4440; }"""
+    --k-place: #7a5c2e; --k-catalog: #1d4e8f; --k-data: #6b4c8f; --k-pixels: #CF3F02; --k-draw: #2a5c45;
+    --k-orbit: #4a4440; }"""
 
 # the stack layer chunk — injected into _MAP_TEMPLATE only when stack_layer=True,
 # so default artifacts carry zero extra bytes
 _STACK_CHUNK = """<button id="stack-toggle" aria-expanded="false">Stack</button>
 <aside id="stack" aria-label="Technology stack">
   <h2>The stack behind this map</h2>
-  <p class="stack-sub">what is actually on screen · tap any entry for what it is and what it talks to</p>
+  <p class="stack-sub">__SUMMARY__</p>
+  <p class="stack-sub">the pipeline in order · tap any entry for what it is and what it talks to</p>
   __ENTRIES__
 </aside>
 <style>
@@ -1036,9 +1037,12 @@ _STACK_CHUNK = """<button id="stack-toggle" aria-expanded="false">Stack</button>
     font-size: 10px; align-self: center; transition: transform .15s ease; }
   .stack-entry[open] summary::after { transform: rotate(90deg); }
   .stack-entry .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
-  .dot.k-data { background: var(--k-data); } .dot.k-access { background: var(--k-access); }
-  .dot.k-tiling { background: var(--k-tiling); } .dot.k-viz { background: var(--k-viz); }
-  .dot.k-standard { background: var(--k-standard); } .dot.k-infra { background: var(--k-infra); }
+  .dot.k-place { background: var(--k-place); } .dot.k-catalog { background: var(--k-catalog); }
+  .dot.k-data { background: var(--k-data); } .dot.k-pixels { background: var(--k-pixels); }
+  .dot.k-draw { background: var(--k-draw); } .dot.k-orbit { background: var(--k-orbit); }
+  .stack-name .island { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--accent); border: 1px dashed var(--accent); border-radius: 3px; padding: 2px 4px; margin-left: 4px;
+    vertical-align: 1px; }
   .s-head { display: flex; flex-direction: column; min-width: 0; }
   .stack-name { font-weight: 600; }
   .stack-name .role { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
@@ -1450,6 +1454,9 @@ def _map_stack_facts(
         "terrain": False,
         "geocoded": False,
         "events": False,
+        "weather": False,
+        "passes": False,
+        "snapshot": False,
         **(extra_facts or {}),
     }
 
@@ -1457,13 +1464,13 @@ def _map_stack_facts(
 def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
     from html import escape
 
-    labels = {"data": "data", "access": "access", "tiling": "tiling", "viz": "visualization",
-              "standard": "standards", "infra": "infrastructure"}
+    from groundstation.stack import STAGE_LABELS
+
     parts, last = [], None
     for e in entries:
-        if e["kind"] != last:
-            parts.append(f'<div class="stack-group">{labels[e["kind"]]}</div>')
-            last = e["kind"]
+        if e["stage"] != last:
+            parts.append(f'<div class="stack-group">{STAGE_LABELS[e["stage"]]}</div>')
+            last = e["stage"]
         # escape everything — instance lines carry caller-supplied collection
         # ids, and even curated stack.md text shouldn't be able to break markup
         # ponytail: click-to-expand via native <details>, not hover — hover has
@@ -1472,9 +1479,10 @@ def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
         from groundstation.stack import DS_OWN
 
         role_cls = "role ds" if e["ds-role"] in DS_OWN else "role"
+        island = f'<span class="island" title="Development Seed island">{escape(e["island"])}</span>' if e.get("island") else ""
         parts.append(
-            f'<details class="stack-entry"><summary><span class="dot k-{e["kind"]}"></span><span class="s-head">'
-            f'<span class="stack-name">{escape(e["name"])}<span class="{role_cls}">{escape(e["ds-role"])}</span></span>'
+            f'<details class="stack-entry"><summary><span class="dot k-{e["stage"]}"></span><span class="s-head">'
+            f'<span class="stack-name">{escape(e["name"])}<span class="{role_cls}">{escape(e["ds-role"])}</span>{island}</span>'
             f'<span class="inst">{escape(e["instance"])}</span></span></summary>'
             f'<div class="more"><p>{escape(e["what"])}</p>'
             + (f'<div class="spk">speaks to {escape(spk)}</div>' if spk else "")
@@ -1500,7 +1508,9 @@ def _stack_chunk_for(
     entries = _stack.stack_instances(components, _map_stack_facts(resolved, layers, extra_facts))
     if not entries:
         return None
-    return _STACK_CHUNK.replace("__ENTRIES__", _stack_panel_html(entries))
+    from html import escape
+
+    return _STACK_CHUNK.replace("__ENTRIES__", _stack_panel_html(entries)).replace("__SUMMARY__", escape(_stack.summary(entries)))
 
 
 def _artifact_postcard(
@@ -1543,7 +1553,7 @@ def _artifact_postcard(
         source,
         postcard.get("caption", ""),
         None,
-        _stack_credit_html(facts) if stack_layer else None,
+        _stack_credit_html({**facts, "snapshot": True}) if stack_layer else None,
         engine="STAC · MapLibre GL" if items else "MapLibre GL",
     )
     card_path = postcard.get("out_path") or _artifact_path(None, "postcard", postcard["place"])
@@ -1823,6 +1833,7 @@ def render_map_3d(
     stack_layer: bool = False,
     extra_layers: list[dict[str, Any]] | None = None,
     postcard: dict[str, Any] | None = None,
+    stack_facts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write a self-contained 3D terrain fly-through with imagery draped over it.
 
@@ -1899,7 +1910,7 @@ def render_map_3d(
         )
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for([resolved, *extras], [layer, *(extra_layers or [])], {"terrain": True})
+        stack_html = _stack_chunk_for([resolved, *extras], [layer, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True})
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = (
@@ -1954,7 +1965,7 @@ def render_map_3d(
         all_layers = [layer, *(extra_layers or [])]
         card_path, card_note = _artifact_postcard(
             out_path, postcard,
-            _map_stack_facts([resolved, *extras], all_layers, {"terrain": True}),
+            _map_stack_facts([resolved, *extras], all_layers, {**(stack_facts or {}), "terrain": True}),
             all_layers, stack_layer, bbox, "3d",
         )
         if card_path:
@@ -2042,7 +2053,9 @@ def _stack_credit_html(facts: dict[str, Any]) -> str | None:
         f" — {escape(e['instance'])}</div>"
         for e in entries
     )
-    return f'<div class="stack-list"><div>the stack behind this card:</div>{lines}</div>'
+    islands = _stack.islands_exercised(entries)
+    intro = "the stack behind this card" + (f" ({escape(', '.join(islands))})" if islands else "") + ":"
+    return f'<div class="stack-list"><div>{intro}</div>{lines}</div>'
 
 
 def _stack_credit_for(

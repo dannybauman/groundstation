@@ -110,6 +110,8 @@ First `search_datasets` call takes ~20–30s while collection lists cache; every
 | `render_postcard` | durable share cards: embedded pixels, attribution baked in, nothing expires | TiTiler previews |
 | `active_events` / `weather_summary` | open fires/floods/storms + past & coming week | NASA EONET, GDACS, Open-Meteo |
 
+Every artifact carries a **Stack** panel: the pipeline that made it, in order (place, catalog, data, pixels, draw, next look), only the components that actually ran, Development Seed's own badged and listed first, and the islands it exercised. `docs/stack.md` is the curated source, and adding a tool is one entry with a `when` rule.
+
 The paired skill in `skills/earth-data/` carries the judgment layer: which catalog for what, asset conventions, index-layer recipes, "always end spatial answers with a map."
 
 ## Earth briefs you

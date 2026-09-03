@@ -635,7 +635,7 @@ def t_stack_parse_all_fields():
     comps = gstack.parse_stack()
     assert len(comps) >= 12
     for c in comps:
-        for field in ("name", "kind", "what", "ds-role", "integration", "speaks-to", "link"):
+        for field in ("name", "stage", "what", "ds-role", "integration", "speaks-to", "link", "when"):
             assert c.get(field), f"{c.get('name')} missing {field}"
         assert c["ds-role"] in gstack.DS_ROLES
 
@@ -651,13 +651,15 @@ def _bad_stack(body: str) -> str:
             return str(e)
 
 
-_OK_BLOCK = "- kind: data\n- what: x\n- ds-role: uses\n- integration: x\n- speaks-to: x\n- link: https://x\n"
+_OK_BLOCK = "- stage: data\n- what: x\n- ds-role: uses\n- integration: x\n- speaks-to: x\n- link: https://x\n- when: always\n"
 
 
 def t_stack_parse_curation_mistakes_fail_loudly():
-    err = _bad_stack("## Quantum\n" + _OK_BLOCK.replace("kind: data", "kind: quantum"))
+    err = _bad_stack("## Quantum\n" + _OK_BLOCK.replace("stage: data", "stage: quantum"))
     assert "Quantum" in err and "quantum" in err
-    assert "missing" in _bad_stack("## Thin\n- kind: data\n- ds-role: uses\n")
+    assert "missing" in _bad_stack("## Thin\n- stage: data\n- ds-role: uses\n")
+    assert "unknown fact" in _bad_stack("## Typo\n" + _OK_BLOCK.replace("when: always", "when: catalgs"))
+    assert "unknown island" in _bad_stack("## Atlantis\n" + _OK_BLOCK + "- island: atlantis\n")
     assert "duplicate" in _bad_stack(f"## Twin\n{_OK_BLOCK}\n## Twin\n{_OK_BLOCK}")
     assert "empty" in _bad_stack("## \n" + _OK_BLOCK)
 
@@ -685,28 +687,67 @@ def t_stack_join_names_the_real_render():
 
 def t_stack_join_understates_without_rasters():
     # a geojson-only map exercised no catalog, tiler, or bucket — claiming
-    # them would fabricate provenance
+    # them would fabricate provenance. It did draw, on a basemap
     entries = gstack.stack_instances(gstack.parse_stack(), {"catalogs": [], "maplibre": True})
-    assert [e["name"] for e in entries] == ["MapLibre GL"]
+    assert [e["name"] for e in entries] == ["MapLibre GL", "OpenFreeMap", "OpenStreetMap"]
     # even the renderer is a fact: a static artifact (postcard) claims no engine
     assert gstack.stack_instances(gstack.parse_stack(), {"catalogs": []}) == []
 
 
-def t_stack_active_names_exist_in_stack_md():
-    # the join string-matches component names; a stack.md heading rename must
-    # fail here instead of silently vanishing from every panel
-    names = {c["name"] for c in gstack.parse_stack()}
-    wired = {"MapLibre GL", "STAC", "COG + HTTP range requests", "TiTiler", "rio-tiler",
-             "Cloud object storage", "AWS Terrarium terrain", "Gazet", "Nominatim",
-             "NASA EONET", "GDACS", "Open-Meteo", *gstack._CATALOG_COMPONENT.values()}
-    assert wired <= names, f"wired names missing from stack.md: {sorted(wired - names)}"
+def t_stack_when_rules_activate_the_right_components():
+    # activation is data in stack.md, not code: each artifact shape below must
+    # light the components that really served it and none that did not
+    comps = gstack.parse_stack()
+    def names(facts):
+        return {e["name"] for e in gstack.stack_instances(comps, facts)}
+    veda = names({"catalogs": ["veda"], "collections_by_catalog": {"veda": ["caldor-fire-burn-severity"]}, "tiler_hosts": ["openveda.cloud"], "maplibre": True})
+    assert {"eoAPI", "stac-fastapi", "pgstac", "titiler-pgstac", "NASA VEDA", "TiTiler"} <= veda and "stac-server" not in veda
+    pc = names({"catalogs": ["planetary-computer"], "collections_by_catalog": {"planetary-computer": ["naip"]}, "tiler_hosts": ["planetarycomputer.microsoft.com"], "maplibre": True})
+    assert {"stac-fastapi", "pgstac", "titiler-pgstac", "NAIP", "Planetary Computer"} <= pc and "eoAPI" not in pc
+    es = names({"catalogs": ["earth-search"], "collections_by_catalog": {"earth-search": ["sentinel-1-grd"]}, "tiler_hosts": ["titiler.xyz"], "maplibre": True})
+    assert {"stac-server", "Copernicus Sentinel", "Earth Search", "TiTiler", "COG + HTTP range requests"} <= es and "pgstac" not in es
+    three_d = names({"catalogs": ["earth-search"], "collections_by_catalog": {"earth-search": ["sentinel-2-l2a"]}, "tiler_hosts": ["titiler.xyz"], "maplibre": True, "terrain": True})
+    assert {"AWS Terrarium terrain", "OpenStreetMap"} <= three_d and "OpenFreeMap" not in three_d
+    assert {"Gazet", "Overture Maps", "Natural Earth"} <= names({"geocoded": "gazet"}) and "Nominatim" not in names({"geocoded": "gazet"})
+    assert {"Nominatim", "OpenStreetMap"} <= names({"geocoded": "nominatim"}) and "Gazet" not in names({"geocoded": "nominatim"})
+    assert names({"events": True}) == {"NASA EONET", "GDACS"} and names({"weather": True}) == {"Open-Meteo"}
+    assert names({"passes": True}) == {"eo-predictor", "Celestrak"}
+    assert names({"snapshot": True}) == {"Playwright"} and names({"mosaic_scenes": 3}) == {"rio-tiler"}
+
+
+def t_stack_when_grammar():
+    rule = "catalog=veda,planetary-computer & !terrain | snapshot"
+    assert gstack.matches(rule, {"catalogs": ["veda"], "terrain": False})
+    assert not gstack.matches(rule, {"catalogs": ["veda"], "terrain": True})
+    assert gstack.matches(rule, {"catalogs": ["earth-search"], "terrain": True, "snapshot": True})
+    assert gstack.matches("geocoded=gazet", {"geocoded": True}), "the older bare True claims every geocoder"
+    assert not gstack.matches("geocoded=gazet", {"geocoded": "nominatim"})
+    try:
+        gstack.matches("catalgs", {})
+        raise AssertionError("an unknown fact must fail loudly")
+    except ValueError as e:
+        assert "unknown fact" in str(e)
+
+
+def t_stack_islands_and_summary():
+    comps = gstack.parse_stack()
+    entries = gstack.stack_instances(comps, {"catalogs": ["veda"], "collections_by_catalog": {"veda": ["x"]}, "tiler_hosts": ["openveda.cloud"], "maplibre": True, "geocoded": "gazet"})
+    assert gstack.islands_exercised(entries) == ["Cloud Native Geospatial", "Data in the Browser", "Agentic"]
+    line = gstack.summary(entries)
+    assert "built by Development Seed" in line and "islands: Cloud Native Geospatial, Data in the Browser, Agentic" in line
+    # Development Seed's own components lead their stage
+    by_stage = {}
+    for e in entries:
+        by_stage.setdefault(e["stage"], []).append(e)
+    assert by_stage["pixels"][0]["ds-role"] in gstack.DS_OWN and by_stage["catalog"][0]["ds-role"] in gstack.DS_OWN
 
 
 def t_stack_group_order_and_attribution_shape():
     entries = gstack.stack_instances(gstack.parse_stack(), _STACK_FACTS)
-    # literal expected pipeline order for this fixture (geocoded=True adds the
-    # two access-kind geocoders), not a re-derivation
-    assert [e["kind"] for e in entries] == ["data", "access", "access", "access", "tiling", "viz", "standard", "infra"]
+    # literal expected pipeline order for this fixture (geocoded=True is the
+    # older form and claims both geocoders and their data), not a re-derivation
+    assert [e["stage"] for e in entries] == ["place"] * 4 + ["catalog"] * 3 + ["data"] + ["pixels"] * 3 + ["draw"] * 3, [e["name"] for e in entries]
+    assert entries[0]["name"] == "Gazet" and [e["name"] for e in entries if e["stage"] == "pixels"][0] == "TiTiler"
     html = tools._stack_panel_html(entries)
     assert 'class="stack-group"' in html and "TiTiler" in html
     for role in {e["ds-role"] for e in entries}:
@@ -716,7 +757,7 @@ def t_stack_group_order_and_attribution_shape():
 
 
 def t_stack_panel_escapes_untrusted_values():
-    entries = [{"name": "x", "kind": "data", "what": "<script>alert(1)</script>",
+    entries = [{"name": "x", "kind": "data", "stage": "data", "what": "<script>alert(1)</script>",
                 "ds-role": "uses", "instance": 'onerror="x" <img>', "link": 'https://x/"><script>'}]
     html = tools._stack_panel_html(entries)
     assert "<script>" not in html and "<img>" not in html
@@ -791,17 +832,17 @@ def t_stack_3d_claims_terrain():
 def t_stack_postcard_listing_static_and_honest():
     listing = tools._stack_credit_for("earth-search", "sentinel-2-l2a", "titiler.xyz")
     html = _postcard(stack_html=listing)
-    assert "the stack behind this card:" in html
+    assert "the stack behind this card (Cloud Native Geospatial):" in html
     assert "serving sentinel-2-l2a via titiler.xyz" in html
     assert "MapLibre" not in html  # a still image runs no map engine
     assert "https://" not in html  # the no-live-URLs guarantee survives the listing
-    assert "the stack behind this card:" not in _postcard()  # off by default
+    assert "the stack behind this card" not in _postcard()  # off by default
 
 
 def t_stack_map_honest_extra_facts():
     # callers that geocoded / fetched events say so; the panel only then claims it
-    html, _ = _render_stack_map(stack_layer=True, stack_facts={"geocoded": True, "events": True})
-    for name in ("Gazet", "Nominatim", "NASA EONET", "GDACS", "Open-Meteo"):
+    html, _ = _render_stack_map(stack_layer=True, stack_facts={"geocoded": True, "events": True, "weather": True})
+    for name in ("Gazet", "Nominatim", "NASA EONET", "GDACS", "Open-Meteo", "Overture Maps"):
         assert name in html, f"{name} missing despite honest facts"
     base, _ = _render_stack_map(stack_layer=True)
     assert "Gazet" not in base and "NASA EONET" not in base
