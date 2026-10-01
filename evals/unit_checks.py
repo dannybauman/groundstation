@@ -1425,6 +1425,55 @@ def t_recommended_says_when_the_set_is_starved():
     assert "full_coverage_set" in r and "No single scene" not in r["recommended"]["reason"], r["recommended"]
 
 
+def _jp2_only(id_, bbox, collection="sentinel-2-l2a"):
+    it = _stac_item(id_, bbox)
+    it["collection"] = collection
+    it["assets"] = {"red": {"type": "image/jp2"}, "nir": {"type": "image/jp2"}, "granule_metadata": {"type": "application/xml"}}
+    return it
+
+
+def t_scene_with_no_cog_is_flagged_and_never_recommended():
+    # Earth Search issue #79: 263,066 sentinel-2-l2a items are JPEG2000 only and
+    # the tiler 500s on their pixels. The search has to say so, and must not
+    # hand one over as the scene to start from.
+    assert "cannot be read" in tools._no_cog_note(_jp2_only("x", [0, 0, 1, 1]))
+    assert tools._no_cog_note(_jp2_only("x", [0, 0, 1, 1], "sentinel-2-l1c")) is None  # JP2 by design, reads fine
+    cog = _stac_item("ok", [0, 0, 5, 10])
+    cog["assets"] = {"red": {"type": "image/tiff; application=geotiff; profile=cloud-optimized"}, "red-jp2": {"type": "image/jp2"}}
+    assert tools._no_cog_note(cog) is None
+    # the unreadable scene covers the whole area, the readable one half of it
+    r = _with_stac_search([_jp2_only("dead", [0, 0, 10, 10]), cog],
+                          lambda: tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 10, 10]))
+    by_id = {it["id"]: it for it in r["items"]}
+    assert "read_note" in by_id["dead"] and "read_note" not in by_id["ok"], r["items"]
+    assert r["recommended"]["id"] == "ok", r["recommended"]
+    assert "full_coverage_set" not in r
+
+
+def t_statistics_on_a_no_cog_scene_says_why():
+    class _Boom(_FakeResp):
+        status_code = 500
+
+        def raise_for_status(self):
+            raise RuntimeError("500 Internal Server Error")
+
+    saved_get, saved_json = tools._client.get, tools._get_json
+    tools._client.get = lambda url, **kw: _Boom({})
+    try:
+        tools._get_json = lambda url, **kw: _jp2_only("dead", [0, 0, 1, 1])
+        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "dead", expression="(nir-red)/(nir+red)")
+        assert "cannot be read" in out["error"], out
+        # any other 500 still raises: the note is not a blanket excuse
+        tools._get_json = lambda url, **kw: _stac_item("ok", [0, 0, 1, 1])
+        try:
+            tools.compute_statistics("earth-search", "sentinel-2-l2a", "ok", expression="(nir-red)/(nir+red)")
+            raise AssertionError("a 500 on a readable scene must still raise")
+        except RuntimeError:
+            pass
+    finally:
+        tools._client.get, tools._get_json = saved_get, saved_json
+
+
 def t_recommended_ties_go_to_the_newest_clean_scene():
     # Field test No.8, Chelan County over 30 days: 49.7% at 19.3% cloud (Aug 9)
     # vs 48.9% at 0.6% (Aug 24). Coverage within 5 points is a tie, cloud within

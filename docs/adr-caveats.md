@@ -12,7 +12,7 @@ The fix already existed in this codebase several times over. `next_pass` returns
 
 **Trigger.** A tool returns a caveat when a caller could act on a returned value without knowing a condition that inverts or empties its meaning. Derived numbers (a mean, a delta, a percentage, a coverage figure) are the usual case. Raw passthrough is exempt: `weather_summary` reports what Open-Meteo said and adds nothing to it.
 
-**Shape.** Plain sentences on the same return object as the value, under the key the tool already uses (`note`, `extent_note`, `bbox_note`, `coverage_note`, `caveat`). One sentence per condition. The key is **omitted entirely when nothing applies**, never an empty list or an empty string, so its presence is the signal. A caveat is a list of plain strings or one plain string, never a nested structure and never a new dependency.
+**Shape.** Plain sentences on the same return object as the value, under the key the tool already uses (`note`, `extent_note`, `bbox_note`, `coverage_note`, `read_note`, `caveat`). One sentence per condition. The key is **omitted entirely when nothing applies**, never an empty list or an empty string, so its presence is the signal. A caveat is a list of plain strings or one plain string, never a nested structure and never a new dependency.
 
 **Register.** Written for a small local model with no extra reasoning: no jargon, and it names the **direction** of the error, not only its existence. The worked example is the cloud sentence in `_delta_caveats`: *"cloud pushes a normalized index toward zero."* A caveat that says only "may be unreliable" has not done its job.
 
@@ -26,8 +26,8 @@ The fix already existed in this codebase several times over. `next_pass` returns
 |---|---|---|
 | `geocode` | bbox | `bbox_note` when the geocoder returned a point and the box was widened |
 | `search_datasets` | hits | one record with `searched` and `note` when nothing matched |
-| `search_imagery` | ranking | `recommended` with a reason, `covers_aoi_pct` on every item |
-| `compute_statistics` | mean and friends | `extent_note` when unclipped |
+| `search_imagery` | ranking | `recommended` with a reason, `covers_aoi_pct` on every item, `read_note` on an item the tiler cannot read (never recommended, never in a coverage set) |
+| `compute_statistics` | mean and friends | `extent_note` when unclipped; `error` naming the cause when the scene has no readable pixels |
 | `compare_dates` | delta, delta_pct | `caveat` list: cloud on either scene, near-zero baseline |
 | `render_map`, `render_map_3d` | coverage_pct | `coverage_note` below `PARTIAL_COVERAGE_PCT`, or when no imagery layer exists |
 | `next_pass` | pass times | `note`: swath geometry from TLEs, a pass is a possible capture |
