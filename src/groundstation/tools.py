@@ -521,8 +521,26 @@ def describe_collection(catalog: str, collection_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------- item search
 
 
+def _no_cog_note(item: dict[str, Any]) -> str | None:
+    # Earth Search issue #79: a backfill in August 2026 added 263,066
+    # sentinel-2-l2a items whose assets are all JPEG2000, with no COG behind
+    # them. The tiler reads their headers and then fails on the pixels (500).
+    # Not a JP2 rule: sentinel-2-l1c is JP2 by design and reads fine.
+    # ponytail: keyed to this one collection, delete when Element 84 repairs them
+    if item.get("collection") != "sentinel-2-l2a":
+        return None
+    types = [a.get("type") or "" for a in item.get("assets", {}).values()]
+    if any(t.startswith("image/tiff") for t in types) or not any(t.startswith("image/jp2") for t in types):
+        return None
+    return (
+        "this scene has no cloud-optimized copy in the catalog, so its pixels cannot be read: "
+        "previews, statistics and map layers fail for it. Use another scene"
+    )
+
+
 def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
     props = item.get("properties", {})
+    read_note = _no_cog_note(item)
     self_url = next(
         (l["href"] for l in item.get("links", []) if l.get("rel") == "self"), None
     )
@@ -539,6 +557,7 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
         # geometry. The catalog knows the orbit; don't drop it and leave a
         # change-detection answer resting on two mismatched passes
         **({"orbit_state": props["sat:orbit_state"]} if props.get("sat:orbit_state") else {}),
+        **({"read_note": read_note} if read_note else {}),
     }
 
 def _split_antimeridian(box: list[float]) -> list[list[float]]:
@@ -657,6 +676,8 @@ def search_imagery(
     render_map call instead of answering with a cropped scene. `recommended`
     names the scene to start from and why: coverage and cloud pull in
     opposite directions, and sorting on one of them alone picks wrong.
+    An item carrying read_note cannot be read by the tiler; it is listed so
+    the gap is visible, and never recommended or put in a coverage set.
     """
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
@@ -682,12 +703,13 @@ def search_imagery(
     for it in items:
         it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
     result = {"bbox": bbox, "count": len(feats), "items": items}
-    rec = _recommend(items)
+    readable = [it for it in items if "read_note" not in it]
+    rec = _recommend(readable)
     if rec:
         result["recommended"] = rec
-    best_single = max((it.get("covers_aoi_pct") or 0.0) for it in items) if items else 0.0
-    if items and best_single < FULL_COVERAGE_PCT:
-        full = find_full_coverage_set(items, bbox)
+    best_single = max((it.get("covers_aoi_pct") or 0.0) for it in readable) if readable else 0.0
+    if readable and best_single < FULL_COVERAGE_PCT:
+        full = find_full_coverage_set(readable, bbox)
         if full and len(full["items"]) > 1:
             result["full_coverage_set"] = full
         elif rec:
@@ -866,6 +888,15 @@ def compute_statistics(
         r = _client.post(base, params=params, json=aoi_geojson, timeout=60)
     else:
         r = _client.get(base, params=params, timeout=60)
+    if r.status_code >= 500 and backend not in ("pc", "veda"):
+        # a traceback tells an agent nothing. Look at the item only on failure,
+        # so the working path costs no extra request
+        try:
+            note = _no_cog_note(_get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"))
+        except Exception:
+            note = None
+        if note:
+            return {"error": note}
     r.raise_for_status()
     stats = r.json()
     # strip histograms down so responses stay small
@@ -2374,7 +2405,7 @@ def compare_dates(
             "earth-search", ["sentinel-2-l2a"], bbox=bbox,
             datetime_range=window, max_cloud_cover=max_cloud_cover, limit=25,
         )
-        return r.get("items", [])
+        return [i for i in r.get("items", []) if "read_note" not in i]
 
     after_items, before_items = _search(window_after), _search(window_before)
     if not after_items or not before_items:
