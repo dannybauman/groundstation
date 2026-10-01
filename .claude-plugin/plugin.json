@@ -1,6 +1,7 @@
 {
   "name": "groundstation",
   "version": "0.16.0",
+  "license": "MIT",
   "description": "Earth data, agent-ready \u2014 a Development Seed labs prototype. MCP tools over the cloud-native geospatial stack plus the earth-data skill and a groundstation skill that runs and demos it.",
   "author": {
     "name": "Development Seed",

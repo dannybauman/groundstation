@@ -3,6 +3,8 @@ name = "groundstation"
 version = "0.1.0"
 description = "Earth data, agent-ready: an MCP server + Claude skill over the cloud-native geospatial stack (STAC, TiTiler, Gazet)"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     # mcp 2.x renamed FastMCP to MCPServer and moved its import path, so
     # server.py fails on import there. Lift the ceiling with the migration
