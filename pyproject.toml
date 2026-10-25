@@ -15,6 +15,9 @@ dependencies = [
     "playwright>=1.61.0",
     "skyfield>=1.54",
     "rustac>=0.9.17",
+    "xarray>=2026.9.0",
+    "zarr>=3.4.1",
+    "obstore>=0.12.0",
 ]
 
 [project.urls]

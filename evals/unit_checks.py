@@ -1257,16 +1257,79 @@ def t_empty_dataset_search_says_what_it_searched():
     ]
     try:
         out = tools.search_datasets("himawari")
-        assert len(out) == 1 and out[0]["searched"] == list(tools.CATALOGS), out
+        assert len(out) == 1 and out[0]["searched"] == [*tools.CATALOGS, "zarr"], out
         assert "does not mean the data does not exist" in out[0]["note"], out
         one = tools.search_datasets("himawari", catalog="veda")
         assert one[0]["searched"] == ["veda"], one
         hit = tools.search_datasets("sentinel")
-        assert hit == [{"catalog": c, "id": "sentinel-2-l2a", "title": "Sentinel-2", "summary": ""}
+        assert hit == [{"catalog": c, "id": "sentinel-2-l2a", "title": "Sentinel-2", "summary": "", "gsd": None}
                        for c in tools.CATALOGS], hit
         assert not any("note" in h for h in hit)
     finally:
         tools._collections = saved
+
+
+def t_search_datasets_spatial_and_resolution_filters():
+    efate = [168.0, -18.0, 168.6, -17.4]
+    cols = [
+        {"id": "inside", "extent": {"spatial": {"bbox": [[160, -25, 175, -10]]}},
+         "summaries": {"gsd": [10, 20]}},
+        {"id": "outside", "extent": {"spatial": {"bbox": [[-10, 40, 10, 60]]}},
+         "summaries": {"gsd": [10]}},
+        {"id": "blank"},
+        {"id": "nulls", "extent": {"spatial": {"bbox": [[None, None, None, None]]}}},
+        {"id": "short", "extent": {"spatial": {"bbox": [[1, 2]]}}},
+        {"id": "coarse", "extent": {"spatial": {"bbox": [[160, -25, 175, -10]]}},
+         "item_assets": {"b": {"gsd": 30}}},
+    ]
+    saved = tools._collections
+    tools._collections = lambda cat: cols
+    try:
+        out = tools.search_datasets("", catalog="veda", bbox=efate, max_gsd=10)
+        assert [h["id"] for h in out] == ["inside", "blank", "nulls", "short"], out
+        assert out[0]["gsd"] == 10.0 and out[0]["covers_aoi"] is True
+        assert out[1]["gsd"] is None and out[1]["covers_aoi"] == "unknown"
+        assert "no gsd" in out[1]["note"] and "no spatial extent" in out[1]["note"]
+        assert [h["id"] for h in tools.search_datasets("", catalog="veda", bbox=efate)] == ["inside", "blank", "nulls", "short", "coarse"]
+        assert "covers_aoi" not in tools.search_datasets("", catalog="veda")[0]
+    finally:
+        tools._collections = saved
+
+
+def t_eo_predictor_mapping_and_fallback():
+    fixture = json.loads("""{"constellation": "WorldView-3", "sensor_type": "optical",
+      "swath_km": 13, "altitude_km": 617, "off_nadir_deg": 30, "data_access": "commercial",
+      "tasking": true, "norad_ids": [40115]}""")
+    sar = {"sensor_type": "SAR", "swath_km": 410, "altitude_km": 693, "off_nadir_deg": 33,
+           "data_access": "open", "tasking": False, "norad_ids": [39634, 62261]}
+    cfgs, skipped = tools._eo_predictor_cfgs(
+        {"worldview-3": fixture, "sentinel-1": sar, "bad": {"swath_km": 5}}
+    )
+    assert skipped == ["bad"] and cfgs["sentinel-1"]["optical"] is False
+    assert cfgs["sentinel-1"]["reach_km"] == 205 and cfgs["worldview-3"]["access"] == "commercial"
+    assert abs(cfgs["worldview-3"]["reach_km"] - (6.5 + 617 * 0.57735)) < 0.1
+    saved = (tools._client, tools._CATALOG_CACHE, tools._fetch_tles, tools._TLE_CACHE)
+    try:
+        class Dead:
+            def get(self, *a, **k):
+                raise RuntimeError("offline")
+        with tempfile.TemporaryDirectory() as d:
+            tools._client = Dead()
+            tools._CATALOG_CACHE = Path(d) / "eo-predictor.json"
+            tools._TLE_CACHE = Path(d) / "tle.txt"
+            (Path(d) / "tle-builtin.txt").write_text("")
+            tools._fetch_tles = lambda cfgs, path: []
+            tools._CATALOG_CACHE.write_text("{not json")
+            c, src, sk = tools._load_constellations()
+            assert "built-in list" in src and not tools._CATALOG_CACHE.exists()
+            c, src, sk = tools._load_constellations()
+            assert c is tools._CONSTELLATIONS and "built-in list" in src
+            out = tools.next_pass(-17.7, 168.3, days=1, constellations=["sentinel-2"])
+            assert "built-in list" in out["constellations_source"], out
+            assert out["constellations_available"] == list(tools._CONSTELLATIONS)
+            assert out["eo_predictor_url"] == "https://developmentseed.org/eo-predictor"
+    finally:
+        tools._client, tools._CATALOG_CACHE, tools._fetch_tles, tools._TLE_CACHE = saved
 
 
 def t_recommended_is_the_covering_scene_not_the_clearest():
@@ -1833,6 +1896,75 @@ def t_geoparquet_archive_searches_like_a_catalog():
             assert "error" in err and not (Path(d) / "a.txt").exists()
     finally:
         tools._client = saved
+def t_zarr_catalog_surfaces():
+    keys = {"title", "url", "variables", "sel", "coverage", "chunks", "stats", "tiles", "source"}
+    for sid, z in tools.ZARR_STORES.items():
+        assert keys <= z.keys(), (sid, keys - z.keys())
+        assert z["tiles"] or z.get("tiles_note"), f"{sid}: tiles false needs the reason"
+        assert all({"description", "units"} <= v.keys() for v in z["variables"].values()), sid
+    assert any(c["catalog"] == "zarr" for c in tools.list_catalogs())
+    hits = tools.search_datasets("temperature")  # STAC catalogs raise offline and are caught per catalog
+    assert any(h.get("catalog") == "zarr" and h.get("id") == "noaa-gfs-forecast" for h in hits)
+    d = tools.describe_collection("zarr", "noaa-hrrr-forecast")
+    assert d["id"] == "noaa-hrrr-forecast" and "TMP" in d["variables"] and d["tiles"] is False
+    assert "error" in tools.describe_collection("zarr", "nope")
+    sel = dict(valid_time="2023-01-10T12:00")
+    url = tools.tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel=sel)
+    assert "/zarr/tiles/" in url and "variable=2m_temperature" in url and "time%3Dnearest%3A%3A2023-01-10T12%3A00" in url
+    assert tools.tile_url_template("zarr", "noaa-gfs-forecast", "temperature_2m") == tools.ZARR_STORES["noaa-gfs-forecast"]["tiles_note"]
+    for sid, var in (("nasa-mur-sst", "analysed_sst"), ("noaa-gfs-forecast", "temperature_2m")):
+        assert "error" in tools.compute_statistics("zarr", sid, var, bbox=[0, 0, 1, 1])
+    assert "unknown" in tools.tile_url_template("zarr", "nope", "x")
+    assert "unknown variable" in tools.tile_url_template("zarr", "weatherbench2-era5", "nope")
+    assert tools.ZARR_STORES["noaa-hrrr-forecast"]["coverage"].startswith("CONUS only")
+
+
+def t_zarr_clip_reduce_and_select():
+    import numpy as np
+    import xarray as xr
+
+    # descending latitude and 0..360 longitude, like GFS/ERA5: a bbox in -180..180 still lands
+    lat, lon = np.arange(30.0, 24.0, -1.0), np.arange(255.0, 265.0, 1.0)
+    da = xr.DataArray(np.arange(60.0).reshape(6, 10), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=lon))
+    r = tools._clip_reduce(da, [-104.5, 26.5, -102.5, 28.5])
+    assert r["stats"]["count"] == 4 and r["stats"]["min"] == 21.0 and r["stats"]["max"] == 32.0, r
+    assert "coarse grid" in r["caveats"][0]
+    tiny = tools._clip_reduce(da, [-103.9, 27.1, -103.8, 27.2])
+    assert tiny["stats"]["count"] == 1 and "smaller than one grid cell" in tiny["caveats"][0]
+    assert "error" in tools._clip_reduce(da.where(False), [-104.5, 26.5, -102.5, 28.5])
+    t = np.array(["2026-10-25T00", "2026-10-25T06"], dtype="datetime64[ns]")
+    ts = xr.DataArray(np.zeros((2, 6, 10)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=lat, longitude=lon))
+    _, used, notes = tools._zarr_select(ts, dict(valid_time="2026-10-25T05:00"))
+    assert used["time"] == "2026-10-25 06:00:00" and "snapped" in notes[0]
+
+
+def t_zarr_bbox_outside_coverage_is_refused():
+    import numpy as np
+    import xarray as xr
+
+    lat, lon = np.arange(30.0, 24.0, -1.0), np.arange(255.0, 265.0, 1.0)
+    da = xr.DataArray(np.zeros((6, 10)), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=lon))
+    assert "outside" in tools._clip_reduce(da, [5.0, 45.0, 6.0, 46.0])["error"]
+    wide = xr.DataArray(np.zeros((6, 360)), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=np.arange(360.0)))
+    assert "outside" in tools._clip_reduce(wide, [-1.0, 26.0, 1.0, 28.0])["error"]  # across 0 on a 0..360 grid
+    z = tools.ZARR_STORES["weatherbench2-era5"]
+    saved = tools._open_zarr
+    tools._open_zarr = lambda sid: xr.Dataset({"2m_temperature": wide.expand_dims(time=[np.datetime64("2023-01-10", "ns")])})
+    try:
+        err = tools._zarr_statistics("weatherbench2-era5", "2m_temperature", [-1.0, 26.0, 1.0, 28.0], None)
+    finally:
+        tools._open_zarr = saved
+    assert z["title"] in err["error"] and z["coverage"] in err["error"], err
+
+
+def t_zarr_select_says_how_far_it_snapped():
+    import numpy as np
+    import xarray as xr
+
+    t = np.array(["2022-12-31T18", "2023-01-10T12"], dtype="datetime64[ns]")
+    da = xr.DataArray(np.zeros((2, 2, 2)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=[1.0, 0.0], longitude=[0.0, 1.0]))
+    _, used, notes = tools._zarr_select(da, dict(valid_time="2026-10-25T00:00"))
+    assert used["time"].startswith("2023-01-10") and "outside the store's range" in notes[0] and "off by" in notes[0], notes
 
 
 def t_versions_agree():

@@ -7,6 +7,7 @@ integration breaks.
 
 from __future__ import annotations
 
+import datetime as dt
 import sys
 import tempfile
 import traceback
@@ -46,6 +47,12 @@ def t_geocode():
 def t_datasets():
     hits = tools.search_datasets("sentinel-2")
     assert any(h.get("catalog") == "earth-search" for h in hits if "id" in h)
+
+
+@check("eo-predictor constellation catalog loads live")
+def t_eo_predictor_catalog():
+    cfgs, source, _ = tools._load_constellations()
+    assert source == "developmentseed/eo-predictor" and len(cfgs) >= 10, (source, len(cfgs))
 
 
 @check("search_imagery returns recent low-cloud Sentinel-2")
@@ -163,6 +170,13 @@ def t_pc():
     assert "preview_url" in p
 
 
+@check("zarr forecast store opens and a bbox statistic comes back with the dataset named")
+def t_zarr_live():
+    tomorrow = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=1)).strftime("%Y-%m-%dT21:00")
+    r = tools.compute_statistics("zarr", "noaa-hrrr-forecast", "TMP", bbox=[-99.6, 27.4, -99.4, 27.6], sel=dict(valid_time=tomorrow))
+    assert 233 < r["TMP"]["mean"] < 328 and "HRRR" in r["dataset"], r
+
+
 @check("local synth brief passes brief_checks (loud SKIP without an endpoint)")
 def t_local_synth_live():
     import os
@@ -202,7 +216,7 @@ def t_local_synth_live():
 
 
 if __name__ == "__main__":
-    checks = [t_geocode, t_datasets, t_search, t_write_archive, t_full_coverage_calgary, t_preview, t_stats, t_map, t_postcard, t_events, t_weather, t_veda, t_pc, t_local_synth_live]
+    checks = [t_geocode, t_datasets, t_eo_predictor_catalog, t_search, t_write_archive, t_full_coverage_calgary, t_preview, t_stats, t_map, t_postcard, t_events, t_weather, t_veda, t_pc, t_local_synth_live]
     for fn in checks:
         fn()
     print(f"\n{len(checks) - len(FAILURES)}/{len(checks)} passed")
