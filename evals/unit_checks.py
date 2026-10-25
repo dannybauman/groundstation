@@ -1257,7 +1257,7 @@ def t_empty_dataset_search_says_what_it_searched():
     ]
     try:
         out = tools.search_datasets("himawari")
-        assert len(out) == 1 and out[0]["searched"] == list(tools.CATALOGS), out
+        assert len(out) == 1 and out[0]["searched"] == [*tools.CATALOGS, "zarr"], out
         assert "does not mean the data does not exist" in out[0]["note"], out
         one = tools.search_datasets("himawari", catalog="veda")
         assert one[0]["searched"] == ["veda"], one
@@ -1795,6 +1795,44 @@ def t_statistics_429_retries_once_on_eoapi():
     finally:
         tools._client, tools._get_json = saved
         tools._ITEMS.clear()
+
+
+def t_zarr_catalog_surfaces():
+    keys = {"title", "url", "variables", "sel", "coverage", "chunks", "stats", "tiles", "source"}
+    for sid, z in tools.ZARR_STORES.items():
+        assert keys <= z.keys(), (sid, keys - z.keys())
+        assert z["tiles"] or z.get("tiles_note"), f"{sid}: tiles false needs the reason"
+        assert all({"description", "units"} <= v.keys() for v in z["variables"].values()), sid
+    assert any(c["catalog"] == "zarr" for c in tools.list_catalogs())
+    hits = tools.search_datasets("temperature")  # STAC catalogs raise offline and are caught per catalog
+    assert any(h.get("catalog") == "zarr" and h.get("id") == "noaa-gfs-forecast" for h in hits)
+    d = tools.describe_collection("zarr", "noaa-hrrr-forecast")
+    assert d["id"] == "noaa-hrrr-forecast" and "TMP" in d["variables"] and d["tiles"] is False
+    assert "error" in tools.describe_collection("zarr", "nope")
+    sel = dict(valid_time="2023-01-10T12:00")
+    url = tools.tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel=sel)
+    assert "/zarr/tiles/" in url and "variable=2m_temperature" in url and "time%3Dnearest%3A%3A2023-01-10T12%3A00" in url
+    assert tools.tile_url_template("zarr", "noaa-gfs-forecast", "temperature_2m") == tools.ZARR_STORES["noaa-gfs-forecast"]["tiles_note"]
+    assert "error" in tools.compute_statistics("zarr", "nasa-mur-sst", "analysed_sst", bbox=[0, 0, 1, 1])
+
+
+def t_zarr_clip_reduce_and_select():
+    import numpy as np
+    import xarray as xr
+
+    # descending latitude and 0..360 longitude, like GFS/ERA5: a bbox in -180..180 still lands
+    lat, lon = np.arange(30.0, 24.0, -1.0), np.arange(255.0, 265.0, 1.0)
+    da = xr.DataArray(np.arange(60.0).reshape(6, 10), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=lon))
+    r = tools._clip_reduce(da, [-104.5, 26.5, -102.5, 28.5])
+    assert r["stats"]["count"] == 4 and r["stats"]["min"] == 21.0 and r["stats"]["max"] == 32.0, r
+    assert "coarse grid" in r["caveats"][0]
+    tiny = tools._clip_reduce(da, [-103.9, 27.1, -103.8, 27.2])
+    assert tiny["stats"]["count"] == 1 and "smaller than one grid cell" in tiny["caveats"][0]
+    assert "error" in tools._clip_reduce(da.where(False), [-104.5, 26.5, -102.5, 28.5])
+    t = np.array(["2026-10-25T00", "2026-10-25T06"], dtype="datetime64[ns]")
+    ts = xr.DataArray(np.zeros((2, 6, 10)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=lat, longitude=lon))
+    _, used, notes = tools._zarr_select(ts, dict(valid_time="2026-10-25T05:00"))
+    assert used["time"] == "2026-10-25 06:00:00" and "snapped" in notes[0]
 
 
 def t_versions_agree():
