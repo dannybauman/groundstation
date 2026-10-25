@@ -1292,6 +1292,13 @@ def t_search_datasets_spatial_and_resolution_filters():
         assert "no gsd" in out[1]["note"] and "no spatial extent" in out[1]["note"]
         assert [h["id"] for h in tools.search_datasets("", catalog="veda", bbox=efate)] == ["inside", "blank", "nulls", "short", "coarse"]
         assert "covers_aoi" not in tools.search_datasets("", catalog="veda")[0]
+        # Antimeridian: bbox crossing 180 matches collections covering that longitude
+        fiji = [177.0, -19.0, -179.0, -16.0]
+        fiji_col = {"id": "fiji-cross", "extent": {"spatial": {"bbox": [[175, -20, 180, -15]]}}, "summaries": {"gsd": [10]}}
+        tools._collections = lambda cat: [fiji_col, {"id": "other", "extent": {"spatial": {"bbox": [[0, 0, 10, 10]]}}, "summaries": {"gsd": [10]}}]
+        fiji_out = tools.search_datasets("", catalog="veda", bbox=fiji, max_gsd=10)
+        assert [h["id"] for h in fiji_out] == ["fiji-cross"]
+        assert fiji_out[0]["covers_aoi"] is True
     finally:
         tools._collections = saved
 
