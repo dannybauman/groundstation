@@ -1257,7 +1257,7 @@ def t_empty_dataset_search_says_what_it_searched():
     ]
     try:
         out = tools.search_datasets("himawari")
-        assert len(out) == 1 and out[0]["searched"] == list(tools.CATALOGS), out
+        assert len(out) == 1 and out[0]["searched"] == [*tools.CATALOGS, "zarr"], out
         assert "does not mean the data does not exist" in out[0]["note"], out
         one = tools.search_datasets("himawari", catalog="veda")
         assert one[0]["searched"] == ["veda"], one
@@ -1795,6 +1795,119 @@ def t_statistics_429_retries_once_on_eoapi():
     finally:
         tools._client, tools._get_json = saved
         tools._ITEMS.clear()
+
+
+def t_zarr_catalog_surfaces():
+    keys = {"title", "url", "variables", "sel", "coverage", "chunks", "stats", "tiles", "source"}
+    for sid, z in tools.ZARR_STORES.items():
+        assert keys <= z.keys(), (sid, keys - z.keys())
+        assert z["tiles"] or z.get("tiles_note"), f"{sid}: tiles false needs the reason"
+        assert all({"description", "units"} <= v.keys() for v in z["variables"].values()), sid
+    assert any(c["catalog"] == "zarr" for c in tools.list_catalogs())
+    hits = tools.search_datasets("temperature")  # STAC catalogs raise offline and are caught per catalog
+    assert any(h.get("catalog") == "zarr" and h.get("id") == "noaa-gfs-forecast" for h in hits)
+    d = tools.describe_collection("zarr", "noaa-hrrr-forecast")
+    assert d["id"] == "noaa-hrrr-forecast" and "TMP" in d["variables"] and d["tiles"] is False
+    assert "error" in tools.describe_collection("zarr", "nope")
+    sel = dict(valid_time="2023-01-10T12:00")
+    url = tools.tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel=sel)
+    assert "/zarr/tiles/" in url and "variable=2m_temperature" in url and "time%3Dnearest%3A%3A2023-01-10T12%3A00" in url
+    assert tools.tile_url_template("zarr", "noaa-gfs-forecast", "temperature_2m") == tools.ZARR_STORES["noaa-gfs-forecast"]["tiles_note"]
+    for sid, var in (("nasa-mur-sst", "analysed_sst"), ("noaa-gfs-forecast", "temperature_2m")):
+        assert "error" in tools.compute_statistics("zarr", sid, var, bbox=[0, 0, 1, 1])
+    assert "unknown" in tools.tile_url_template("zarr", "nope", "x")
+    assert "unknown variable" in tools.tile_url_template("zarr", "weatherbench2-era5", "nope")
+    assert tools.ZARR_STORES["noaa-hrrr-forecast"]["coverage"].startswith("CONUS only")
+
+
+def t_zarr_clip_reduce_and_select():
+    import numpy as np
+    import xarray as xr
+
+    # descending latitude and 0..360 longitude, like GFS/ERA5: a bbox in -180..180 still lands
+    lat, lon = np.arange(30.0, 24.0, -1.0), np.arange(255.0, 265.0, 1.0)
+    da = xr.DataArray(np.arange(60.0).reshape(6, 10), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=lon))
+    r = tools._clip_reduce(da, [-104.5, 26.5, -102.5, 28.5])
+    assert r["stats"]["count"] == 4 and r["stats"]["min"] == 21.0 and r["stats"]["max"] == 32.0, r
+    assert "coarse grid" in r["caveats"][0]
+    tiny = tools._clip_reduce(da, [-103.9, 27.1, -103.8, 27.2])
+    assert tiny["stats"]["count"] == 1 and "smaller than one grid cell" in tiny["caveats"][0]
+    assert "error" in tools._clip_reduce(da.where(False), [-104.5, 26.5, -102.5, 28.5])
+    t = np.array(["2026-10-25T00", "2026-10-25T06"], dtype="datetime64[ns]")
+    ts = xr.DataArray(np.zeros((2, 6, 10)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=lat, longitude=lon))
+    _, used, notes = tools._zarr_select(ts, dict(valid_time="2026-10-25T05:00"))
+    assert used["time"] == "2026-10-25 06:00:00" and "snapped" in notes[0]
+
+
+def t_zarr_bbox_outside_coverage_is_refused():
+    import numpy as np
+    import xarray as xr
+
+    lat, lon = np.arange(30.0, 24.0, -1.0), np.arange(255.0, 265.0, 1.0)
+    da = xr.DataArray(np.zeros((6, 10)), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=lon))
+    assert "outside" in tools._clip_reduce(da, [5.0, 45.0, 6.0, 46.0])["error"]
+    wide = xr.DataArray(np.zeros((6, 360)), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=np.arange(360.0)))
+    assert "outside" in tools._clip_reduce(wide, [-1.0, 26.0, 1.0, 28.0])["error"]  # across 0 on a 0..360 grid
+    z = tools.ZARR_STORES["weatherbench2-era5"]
+    saved = tools._open_zarr
+    tools._open_zarr = lambda sid: xr.Dataset({"2m_temperature": wide.expand_dims(time=[np.datetime64("2023-01-10", "ns")])})
+    try:
+        err = tools._zarr_statistics("weatherbench2-era5", "2m_temperature", [-1.0, 26.0, 1.0, 28.0], None)
+    finally:
+        tools._open_zarr = saved
+    assert z["title"] in err["error"] and z["coverage"] in err["error"], err
+
+
+def t_zarr_select_says_how_far_it_snapped():
+    import numpy as np
+    import xarray as xr
+
+    t = np.array(["2022-12-31T18", "2023-01-10T12"], dtype="datetime64[ns]")
+    da = xr.DataArray(np.zeros((2, 2, 2)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=[1.0, 0.0], longitude=[0.0, 1.0]))
+    _, used, notes = tools._zarr_select(da, dict(valid_time="2026-10-25T00:00"))
+    assert used["time"].startswith("2023-01-10") and "outside the store's range" in notes[0] and "off by" in notes[0], notes
+
+
+def t_http_zarr_store_range_206():
+    import asyncio
+    from zarr.abc.store import RangeByteRequest
+
+    store = tools._http_zarr_store("https://example.com/test.zarr")
+    class FakeBuf:
+        @classmethod
+        def from_bytes(cls, b): return b
+    class FakeProto:
+        buffer = FakeBuf
+
+    class FakeResp:
+        def __init__(self, status, content):
+            self.status_code = status
+            self.content = content
+        def raise_for_status(self):
+            if self.status_code >= 400: raise RuntimeError(f"HTTP {self.status_code}")
+
+    async def run():
+        # 206 partial content returns bytes
+        async def get_206(url, headers): return FakeResp(206, b"abc")
+        store._c.get = get_206
+        res = await store.get("data", FakeProto, RangeByteRequest(0, 3))
+        assert res == b"abc"
+
+        # 200 on a Range request raises RuntimeError (server ignored Range)
+        async def get_200(url, headers): return FakeResp(200, b"full content")
+        store._c.get = get_200
+        try:
+            await store.get("data", FakeProto, RangeByteRequest(0, 3))
+            raise AssertionError("expected server Range refusal error")
+        except RuntimeError as e:
+            assert "ignored a Range request" in str(e)
+
+        # 404 returns None
+        async def get_404(url, headers): return FakeResp(404, b"")
+        store._c.get = get_404
+        assert (await store.get("data", FakeProto, None)) is None
+
+    asyncio.run(run())
 
 
 def t_versions_agree():

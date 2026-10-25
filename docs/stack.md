@@ -332,3 +332,78 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - speaks-to: eo-predictor
 - link: https://celestrak.org
 - when: passes
+
+## Zarr
+- stage: data
+- what: chunked, cloud-native N-dimensional arrays — the format of forecast and reanalysis grids that STAC and COGs do not carry
+- ds-role: contributes
+- island: cng
+- integration: the curated stores (GFS, HRRR, ERA5, MUR) read by `compute_statistics` and drawn by titiler.xyz `/zarr/tiles`. New dep `zarr`: it opens the stores; the format has no lighter reader
+- speaks-to: xarray, obstore, TiTiler
+- link: https://zarr.dev
+- when: collection=noaa-gfs-forecast,noaa-hrrr-forecast,nasa-mur-sst,weatherbench2-era5
+
+## xarray
+- stage: data
+- what: labelled N-dimensional arrays — selects a variable, a time and a bbox out of a Zarr store
+- ds-role: uses
+- integration: the nearest-time `sel` and the clip-and-reduce behind a Zarr statistic. New dep `xarray`: titiler.xarray reads stores through it, so the statistics and the tiles agree on what a selection means
+- speaks-to: Zarr, obstore
+- link: https://xarray.dev
+- when: collection=noaa-gfs-forecast,noaa-hrrr-forecast,nasa-mur-sst,weatherbench2-era5
+
+## obstore
+- stage: data
+- what: Development Seed's fast object-store client for Python (Rust-backed), with a Zarr store adapter
+- ds-role: created
+- island: cng
+- integration: reads the S3 Zarr stores (HRRR, MUR) anonymously. New dep `obstore`: it is our own tool and the one zarr's `ObjectStore` wraps. The https stores go through httpx instead, because Cloudflare-fronted hosts send compressed metadata with no Content-Length, which obstore's HTTP store rejects
+- speaks-to: Zarr, Cloud object storage
+- link: https://github.com/developmentseed/obstore
+- when: collection=noaa-hrrr-forecast,nasa-mur-sst
+
+## titiler.xarray
+- stage: pixels
+- what: TiTiler's xarray extension — web map tiles, point and statistics routes over Zarr variables, selected by `variable` and `sel`
+- ds-role: created
+- island: cng
+- integration: titiler.xyz `/zarr/tiles` draws the stores that open there (ERA5 today); GFS, HRRR and MUR do not and say why in `tiles_note`
+- speaks-to: TiTiler, Zarr, xarray
+- link: https://github.com/developmentseed/titiler
+- when: collection=weatherbench2-era5
+
+## NOAA HRRR Zarr (University of Utah)
+- stage: data
+- what: University of Utah's hourly HRRR Zarr archive on AWS Open Data
+- ds-role: uses
+- integration: the hourly CONUS temperature forecast grid behind compute_statistics on noaa-hrrr-forecast
+- speaks-to: Zarr, xarray, obstore
+- link: https://registry.opendata.aws/noaa-hrrr-zarr/
+- when: collection=noaa-hrrr-forecast
+
+## GFS Zarr (Dynamical.org)
+- stage: data
+- what: NOAA Global Forecast System weather model archived in Zarr format by Dynamical.org
+- ds-role: uses
+- integration: the global GFS forecast grid (deprecated plain Zarr copy; Icechunk is the upgrade path)
+- speaks-to: Zarr, xarray
+- link: https://data.dynamical.org
+- when: collection=noaa-gfs-forecast
+
+## NASA MUR SST
+- stage: data
+- what: NASA Multi-scale Ultra-high Resolution (MUR) Sea Surface Temperature on AWS Open Data
+- ds-role: uses
+- integration: 1 km daily global sea surface temperature analysis in Zarr format
+- speaks-to: Zarr, obstore
+- link: https://registry.opendata.aws/mur/
+- when: collection=nasa-mur-sst
+
+## WeatherBench 2 ERA5
+- stage: data
+- what: Google Research benchmark dataset — ECMWF ERA5 reanalysis regridded to Zarr on Google Cloud
+- ds-role: uses
+- integration: global 1.5 degree atmospheric reanalysis drawn by titiler.xyz and computed by compute_statistics
+- speaks-to: Zarr, xarray, TiTiler
+- link: https://weatherbench2.readthedocs.io
+- when: collection=weatherbench2-era5
