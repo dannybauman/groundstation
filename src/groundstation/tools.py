@@ -428,7 +428,12 @@ def reverse_geocode(lat: float, lon: float) -> dict[str, Any]:
 
 def list_catalogs() -> list[dict[str, str]]:
     """List the STAC catalogs this server can search, with what each is good for."""
-    return [{"catalog": k, **v} for k, v in CATALOGS.items()]
+    return [{"catalog": k, **v} for k, v in CATALOGS.items()] + [{
+        "catalog": "zarr",
+        "notes": "Curated Zarr stores, not STAC: forecast and reanalysis grids (GFS, HRRR, ERA5, MUR SST). "
+        "search_datasets finds them, describe_collection('zarr', id) lists variables, compute_statistics "
+        "reads a clipped number, tile_url_template draws it where the store renders.",
+    }]
 
 
 def _collections(catalog: str) -> list[dict[str, Any]]:
@@ -514,7 +519,11 @@ def search_datasets(
         if isinstance(aoi, dict):
             return [aoi]
     terms = [t.lower() for t in keywords.split() if t]
-    cats = [catalog] if catalog else list(CATALOGS)
+    cats = [c for c in ([catalog] if catalog else list(CATALOGS)) if c != "zarr"]
+    zarr_hits = _zarr_hits(terms) if catalog in (None, "zarr") else []
+    if aoi or max_gsd is not None:
+        for h in zarr_hits:
+            h.setdefault("note", "curated zarr store: place and gsd filters not applied, see its coverage")
 
     def fetch(cat: str):
         try:
@@ -524,7 +533,7 @@ def search_datasets(
 
     with ThreadPoolExecutor(max_workers=3) as pool:
         fetched = list(pool.map(fetch, cats))
-    hits = []
+    hits = zarr_hits
     for cat, cols in fetched:
         if isinstance(cols, Exception):
             hits.append({"catalog": cat, "error": str(cols)})
@@ -569,7 +578,7 @@ def search_datasets(
         # An empty list is the return most likely to be narrated into "no such
         # data exists". Say what was searched in the return the model cannot
         # skip, not only in the docstring it might (docs/adr-caveats.md)
-        searched = cats
+        searched = [catalog] if catalog else [*CATALOGS, "zarr"]
         return [{
             "searched": searched,
             "note": (
@@ -583,7 +592,15 @@ def search_datasets(
 
 
 def describe_collection(catalog: str, collection_id: str) -> dict[str, Any]:
-    """Get a collection's description, extent, and asset/band layout."""
+    """Get a collection's description, extent, and asset/band layout.
+
+    catalog="zarr" with a store id from search_datasets returns the store:
+    its variables and units, the dims to select on, coverage, chunking, and
+    whether titiler.xyz can draw it (tiles, and tiles_note when it cannot).
+    """
+    if catalog == "zarr":
+        z = ZARR_STORES.get(collection_id)
+        return {"catalog": "zarr", "id": collection_id, **z} if z else {"error": f"unknown zarr store {collection_id!r}; options: {', '.join(ZARR_STORES)}"}
     cached = _collections_cache.get(catalog)
     c = None
     if cached and time.time() - cached[0] < 3600:
@@ -601,6 +618,296 @@ def describe_collection(catalog: str, collection_id: str) -> dict[str, Any]:
         "assets": {
             k: (v.get("title") or v.get("type", "")) for k, v in item_assets.items()
         },
+    }
+
+
+# ---------------------------------------------------------------- zarr stores
+
+# Curated, not discovered: a Zarr store has no search API, so each entry here was
+# opened by hand (2026-10-25). tiles=False says why titiler.xyz cannot render it
+ZARR_STORES: dict[str, dict[str, Any]] = {
+    "noaa-gfs-forecast": {
+        "title": "NOAA GFS forecast (dynamical.org)",
+        "url": "https://data.dynamical.org/noaa/gfs/forecast/latest.zarr",
+        "variables": {
+            "temperature_2m": {"description": "air temperature 2 m above ground", "units": "degree_Celsius"},
+            "relative_humidity_2m": {"description": "relative humidity 2 m above ground", "units": "percent"},
+            "wind_u_10m": {"description": "eastward wind 10 m above ground", "units": "m s-1"},
+            "wind_v_10m": {"description": "northward wind 10 m above ground", "units": "m s-1"},
+            "total_cloud_cover_atmosphere": {"description": "total cloud cover", "units": "percent"},
+        },
+        "sel": "valid_time (when the forecast is for, UTC; picks the latest run and its lead time), or init_time and lead_time",
+        "coverage": "global, 0.25 degrees (~20 km); runs every 6 h, lead 0-384 h (hourly to 120 h, then 3-hourly)",
+        "chunks": "1 run x 210 lead steps x 726 x 726 per chunk: one point costs a quarter-globe chunk",
+        "stats": False,
+        "stats_note": "the data.dynamical.org plain Zarr copy is deprecated (sunset header 2026-10-01) and its last run is 2026-10-25T06Z; the supported copy is Icechunk, the upgrade path",
+        "tiles": False,
+        "tiles_note": "titiler.xyz cannot open this store: the host sends its metadata compressed without a Content-Length and the tiler's reader (obstore) refuses it",
+        "source": "NOAA NWS NCEP GFS, processed by dynamical.org (CC-BY-4.0). The data.dynamical.org Zarr copy is deprecated (sunset 2026-10-01, still served 2026-10-25); the supported copy is Icechunk",
+    },
+    "noaa-hrrr-forecast": {
+        "title": "NOAA HRRR forecast, 2 m temperature (University of Utah)",
+        "url": "s3://hrrrzarr/sfc/{date}/{date}_{hh}z_fcst.zarr",
+        "group": "2m_above_ground/TMP/2m_above_ground",
+        "region": "us-west-1",
+        "variables": {"TMP": {"description": "air temperature 2 m above ground", "units": "K"}},
+        "sel": "valid_time (UTC); the newest 00/06/12/18z run is used, up to 48 h ahead",
+        "coverage": "CONUS only, 3 km Lambert conformal grid",
+        "chunks": "48 steps x 150 x 150 per chunk",
+        "stats": True,
+        "tiles": False,
+        "tiles_note": "titiler.xyz opens the group but fails on its projected x/y coordinates, which are not stored in the group",
+        "source": "NOAA HRRR via the University of Utah Open Source Weather archive (AWS Open Data hrrrzarr)",
+    },
+    "nasa-mur-sst": {
+        "title": "NASA MUR sea surface temperature, 1 km daily",
+        "url": "s3://mur-sst/zarr-v1",
+        "region": "us-west-2",
+        "variables": {"analysed_sst": {"description": "analysed sea surface temperature", "units": "kelvin"}},
+        "sel": "time (daily, 2002-06-01 to 2020-01-20)",
+        "coverage": "global ocean, 0.01 degrees",
+        "chunks": "5 days x 1799 x 3600 per chunk, about 123 MB: one cell costs a whole chunk",
+        "stats": False,
+        "tiles": False,
+        "tiles_note": "titiler.xyz is denied at this bucket, and a 123 MB chunk makes a tile read slow",
+        "source": "NASA JPL MUR SST on AWS Open Data (metadata only here)",
+    },
+    "weatherbench2-era5": {
+        "title": "ERA5 reanalysis, 1959 to 2023-01-10, 6-hourly, 1.5 degrees (WeatherBench 2)",
+        "url": "https://storage.googleapis.com/weatherbench2/datasets/era5/1959-2023_01_10-6h-240x121_equiangular_with_poles_conservative.zarr",
+        "variables": {"2m_temperature": {"description": "air temperature 2 m above ground", "units": "K", "rescale": "220,320", "colormap_name": "inferno"}},
+        "sel": "time (UTC, 6-hourly, ends 2023-01-10): history, not a forecast",
+        "coverage": "global, 1.5 degrees (~165 km), longitudes 0 to 360",
+        "chunks": "small time-sliced chunks",
+        "stats": True,
+        "tiles": True,
+        "time_dim": "time",
+        "source": "ECMWF ERA5 regridded by Google Research WeatherBench 2 (CC-BY-4.0)",
+    },
+}
+_ZARR_X = ("longitude", "lon", "x")
+_ZARR_Y = ("latitude", "lat", "y")
+# ponytail: HRRR's Lambert CRS is written out because the Utah store stores x/y
+# in metres but no CRS; a store with a spatial_ref would drop this
+_HRRR_CRS = "+proj=lcc +lat_0=38.5 +lon_0=-97.5 +lat_1=38.5 +lat_2=38.5 +R=6371229 +units=m +no_defs"
+
+
+def _zarr_hits(terms: list[str]) -> list[dict[str, Any]]:
+    out = []
+    for sid, z in ZARR_STORES.items():
+        vars_ = " ".join(f"{k} {v['description']}" for k, v in z["variables"].items())
+        hay = f"{sid} {z['title']} {vars_} {z['coverage']} {z['source']} zarr".lower()
+        if all(t in hay for t in terms):
+            out.append({"catalog": "zarr", "id": sid, "title": z["title"], "summary": f"{z['coverage']}. Variables: {', '.join(z['variables'])}"})
+    return out
+
+
+def _http_zarr_store(base: str):
+    # ponytail: no listing, and one client that is never closed; a Range answered
+    # with 206 is required, so a server ignoring Range errors instead of returning wrong bytes.
+    # Upgrade: obstore's HTTP store once it accepts a missing Content-Length, or Icechunk
+    # obstore's HTTPStore needs a Content-Length, and Cloudflare-fronted hosts
+    # send compressed JSON without one (data.dynamical.org), so over https read with httpx
+    import httpx
+    from zarr.abc.store import ByteRequest, OffsetByteRequest, RangeByteRequest, Store, SuffixByteRequest
+
+    class HttpStore(Store):
+        supports_writes = supports_deletes = supports_listing = False
+
+        def __init__(self) -> None:
+            super().__init__(read_only=True)
+            self._c = httpx.AsyncClient(timeout=60, follow_redirects=True, headers=UA)
+
+        def __eq__(self, o: object) -> bool:
+            return isinstance(o, HttpStore) and o is self
+
+        async def get(self, key: str, prototype: Any, byte_range: ByteRequest | None = None) -> Any:
+            h = {}
+            if isinstance(byte_range, RangeByteRequest):
+                h["Range"] = f"bytes={byte_range.start}-{byte_range.end - 1}"
+            elif isinstance(byte_range, OffsetByteRequest):
+                h["Range"] = f"bytes={byte_range.offset}-"
+            elif isinstance(byte_range, SuffixByteRequest):
+                h["Range"] = f"bytes=-{byte_range.suffix}"
+            r = await self._c.get(f"{base.rstrip('/')}/{key}", headers=h)
+            if r.status_code in (403, 404):
+                return None
+            r.raise_for_status()
+            if h and r.status_code != 206:
+                raise RuntimeError(f"{base} ignored a Range request (status {r.status_code})")
+            return prototype.buffer.from_bytes(r.content)
+
+        async def get_partial_values(self, prototype: Any, key_ranges: Any) -> list:
+            return [await self.get(k, prototype, r) for k, r in key_ranges]
+
+        async def exists(self, key: str) -> bool:
+            return (await self._c.head(f"{base.rstrip('/')}/{key}")).status_code == 200
+
+        async def set(self, *a: Any, **k: Any) -> None:
+            raise NotImplementedError
+
+        async def delete(self, *a: Any, **k: Any) -> None:
+            raise NotImplementedError
+
+        async def set_if_not_exists(self, *a: Any, **k: Any) -> None:
+            raise NotImplementedError
+
+        async def list(self):
+            return
+            yield
+
+        list_prefix = list_dir = lambda self, prefix: self.list()
+
+    return HttpStore()
+
+
+def _s3_zarr_store(url: str, region: str):
+    from obstore.store import S3Store
+    from zarr.storage import ObjectStore
+
+    bucket, _, prefix = url.removeprefix("s3://").partition("/")
+    return ObjectStore(S3Store(bucket, region=region, skip_signature=True, prefix=prefix), read_only=True)
+
+
+def _open_zarr(store_id: str):
+    """Open a curated store as an xarray Dataset (lazy). HRRR gets its time and x/y from the parent group."""
+    import xarray as xr
+
+    z = ZARR_STORES[store_id]
+    url = z["url"]
+    if "{date}" in url:
+        from obstore.store import S3Store
+        import obstore
+
+        now = dt.datetime.now(dt.timezone.utc)
+        for back in range(0, 48, 6):
+            run = (now - dt.timedelta(hours=back)).replace(minute=0, second=0, microsecond=0)
+            run = run.replace(hour=run.hour // 6 * 6)
+            u = url.format(date=run.strftime("%Y%m%d"), hh=f"{run.hour:02d}")
+            bucket, _, prefix = u.removeprefix("s3://").partition("/")
+            try:
+                obstore.head(S3Store(bucket, region=z["region"], skip_signature=True, prefix=prefix), f"{z['group']}/TMP/.zarray")
+                break
+            except Exception:
+                continue
+        else:
+            raise RuntimeError("no HRRR run found in the last 48 h")
+        st = _s3_zarr_store(u, z["region"])
+        ds = xr.open_zarr(st, group=z["group"], consolidated=False, zarr_format=2, chunks=None)
+        # the group one level up carries the real valid times and x/y; the variable's own group has none
+        up = xr.open_zarr(st, group=z["group"].rsplit("/", 1)[0], consolidated=False, zarr_format=2, chunks=None)
+        return ds.rename(projection_y_coordinate="y", projection_x_coordinate="x").assign_coords(
+            x=up["projection_x_coordinate"].values, y=up["projection_y_coordinate"].values, time=up["time"].values
+        )
+    store = _s3_zarr_store(url, z["region"]) if url.startswith("s3://") else _http_zarr_store(url)
+    return xr.open_zarr(store, consolidated=True, chunks=None)
+
+
+def _zarr_select(da: Any, sel: dict[str, str] | None) -> tuple[Any, dict[str, str], list[str]]:
+    """Pick one 2-D slice: every non-spatial dim resolved by nearest match, and say what snapped."""
+    import numpy as np
+    import pandas as pd
+
+    sel = dict(sel or {})
+    used: dict[str, str] = {}
+    notes: list[str] = []
+    kinds = {"M": pd.Timestamp, "m": pd.Timedelta}
+    label = lambda v: str(kinds.get(v.dtype.kind, lambda x: x)(v))  # noqa: E731
+    valid = sel.pop("valid_time", None)
+    if valid and "time" in da.dims:
+        sel["time"] = valid
+    for dim in [d for d in da.dims if d not in _ZARR_X + _ZARR_Y]:
+        want = sel.get(dim)
+        if dim == "lead_time" and valid:
+            want = pd.Timestamp(valid) - pd.Timestamp(used["init_time"])
+        coord = da[dim].values
+        if want is None or want == "latest":
+            idx = len(coord) - 1 if dim in ("init_time", "time") else 0
+        else:
+            if coord.dtype.kind == "M":
+                t = pd.Timestamp(want)
+                target = (t.tz_convert(None) if t.tzinfo else t).to_datetime64()
+            elif coord.dtype.kind == "m":
+                target = (want if isinstance(want, pd.Timedelta) else pd.Timedelta(hours=float(want))).to_timedelta64()
+            else:
+                target = float(want)
+            idx = int(np.abs(coord - target).argmin())
+            if coord[idx] != target:
+                gap = pd.Timedelta(abs(coord[idx] - target)) if coord.dtype.kind in "Mm" else abs(coord[idx] - target)
+                edge = " (outside the store's range)" if idx in (0, len(coord) - 1) and (target < coord[0] or target > coord[-1]) else ""
+                notes.append(f"{dim} {want} snapped to {label(coord[idx])}, off by {gap}{edge}")
+        da = da.isel({dim: idx})
+        used[dim] = label(coord[idx])
+    if valid and "init_time" in used:
+        used["valid_time"] = str((pd.Timestamp(used["init_time"]) + pd.Timedelta(used["lead_time"])))
+    return da, used, notes
+
+
+def _clip_reduce(da: Any, bbox: list[float], crs: str | None = None) -> dict[str, Any]:
+    """Clip a 2-D DataArray to bbox [w, s, e, n] (degrees) and reduce it to the COG-path stats."""
+    import numpy as np
+
+    xn = next(d for d in da.dims if d in _ZARR_X)
+    yn = next(d for d in da.dims if d in _ZARR_Y)
+    w, s, e, n = bbox
+    if crs:
+        from rasterio.warp import transform_bounds
+
+        w, s, e, n = transform_bounds("EPSG:4326", crs, w, s, e, n)
+    elif float(da[xn].max()) > 180:
+        w, e = w % 360, e % 360
+    xs, ys = da[xn].values, da[yn].values
+    cell = abs(float(xs[1] - xs[0]))
+    outside = {"error": "bbox outside the store's coverage"}
+    # ponytail: a bbox straddling the prime meridian on a 0..360 grid is refused, not split into 2 reads
+    if w > e or (w + e) / 2 < xs.min() - cell or (w + e) / 2 > xs.max() + cell or (s + n) / 2 < ys.min() - cell or (s + n) / 2 > ys.max() + cell:
+        return outside
+    sub = da.sel({xn: slice(w, e), yn: slice(s, n) if ys[0] < ys[-1] else slice(n, s)})
+    caveats = []
+    if sub.size == 0:
+        sub = da.sel({xn: (w + e) / 2, yn: (s + n) / 2}, method="nearest")
+        caveats.append("bbox is smaller than one grid cell: the value is the nearest cell, not an area statistic")
+    v = np.atleast_1d(sub.values).astype(float).ravel()
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return {"error": "no valid values in the bbox for this selection (outside the grid, or the model run is not written yet)"}
+    if v.size <= 4:
+        caveats.append(f"coarse grid: only {v.size} cell(s) (cell size {cell:g}{'' if crs else ' deg'}) fall in the bbox, so min/max/mean are close to one model value, not a local average")
+    p2, p98 = np.percentile(v, [2, 98])
+    return {
+        "stats": {
+            "min": float(v.min()), "max": float(v.max()), "mean": float(v.mean()), "median": float(np.median(v)),
+            "std": float(v.std()), "percentile_2": float(p2), "percentile_98": float(p98), "count": int(v.size),
+        },
+        "caveats": caveats,
+    }
+
+
+def _zarr_statistics(store_id: str, variable: str, bbox: list[float] | None, sel: dict[str, str] | None) -> dict[str, Any]:
+    z = ZARR_STORES.get(store_id)
+    if not z:
+        return {"error": f"unknown zarr store {store_id!r}; options: {', '.join(ZARR_STORES)}"}
+    if not z["stats"]:
+        return {"error": f"statistics are not offered for {z['title']}: {z.get('stats_note') or z['chunks']}"}
+    if variable not in z["variables"]:
+        return {"error": f"unknown variable {variable!r}; options: {', '.join(z['variables'])}"}
+    if not bbox:
+        return {"error": "bbox [w, s, e, n] is required: a Zarr store is a whole grid, so unclipped statistics would describe the globe or the continent"}
+    ds = _open_zarr(store_id)
+    da, used, notes = _zarr_select(ds[variable], sel)
+    r = _clip_reduce(da, bbox, _HRRR_CRS if "{date}" in z["url"] else None)
+    if r.get("error", "").startswith("bbox outside"):
+        return {"error": f"bbox outside {z['title']}'s coverage ({z['coverage']})"}
+    if "error" in r:
+        return r | {"sel": used}
+    meta = z["variables"][variable]
+    return {
+        variable: r["stats"],
+        "clipped_to": bbox,
+        "dataset": f"{z['title']}: {variable} ({meta['description']}), {meta['units']}",
+        "units": meta["units"],
+        "sel": used,
+        "caveats": notes + r["caveats"],
     }
 
 
@@ -933,6 +1240,7 @@ def compute_statistics(
     assets: list[str] | None = None,
     aoi_geojson: dict[str, Any] | None = None,
     bbox: list[float] | None = None,
+    sel: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Compute pixel statistics (min/max/mean/std/percentiles) for a STAC item.
 
@@ -948,7 +1256,15 @@ def compute_statistics(
     the shape callers actually hold. geocode and search_imagery hand back a
     bbox, never a Feature, so unclipped whole-scene stats are usually just the
     cost of the conversion. Pass one of the two and the extent_note goes away.
+
+    catalog="zarr": collection_id is a store id (search_datasets), item_id the
+    variable, bbox required, sel picks the slice by nearest match, e.g.
+    {"valid_time": "2026-10-26T21:00"} (UTC) on a forecast store. Returns
+    {variable: stats, clipped_to, dataset, units, sel (what was actually
+    used), caveats}: read the caveats before quoting the number.
     """
+    if catalog == "zarr":
+        return _zarr_statistics(collection_id, item_id, bbox, sel)
     if bbox and not aoi_geojson:
         aoi_geojson = _bbox_feature(bbox)
     backend = CATALOGS[catalog]["raster"]
@@ -1071,14 +1387,36 @@ def tile_url_template(
     rescale: str | None = None,
     colormap_name: str | None = None,
     expression: str | None = None,
+    sel: dict[str, str] | None = None,
 ) -> str:
     """XYZ tile URL template ({z}/{x}/{y}) for a STAC item, for web maps.
+
+    catalog="zarr": item_id is the variable and sel picks the slice, e.g.
+    {"time": "2023-01-10T12:00"}; stores that titiler.xyz cannot draw return
+    their tiles_note instead of a template. Pass the template to render_map
+    as a {"type": "raster", "tiles": ...} layer.
 
     For index layers (NDVI etc.) pass expression over asset names, e.g.
     "(nir-red)/(nir+red)" with colormap_name="rdylgn" — supported on
     earth-search; ignored for veda/planetary-computer. Index expressions
     default to rescale="-1,1" (without a rescale they render blank).
     """
+    if catalog == "zarr":
+        z = ZARR_STORES.get(collection_id)
+        if not z:
+            return f"unknown zarr store {collection_id!r}; options: {', '.join(ZARR_STORES)}"
+        if not z["tiles"]:
+            return z["tiles_note"]
+        v = z["variables"].get(item_id)
+        if v is None:
+            return f"unknown variable {item_id!r}; options: {', '.join(z['variables'])}"
+        params = [("url", z["url"]), ("variable", item_id)]
+        params += [("sel", f"{z['time_dim'] if k == 'valid_time' else k}=nearest::{x}") for k, x in (sel or {}).items()]
+        if rescale or v.get("rescale"):
+            params.append(("rescale", rescale or v["rescale"]))
+        if colormap_name or v.get("colormap_name"):
+            params.append(("colormap_name", colormap_name or v["colormap_name"]))
+        return f"{TITILER}/zarr/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + str(httpx.QueryParams(params))
     # with an expression, assets must be the expression's bands, never defaults
     assets = assets or ([] if expression else _default_assets(collection_id))
     if expression and not rescale:
