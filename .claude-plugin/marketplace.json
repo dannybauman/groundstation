@@ -9,8 +9,23 @@
     {
       "name": "groundstation",
       "source": "./",
-      "version": "0.16.1",
-      "description": "Earth data, agent-ready: STAC search across Earth Search/VEDA/Planetary Computer, TiTiler previews and band math, date comparisons, shareable maps, events and weather — as MCP tools plus an earth-data skill. Requires uv (https://docs.astral.sh/uv/)."
+      "version": "0.16.2",
+      "description": "Earth data, agent-ready: STAC search across Earth Search/VEDA/Planetary Computer, TiTiler previews and band math, date comparisons, shareable maps, events and weather — as MCP tools plus an earth-data skill. Requires uv (https://docs.astral.sh/uv/).",
+      "author": {
+        "name": "Development Seed",
+        "url": "https://developmentseed.org"
+      },
+      "homepage": "https://github.com/dannybauman/groundstation",
+      "repository": "https://github.com/dannybauman/groundstation",
+      "license": "MIT",
+      "keywords": [
+        "earth-observation",
+        "geospatial",
+        "stac",
+        "titiler",
+        "satellite",
+        "mcp"
+      ]
     }
   ]
 }

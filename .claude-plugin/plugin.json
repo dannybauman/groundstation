@@ -1,10 +1,20 @@
 {
   "name": "groundstation",
-  "version": "0.16.1",
-  "license": "MIT",
-  "description": "Earth data, agent-ready \u2014 a Development Seed labs prototype. MCP tools over the cloud-native geospatial stack plus the earth-data skill and a groundstation skill that runs and demos it.",
+  "version": "0.16.2",
+  "description": "Earth data, agent-ready: a Development Seed labs prototype. MCP tools over the cloud-native geospatial stack plus the earth-data skill and a groundstation skill that runs and demos it.",
   "author": {
     "name": "Development Seed",
-    "url": "https://github.com/dannybauman/groundstation"
-  }
+    "url": "https://developmentseed.org"
+  },
+  "homepage": "https://github.com/dannybauman/groundstation",
+  "repository": "https://github.com/dannybauman/groundstation",
+  "license": "MIT",
+  "keywords": [
+    "earth-observation",
+    "geospatial",
+    "stac",
+    "titiler",
+    "satellite",
+    "mcp"
+  ]
 }
