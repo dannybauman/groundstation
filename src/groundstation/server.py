@@ -8,12 +8,15 @@ Register with Claude Code:
 
 from __future__ import annotations
 
+from importlib.metadata import version
+
 from mcp.server.fastmcp import FastMCP
 
 from groundstation import tools
 
 mcp = FastMCP(
     "groundstation",
+    website_url="https://github.com/dannybauman/groundstation",
     instructions=(
         "Tools for discovering, analyzing, and mapping Earth observation data "
         "via the cloud-native geospatial stack (STAC, TiTiler, Gazet). Typical "
@@ -23,6 +26,9 @@ mcp = FastMCP(
         "active_events and weather_summary support monitoring and briefings."
     ),
 )
+# FastMCP 1.x never forwards a version, so the initialize handshake would
+# report the mcp library's own; the low-level server is where it is read
+mcp._mcp_server.version = version("groundstation")
 
 # the earth-data skill tells the agent how many tools to wait for on a cold
 # start, so an eval asserts that number against this tuple — keep them together

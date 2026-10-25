@@ -1622,6 +1622,17 @@ def t_no_artifact_rides_the_watermarked_basemap():
         assert "cartocdn" not in html3 and "tile.openstreetmap.org" in html3
 
 
+def t_versions_agree():
+    # the plugin version is what installs cache by and what the Store compares;
+    # pyproject's is what the MCP handshake reports. One number, three files
+    import tomllib
+    root = Path(__file__).resolve().parents[1]
+    py = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    plug = json.loads((root / ".claude-plugin" / "plugin.json").read_text())["version"]
+    mkt = json.loads((root / ".claude-plugin" / "marketplace.json").read_text())["plugins"][0]["version"]
+    assert py == plug == mkt, (py, plug, mkt)
+
+
 if __name__ == "__main__":
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("t_")):
         check(name, fn)

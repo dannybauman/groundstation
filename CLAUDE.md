@@ -12,7 +12,7 @@ Before building a capability or reaching for a generic dependency, ask: **does a
 
 - one branch + one small PR per change, evals in `evals/unit_checks.py` before the PR, eval output pasted in the PR body
 - a tool that returns a derived number returns, in the same object, the conditions under which it should not be read at face value — the rule and the audit are in `docs/adr-caveats.md`
-- bump `.claude-plugin/plugin.json` in every PR that ships behavior — installs cache per version
+- bump the version in every PR that ships behavior — installs cache per version. It lives in 3 files that must agree: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` and `pyproject.toml` (then `uv lock`); `evals/unit_checks.py` fails when they drift
 - multi `-m` commits, Claude co-author trailer
 - deliberate shortcuts get a `ponytail:` comment naming the ceiling and the upgrade path
 - the shared titiler.xyz is a courtesy: be frugal in tests and demos, batch live checks, stop on 429
