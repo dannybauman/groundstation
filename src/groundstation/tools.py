@@ -470,10 +470,13 @@ def _covers_aoi(c: dict[str, Any], aoi: list[float]) -> bool | str:
     if not boxes:
         return "unknown"
     w, s, e, n = aoi
-    for b in boxes:
-        bw, bs, be, bn = (b[0], b[1], b[2], b[3]) if len(b) == 4 else (b[0], b[1], b[3], b[4])
-        if bw <= e and be >= w and bs <= n and bn >= s:
-            return True
+    try:
+        for b in boxes:
+            bw, bs, be, bn = (b[0], b[1], b[2], b[3]) if len(b) == 4 else (b[0], b[1], b[3], b[4])
+            if bw <= e and be >= w and bs <= n and bn >= s:
+                return True
+    except (TypeError, IndexError, ValueError):
+        return "unknown"
     return False
 
 
@@ -519,7 +522,7 @@ def search_datasets(
         except Exception as e:
             return cat, e
 
-    with ThreadPoolExecutor(max_workers=len(cats)) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         fetched = list(pool.map(fetch, cats))
     hits = []
     for cat, cols in fetched:
@@ -2916,8 +2919,10 @@ def _eo_predictor_cfgs(files: dict[str, dict[str, Any]]) -> tuple[dict[str, dict
         if not d.get("norad_ids") or not d.get("swath_km"):
             skipped.append(name)
             continue
-        # a pointable sensor reaches past its own swath: half-swath + altitude * tan(off-nadir)
-        reach = d["swath_km"] / 2 + (d.get("altitude_km") or 0) * math.tan(math.radians(d.get("off_nadir_deg") or 0))
+        # only a tasked sensor points; Sentinel-1 and NISAR have a fixed look angle inside their swath
+        reach = d["swath_km"] / 2
+        if d.get("tasking"):
+            reach += (d.get("altitude_km") or 0) * math.tan(math.radians(d.get("off_nadir_deg") or 0))
         cfgs[name] = {
             "norad_ids": d["norad_ids"],
             "swath_km": d["swath_km"],
@@ -2951,31 +2956,32 @@ def _load_constellations() -> tuple[dict[str, dict[str, Any]], str, list[str]]:
         if cfgs:
             return cfgs, "developmentseed/eo-predictor", skipped
     except Exception:
-        pass
+        _CATALOG_CACHE.unlink(missing_ok=True)  # a corrupt file must not pin the fallback for 24 h
     return _CONSTELLATIONS, "built-in list (eo-predictor catalog unreachable)", []
 
 
-def _fetch_tles(cfgs: dict[str, dict[str, Any]] | None = None) -> str:
-    if _TLE_CACHE.exists() and time.time() - _TLE_CACHE.stat().st_mtime < _TLE_MAX_AGE_S:
-        return _TLE_CACHE.read_text(encoding="utf-8")
+def _fetch_tles(cfgs: dict[str, dict[str, Any]], path: Path) -> list[str]:
+    """Write TLEs for every id in cfgs to path (24 h cache); return ids with no data."""
+    if path.exists() and time.time() - path.stat().st_mtime < _TLE_MAX_AGE_S:
+        return []
 
     def one(nid: int) -> str:
-        r = _client.get(
-            "https://celestrak.org/NORAD/elements/gp.php",
-            params={"CATNR": nid, "FORMAT": "tle"},
-        )
-        if r.status_code == 404:  # a decayed satellite still listed in the catalog
+        # a decayed satellite 404s and a throttled request is not worth failing the call for
+        try:
+            r = _client.get(
+                "https://celestrak.org/NORAD/elements/gp.php",
+                params={"CATNR": nid, "FORMAT": "tle"},
+            )
+        except httpx.HTTPError:
             return ""
-        r.raise_for_status()
-        return "" if "No GP data found" in r.text else r.text.strip()
+        return r.text.strip() if r.status_code == 200 and "No GP data found" not in r.text else ""
 
-    ids = sorted({n for c in (cfgs or _CONSTELLATIONS).values() for n in c["norad_ids"]})
+    ids = sorted({n for c in cfgs.values() for n in c["norad_ids"]})
     with ThreadPoolExecutor(max_workers=8) as pool:
-        chunks = [t for t in pool.map(one, ids) if t]
-    text = "\n".join(chunks) + "\n"
-    _TLE_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    _TLE_CACHE.write_text(text, encoding="utf-8")
-    return text
+        texts = list(pool.map(one, ids))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(t for t in texts if t) + "\n", encoding="utf-8")
+    return [f"norad-{n}" for n, t in zip(ids, texts) if not t]
 
 
 def next_pass(
@@ -3000,19 +3006,23 @@ def next_pass(
     The constellation catalog (swath, altitude, off-nadir pointing, NORAD ids)
     is read from developmentseed/eo-predictor; if it is unreachable a built-in
     list of Sentinel-2, Sentinel-1 and Landsat is used and
-    `constellations_source` says so. Commercial and tasked sensors (`access`
-    other than "open") only image on order, and a pointable one is counted as
-    a pass whenever the target is inside its off-nadir reach. The result links
-    EO Predictor (`eo_predictor_url`), the richer interactive view.
+    `constellations_source` says so. The default is open-data constellations
+    only; every loaded one, commercial ones included, is available by name and
+    listed in `constellations_available`. Commercial sensors (`access` other
+    than "open") only image on order, and a tasked one is counted as a pass
+    whenever the target is inside its off-nadir reach. The result links EO
+    Predictor (`eo_predictor_url`), the richer interactive view.
     """
     import numpy as np
     from skyfield.api import load, wgs84
 
     days = min(days, 7)
     cfgs, source, skipped = _load_constellations()
-    wanted = constellations or list(cfgs)
-    _fetch_tles(cfgs)  # ensures the cache file exists and is fresh
-    sats = load.tle_file(str(_TLE_CACHE))
+    wanted = constellations or [k for k, c in cfgs.items() if c.get("access", "open") == "open"]
+    # one TLE file per catalog source: a fallback-run file must not serve a catalog run
+    tle_path = _TLE_CACHE.with_name(f"{_TLE_CACHE.stem}-{'eo-predictor' if cfgs is not _CONSTELLATIONS else 'builtin'}.txt")
+    skipped = skipped + _fetch_tles({k: cfgs[k] for k in wanted if k in cfgs}, tle_path)
+    sats = load.tle_file(str(tle_path))
     by_id = {s.model.satnum: s for s in sats}
 
     ts = load.timescale()
@@ -3064,6 +3074,7 @@ def next_pass(
         "window_days": days,
         "passes": passes,
         "constellations_source": source,
+        "constellations_available": list(cfgs),
         "skipped": skipped,
         "eo_predictor_url": EO_PREDICTOR_URL,
         "note": (
@@ -3316,6 +3327,7 @@ def conditions_brief(
                 "time_utc": p.get("time_utc"),
                 "track_distance_km": p.get("track_distance_km"),
                 "kind": p.get("kind"),
+                "access": p.get("access"),
             })
         brief["next_looks"] = next_looks
     except Exception as e:
