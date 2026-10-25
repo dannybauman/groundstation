@@ -21,6 +21,14 @@ from groundstation.tools import _bbox_coverage_pct, _expression_to_bands  # noqa
 import brief  # noqa: E402
 import brief_checks  # noqa: E402
 
+def _offline(*a, **k):
+    raise RuntimeError("offline suite: no network")
+
+
+# a layer without asset_href reads its item for the 429 fallback; offline that is a
+# cached None, loud if anything expected a real answer
+tools._get_json = _offline
+
 FAILED = []
 
 
@@ -1620,6 +1628,173 @@ def t_no_artifact_rides_the_watermarked_basemap():
         m3 = tools.render_map_3d("t", [0, 0, 10, 10], {"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}, out_path=str(Path(d) / "m3.html"))
         html3 = Path(m3["path"]).read_text()
         assert "cartocdn" not in html3 and "tile.openstreetmap.org" in html3
+
+
+def t_hrrr_url_builders():
+    import datetime as dt
+    g = tools._hrrr_grib_url(dt.date(2026, 10, 25), 6, 24)
+    assert g == "https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.20261025/conus/hrrr.t06z.wrfsfcf24.grib2"
+    t = tools._hrrr_tile_template(g)
+    assert t.startswith(tools.EOAPI + "/external/tiles/WebMercatorQuad/{z}/{x}/{y}.png?")
+    # bands=76 rides INSIDE the vrt value (encoded), the expression and colormap outside it
+    assert "url=vrt%3A%2F%2F" in t and "bands%3D76" in t and "&expression=b1%2A1000000000" in t and "&colormap=" in t
+
+
+def t_smoke_forecast_outside_conus_makes_no_network_call():
+    real = tools._client
+    class Boom:
+        def __getattr__(self, k):
+            raise AssertionError("network touched")
+    tools._client = Boom()
+    try:
+        r = tools.smoke_forecast(51.5, -0.1)
+    finally:
+        tools._client = real
+    assert r["error"].startswith("HRRR smoke covers") and r["coverage_bbox"] == tools.HRRR_BBOX
+
+
+def _fallback_map(**extra):
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        layer = {"type": "item", "name": "s2", "catalog": "earth-search", "collection_id": "sentinel-2-l2a",
+                 "item_id": "X", "bbox": [0, 0, 1, 1], **extra}
+        r = tools.render_map("t", [0, 0, 1, 1], [layer], out_path=out)
+        return Path(out).read_text(encoding="utf-8"), r
+
+
+def t_render_map_429_fallback_tiles():
+    html, r = _fallback_map(asset_href="https://example.com/visual.tif")
+    fb = r["state"]["layers"][0]["fallback_tiles"]
+    assert fb.startswith(tools.EOAPI + "/external/tiles/") and "visual.tif" in fb
+    assert r["state"]["fallback"] == "raster.eoapi.dev" and fb in html and "setTiles" in html
+    # an expression layer cannot fall back (eoapi.dev has no /stac), and carries no key
+    _, r2 = _fallback_map(expression="(nir-red)/(nir+red)", asset_href="https://example.com/visual.tif")
+    assert "fallback" not in r2["state"] and "fallback_tiles" not in r2["state"]["layers"][0]
+
+
+def t_stac_map_link_only_with_an_item_layer():
+    html, r = _fallback_map(asset_href="https://example.com/visual.tif")
+    assert 'id="stacmap"' in html and r["stac_map_url"].startswith("https://developmentseed.org/stac-map/?href=https%3A%2F%2F")
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        r = tools.render_map("t", [0, 0, 1, 1], [{"type": "raster", "name": "r", "tiles": "https://x/{z}/{x}/{y}"}], out_path=out)
+        assert 'id="stacmap"' not in Path(out).read_text(encoding="utf-8") and "stac_map_url" not in r
+
+
+def t_llms_txt_present():
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "llms.txt").read_text(encoding="utf-8").startswith("# groundstation")
+
+
+class _Resp:
+    def __init__(self, status=200, body=None):
+        self.status_code, self._body = status, body
+
+    def json(self):
+        return self._body
+
+    def raise_for_status(self):
+        assert self.status_code < 400
+
+
+def _fake_smoke(now, available, get_json=None):
+    """Run smoke_forecast with a fake clock, fake NOAA bucket (available(url) -> bool) and point reads."""
+    saved = tools._client, tools._get_json, tools._utcnow
+    class C:
+        def head(self, url):
+            return _Resp(200 if available(url) else 404)
+    tools._client, tools._utcnow = C(), lambda: now
+    tools._get_json = get_json or (lambda url, **kw: {"values": [1.234]})
+    try:
+        return tools.smoke_forecast(47.8, -120.3)
+    finally:
+        tools._client, tools._get_json, tools._utcnow = saved
+
+
+def t_smoke_forecast_run_selection():
+    import datetime as dt
+    utc = dt.timezone.utc
+    # day boundary: 02z now, the newest run is 18z yesterday, 8 h old
+    r = _fake_smoke(dt.datetime(2026, 10, 25, 2, 30, tzinfo=utc), lambda u: "hrrr.20261024/conus/hrrr.t18z" in u)
+    assert r["run"] == "2026-10-24T18:00Z" and r["forecast_hour"] == 32 and r["valid_time"] == "2026-10-26T02:00Z"
+    assert r["now_valid_time"] == "2026-10-25T02:00Z" and r["now_ugm3"] == 1.2
+    assert not any("earlier than asked" in c for c in r["caveat"])
+    # the wanted frame is missing: step down to one that exists, and say so
+    def upto29(u):
+        return "hrrr.20261024/conus/hrrr.t18z" in u and int(u.split("wrfsfcf")[1][:2]) <= 29
+    r = _fake_smoke(dt.datetime(2026, 10, 25, 2, 30, tzinfo=utc), upto29)
+    assert r["forecast_hour"] == 29 and any("earlier than asked" in c for c in r["caveat"])
+    # a run older than 24 h clamps to 48 and must still say the frame is earlier than asked
+    r = _fake_smoke(dt.datetime(2026, 10, 26, 8, 0, tzinfo=utc), lambda u: "hrrr.20261025/conus/hrrr.t00z" in u)
+    assert r["forecast_hour"] == 48 and any("earlier than asked" in c for c in r["caveat"])
+    # nothing within 36 h: an error dict, not a raise
+    r = _fake_smoke(dt.datetime(2026, 10, 26, 8, 0, tzinfo=utc), lambda u: False)
+    assert "error" in r and r["source"]["model"] == "NOAA HRRR"
+
+
+def t_smoke_forecast_failures_are_data():
+    import datetime as dt
+    now = dt.datetime(2026, 10, 25, 12, 30, tzinfo=dt.timezone.utc)
+    def boom(url, **kw):
+        raise RuntimeError("429 from the point route")
+    r = _fake_smoke(now, lambda u: True, boom)
+    assert r["error"].startswith("HRRR smoke lookup failed") and "source" in r
+    r = _fake_smoke(now, lambda u: True, lambda url, **kw: {"values": [None]})
+    assert r["now_ugm3"] is None and r["forecast_ugm3"] is None and any("empty" in c for c in r["caveat"])
+
+
+def t_asset_href_cache_and_scheme():
+    calls = []
+    saved = tools._get_json
+    item = {"assets": {"visual": {"href": "https://x/v.tif"}, "raw": {"href": "s3://bucket/raw.tif"}}}
+    def fake(url, **kw):
+        calls.append(url)
+        if "dead" in url:
+            raise RuntimeError("404")
+        return item
+    tools._get_json = fake
+    tools._ITEMS.clear()
+    try:
+        assert tools._asset_href("earth-search", "c", "ok", "visual") == "https://x/v.tif"
+        assert tools._asset_href("earth-search", "c", "ok", "raw") is None  # s3:// never goes to the public tiler
+        assert len(calls) == 1  # one GET per item
+        assert tools._asset_href("earth-search", "c", "dead", "visual") is None
+        assert tools._asset_href("earth-search", "c", "dead", "visual") is None
+        assert len(calls) == 2  # a failure is cached too
+        calls.clear()
+        _fallback_map(asset_href="https://x/v.tif")  # caller holds the href and bbox: no fetch at all
+        assert calls == []
+    finally:
+        tools._get_json = saved
+        tools._ITEMS.clear()
+
+
+def t_statistics_429_retries_once_on_eoapi():
+    saved = tools._client, tools._get_json
+    item = {"bbox": [0, 0, 1, 1], "assets": {"visual": {"href": "https://x/v.tif"}}}
+    seen = []
+    class C:
+        def __init__(self, eoapi_status):
+            self.eoapi_status = eoapi_status
+        def get(self, url, **kw):
+            seen.append(url)
+            if "raster.eoapi.dev" in url:
+                return _Resp(self.eoapi_status, {"b1": {"min": 0, "max": 1}})
+            return _Resp(429)
+    tools._get_json = lambda url, **kw: item
+    tools._ITEMS.clear()
+    try:
+        tools._client = C(200)
+        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "I1")
+        assert "visual" in out and "b1" not in out and out["note"].startswith("titiler.xyz rate-limited")
+        assert len(seen) == 2 and "raster.eoapi.dev/external/statistics" in seen[1]
+        seen.clear()
+        tools._client = C(429)  # both limited: an error dict, no third try
+        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "I1")
+        assert "rate-limited" in out["error"] and len(seen) == 2
+    finally:
+        tools._client, tools._get_json = saved
+        tools._ITEMS.clear()
 
 
 def t_versions_agree():

@@ -15,6 +15,7 @@ import os
 import re
 import time
 from pathlib import Path
+from urllib.parse import quote
 from typing import Any
 
 import httpx
@@ -23,6 +24,10 @@ UA = {"User-Agent": "groundstation/0.1 (Development Seed labs prototype)"}
 # titiler.xyz is a shared community endpoint with rate limits (429s under heavy
 # use) — point GROUNDSTATION_TITILER at your own TiTiler deployment for real work
 TITILER = os.environ.get("GROUNDSTATION_TITILER", "https://titiler.xyz")
+# Development Seed's public eoAPI raster instance: the HRRR smoke tiler, and the
+# fallback when titiler.xyz rate-limits. Its /external routes read any COG or
+# GDAL-readable URL; it has no /stac routes
+EOAPI = os.environ.get("GROUNDSTATION_EOAPI", "https://raster.eoapi.dev")
 
 CATALOGS: dict[str, dict[str, str]] = {
     "earth-search": {
@@ -874,7 +879,8 @@ def compute_statistics(
         else:
             expression, assets = _expression_to_bands(expression, assets)
             params.append(("expression", expression))
-    for a in assets or _default_assets(collection_id) or ["visual"]:
+    used = assets or _default_assets(collection_id) or ["visual"]
+    for a in used:
         params.append(("assets", a))
     if backend == "pc":
         base = "https://planetarycomputer.microsoft.com/api/data/v1/item/statistics"
@@ -888,6 +894,19 @@ def compute_statistics(
         r = _client.post(base, params=params, json=aoi_geojson, timeout=60)
     else:
         r = _client.get(base, params=params, timeout=60)
+    retried = False
+    if r.status_code == 429 and backend == "titiler-xyz":
+        # one retry on the other tiler, never a loop: the shared tiler is a courtesy
+        href = None if expression or len(used) != 1 else _asset_href(catalog, collection_id, item_id, used[0])
+        if href:
+            retried = True
+            base, params = f"{EOAPI}/external/statistics", [("max_size", "512"), ("url", href)]
+            if aoi_geojson:
+                r = _client.post(base, params=params, json=aoi_geojson, timeout=60)
+            else:
+                r = _client.get(base, params=params, timeout=60)
+        if r.status_code == 429:
+            return {"error": "titiler.xyz rate-limited (429); try again later or set GROUNDSTATION_TITILER"}
     if r.status_code >= 500 and backend not in ("pc", "veda"):
         # a traceback tells an agent nothing. Look at the item only on failure,
         # so the working path costs no extra request
@@ -920,10 +939,14 @@ def compute_statistics(
     # TiTiler names the bands of a plain asset request b1..bN. Field test No.8:
     # a caller asking for "vv" got "b1" back and had to guess. Give the asset
     # its name back when the mapping is one to one and no expression is involved
-    if assets and not expression and isinstance(out, dict):
-        for i, a in enumerate(assets, 1):
+    # (the eoapi.dev retry always answers b1..bN, so it renames by the asset it was sent)
+    names = assets or (used if retried else None)
+    if names and not expression and isinstance(out, dict):
+        for i, a in enumerate(names, 1):
             if f"b{i}" in out and a not in out:
                 out[a] = out.pop(f"b{i}")
+    if retried and isinstance(out, dict):
+        out["note"] = "titiler.xyz rate-limited; statistics from raster.eoapi.dev"
     try:
         item = _get_json(
             f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
@@ -1129,7 +1152,7 @@ __BRAND__
 <script>if (location.hash === "#clean") document.documentElement.classList.add("clean");</script>
 </head><body>
 <div id="map"></div>
-<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div></div>
+<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div>__STACMAP__</div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
 __STACK__
 <script>
@@ -1148,6 +1171,20 @@ function addLayerTo(m, l, i) {
     m.addSource(id, { type: "raster", tiles: [l.tiles], tileSize: 256,
       ...(l.bounds ? { bounds: l.bounds } : {}) });
     m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": l.opacity ?? 1 } });
+    if (l.fallback_tiles) {
+      // titiler.xyz rate-limits (429): swap this source to raster.eoapi.dev, once.
+      // If titiler.xyz 429 lacks CORS headers, the browser reports status 0 / network error.
+      let swapped = false;
+      m.on("error", (e) => {
+        if (swapped || e.sourceId !== id || !e.error) return;
+        const s = e.error.status;
+        if (s !== 429 && s !== 0 && s !== undefined) return console.error(e.error);
+        swapped = true;
+        m.getSource(id).setTiles([l.fallback_tiles]);
+        const lab = document.getElementById("lbl" + id);
+        if (lab) lab.textContent += " (via raster.eoapi.dev)";
+      });
+    }
   } else if (l.type === "geojson") {
     m.addSource(id, { type: "geojson", data: l.data });
     m.addLayer({ id: id + "-fill", type: "circle", source: id,
@@ -1223,13 +1260,73 @@ if (COMPARE && rasters.length === 2) {
         const vis = cb.checked ? "visible" : "none";
         [id, id + "-fill", id + "-line"].forEach(x => map.getLayer(x) && map.setLayoutProperty(x, "visibility", vis));
       };
-      row.appendChild(cb); row.appendChild(document.createTextNode(" " + l.name));
+      const lab = document.createElement("span");
+      lab.id = "lbl" + id; lab.textContent = " " + l.name;
+      row.appendChild(cb); row.appendChild(lab);
       toggles.appendChild(row);
     });
   });
 }
 </script></body></html>
 """
+
+
+def stac_map_link(catalog: str, collection_id: str, item_id: str) -> str:
+    """stac-map opens any STAC URL from ?href= (src/utils/href.ts)."""
+    if catalog not in CATALOGS or "stac" not in CATALOGS[catalog]:
+        return ""
+    self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
+    return "https://developmentseed.org/stac-map/?href=" + quote(self_url, safe="")
+
+
+_ITEMS: dict[str, dict[str, Any] | None] = {}
+
+
+def _item(catalog: str, collection_id: str, item_id: str) -> dict[str, Any] | None:
+    """The STAC item, fetched at most once per process; a failure is cached as None.
+
+    ponytail: a transient failure sticks until the server restarts; add a TTL
+    if a flaky catalog makes fallbacks disappear in a long-lived session
+    """
+    key = f"{catalog}:{collection_id}:{item_id}"
+    if key not in _ITEMS:
+        try:
+            _ITEMS[key] = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}")
+        except Exception:
+            _ITEMS[key] = None
+    return _ITEMS[key]
+
+
+def _asset_href(catalog: str, collection_id: str, item_id: str, asset: str) -> str | None:
+    """http(s) href of one item asset; None when absent or not publicly readable."""
+    href = ((_item(catalog, collection_id, item_id) or {}).get("assets", {}).get(asset) or {}).get("href")
+    # s3:// and friends: the public tiler cannot read them
+    return href if isinstance(href, str) and href.startswith(("http://", "https://")) else None
+
+
+def _fallback_tiles(l: dict[str, Any]) -> str | None:
+    """raster.eoapi.dev tile template for a titiler.xyz item layer, or None.
+
+    Only a single-asset layer with no expression: eoapi.dev has no /stac route,
+    so it cannot merge bands or run band math.
+    ponytail: single-asset only; a self-hosted titiler with /stac would let
+    band-merge and expression layers fall back too
+    """
+    if CATALOGS[l["catalog"]]["raster"] != "titiler-xyz" or l.get("expression"):
+        return None
+    assets = l.get("assets") or _default_assets(l["collection_id"])
+    if len(assets) != 1:
+        return None
+    # no asset_href from the caller: read it from the cached item (one GET per item, ever)
+    href = l.get("asset_href") or _asset_href(l["catalog"], l["collection_id"], l["item_id"], assets[0])
+    if not href:
+        return None
+    params = [("url", href)]
+    if l.get("rescale"):
+        params.append(("rescale", l["rescale"]))
+    if l.get("colormap_name"):
+        params.append(("colormap_name", l["colormap_name"]))
+    return f"{EOAPI}/external/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + str(httpx.QueryParams(params))
 
 
 def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
@@ -1240,13 +1337,8 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
     if item_bounds is None:
         # scene footprint bounds stop the map requesting (and the tiler
         # serving 404s for) every out-of-footprint tile in the viewport
-        try:
-            item = _get_json(
-                f"{CATALOGS[l['catalog']]['stac']}/collections/{l['collection_id']}/items/{l['item_id']}"
-            )
-            item_bounds = item.get("bbox")
-        except Exception:
-            item_bounds = None
+        item_bounds = (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("bbox")
+    fallback = _fallback_tiles(l)
     return {
         "type": "raster",
         "name": l.get("name") or l["item_id"],
@@ -1262,6 +1354,7 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
         "opacity": l.get("opacity", 1),
         **({"bounds": item_bounds} if item_bounds else {}),
         **({"pc_fallback": True} if l.get("item_id") in _PC_FALLBACKS else {}),
+        **({"fallback_tiles": fallback} if fallback else {}),
     }
 
 
@@ -1307,6 +1400,7 @@ def _layer_state(l: dict[str, Any], deferred: bool = False) -> dict[str, Any]:
         "kind": l.get("type"),
         **({"bounds": l["bounds"]} if l.get("bounds") else {}),
         **({"tiles": l["tiles"]} if l.get("tiles") else {}),
+        **({"fallback_tiles": l["fallback_tiles"]} if l.get("fallback_tiles") else {}),
         **({"opacity": l["opacity"]} if l.get("opacity") not in (None, 1) else {}),
         **({"deferred": True} if deferred else {}),
     }
@@ -1669,6 +1763,8 @@ def render_map(
         stack_html = _stack_chunk_for(resolved, layers, stack_facts)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
+    first = next((l for l in layers if l.get("type") == "item"), None)
+    stac_map_url = first and stac_map_link(first["catalog"], first["collection_id"], first["item_id"])
     html = (
         _MAP_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
         .replace("__TITLE__", title)
@@ -1676,6 +1772,7 @@ def render_map(
         .replace("__LAYERS__", json.dumps(resolved))
         .replace("__BBOX__", json.dumps(bbox))
         .replace("__COMPARE__", json.dumps(compare))
+        .replace("__STACMAP__", f'<a id="stacmap" href="{stac_map_url}" target="_blank">Open in stac-map</a>' if stac_map_url else "")
         # __STACK__ goes last: its entries carry caller-supplied strings, and
         # replacing it earlier would let a literal "__LAYERS__" inside them be
         # macro-expanded by the later template substitutions
@@ -1693,6 +1790,10 @@ def render_map(
         "compare": bool(compare),
         "layers": [_layer_state(l) for l in resolved],
     }
+    if any(l.get("fallback_tiles") for l in resolved):
+        out["state"]["fallback"] = "raster.eoapi.dev"
+    if stac_map_url:
+        out["stac_map_url"] = stac_map_url
     if stack_note:
         out["note"] = stack_note
     fb = [l["name"] for l in resolved if l.get("pc_fallback")]
@@ -2543,6 +2644,122 @@ def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 
     except Exception as e:
         out["gdacs_error"] = str(e)
     return out
+
+
+# HRRR smoke: NOAA's 3 km CONUS model on the open-data bucket, read as a
+# GDAL vrt:// through eoAPI. Bounds from smokehrrr's metadata.ts
+HRRR_BBOX = [-134.12, 21.12, -60.9, 52.62]
+HRRR_BUCKET = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com"
+HRRR_MAX_HOURS = 48  # only the 00/06/12/18z runs reach it; plain hours stop at 18
+# MASSDEN kg/m3 -> ug/m3, then transparent below 1 so clear air shows the basemap
+HRRR_EXPR = "b1*1000000000"
+HRRR_COLORMAP = json.dumps([
+    [[0, 1], [0, 0, 0, 0]], [[1, 5], [255, 224, 102, 70]], [[5, 35], [255, 153, 0, 150]],
+    [[35, 150], [214, 40, 0, 205]], [[150, 1000000], [110, 0, 20, 235]],
+])
+# approximate reading scale, NOT the AQI: the bounds are a judgment call, tune them
+SMOKE_SOURCE = {"model": "NOAA HRRR", "band": "MASSDEN (76)", "tiler": EOAPI, "recipe": "https://github.com/hrodmn/smokehrrr"}
+SMOKE_SCALE = "under 5 clear, 5 to 35 light, 35 to 150 moderate, above 150 heavy"
+
+
+def _hrrr_grib_url(date: dt.date, hour: int, fhour: int) -> str:
+    return f"{HRRR_BUCKET}/hrrr.{date:%Y%m%d}/conus/hrrr.t{hour:02d}z.wrfsfcf{fhour:02d}.grib2"
+
+
+def _hrrr_vrt(grib_url: str) -> str:
+    return f"vrt://{grib_url}?bands=76"  # band 76 is MASSDEN, and the option belongs inside the vrt value
+
+
+def _hrrr_tile_template(grib_url: str) -> str:
+    q = str(httpx.QueryParams([("url", _hrrr_vrt(grib_url)), ("expression", HRRR_EXPR), ("colormap", HRRR_COLORMAP)]))
+    return f"{EOAPI}/external/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + q
+
+
+def smoke_word(ugm3: float | None) -> str:
+    return "no data" if ugm3 is None else "clear" if ugm3 < 5 else "light" if ugm3 < 35 else "moderate" if ugm3 < 150 else "heavy"
+
+
+def _utcnow() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def smoke_forecast(lat: float, lon: float, hours_ahead: int = 24) -> dict[str, Any]:
+    """Smoke near the ground now and hours_ahead from now, at a point in the contiguous US.
+
+    NOAA HRRR near-surface smoke mass density (MASSDEN, GRIB band 76) through
+    raster.eoapi.dev's vrt:// GRIB reader, the smokehrrr recipe
+    (https://github.com/hrodmn/smokehrrr). CONUS only. Forecast frames are
+    model guidance, not observation, and new runs can lag in NOAA's bucket.
+
+    Returns now_ugm3 (the frame nearest the current time, stamped
+    now_valid_time) and forecast_ugm3 (µg/m³), a tiles XYZ template for the
+    forecast frame (clear air is transparent, so it drapes on a map), and
+    a caveat list to read before quoting the numbers.
+    """
+    w, s, e, n = HRRR_BBOX
+    if not (w <= lon <= e and s <= lat <= n):
+        return {"error": "HRRR smoke covers the contiguous US only", "coverage_bbox": HRRR_BBOX}
+    now = _utcnow()
+    hour = dt.timedelta(hours=1)
+    try:
+        run = None
+        for back in range(37):  # smokehrrr probes back 36 h too, but only the long runs are worth a HEAD
+            t = (now - back * hour).replace(minute=0, second=0, microsecond=0)
+            if t.hour % 6 == 0 and _client.head(_hrrr_grib_url(t.date(), t.hour, 0)).status_code == 200:
+                run = t
+                break
+        if run is None:
+            return {"error": "no HRRR run found in NOAA's bucket for the last 36 hours", "source": SMOKE_SOURCE}
+
+        def have(f: int) -> bool:
+            return _client.head(_hrrr_grib_url(run.date(), run.hour, f)).status_code == 200
+
+        def read(f: int) -> float | None:
+            d = _get_json(
+                f"{EOAPI}/external/point/{lon},{lat}",
+                params={"url": _hrrr_vrt(_hrrr_grib_url(run.date(), run.hour, f)), "expression": HRRR_EXPR},
+                timeout=60,
+            )
+            v = d["values"][0]
+            return None if v is None else round(v, 1)
+
+        want = max(1, min(HRRR_MAX_HOURS, round((now + hours_ahead * hour - run) / hour)))
+        # ponytail: tries at most 5 hours at or below the wanted one, not the whole run;
+        # a bucket listing would find the true latest hour in one call
+        fh = next((f for f in dict.fromkeys((want, want - 1, want - 3, want - 6, want - 12)) if f >= 1 and have(f)), None)
+        if fh is None:
+            return {"error": f"HRRR run {run:%Y-%m-%dT%H:%MZ} has no forecast frames in NOAA's bucket yet", "source": SMOKE_SOURCE}
+        # runs are 6-hourly here, so f00 can be hours old: read the frame nearest the clock
+        fh_now = max(0, min(HRRR_MAX_HOURS, round((now - run) / hour)))
+        if fh_now and not have(fh_now):
+            fh_now = 0
+        now_ugm3, forecast_ugm3 = read(fh_now), read(fh)
+    except Exception as ex:
+        return {"error": f"HRRR smoke lookup failed: {type(ex).__name__}: {ex}", "source": SMOKE_SOURCE}
+    valid = run + fh * hour
+    caveat = [
+        "this is model guidance from NOAA HRRR, not a measurement; a smoke plume's timing and edges can be off by hours and miles",
+        "the model grid is 3 km, so a valley or a ridge can read differently from the cell value",
+        "HRRR covers the contiguous US only",
+        f"approximate reading scale in µg/m³, not the AQI: {SMOKE_SCALE}",
+    ]
+    if valid < now + hours_ahead * hour - hour:
+        caveat.insert(0, f"the frame for {hours_ahead} h ahead is not in NOAA's bucket (the run is old or the newer frames have not landed), so this uses the frame valid {valid:%Y-%m-%dT%H:%MZ}, which is earlier than asked")
+    if now_ugm3 is None or forecast_ugm3 is None:
+        caveat.append("a reading came back empty (no data at this point), so that number is null")
+    return {
+        "run": f"{run:%Y-%m-%dT%H:%MZ}",
+        "forecast_hour": fh,
+        "valid_time": f"{valid:%Y-%m-%dT%H:%MZ}",
+        "now_valid_time": f"{run + fh_now * hour:%Y-%m-%dT%H:%MZ}",
+        "now_ugm3": now_ugm3,
+        "forecast_ugm3": forecast_ugm3,
+        "units": "µg/m³ near-surface smoke mass density",
+        "tiles": _hrrr_tile_template(_hrrr_grib_url(run.date(), run.hour, fh)),
+        "bounds": HRRR_BBOX,
+        "source": SMOKE_SOURCE,
+        "caveat": caveat,
+    }
 
 
 def weather_summary(lat: float, lon: float, past_days: int = 7) -> dict[str, Any]:

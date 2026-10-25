@@ -45,6 +45,9 @@ Which new satellite scenes arrived, their dates and cloud cover, and what to loo
 
 Rules: be specific, cite dates, no filler, no speculation beyond the data. If data sections have
 errors or are empty, work with what's there and note the gap in one clause, not a paragraph.
+If a "smoke" block is present, add one sentence about smoke to Weather signal: now versus the
+forecast, both in µg/m³ with the approximate scale word, and say it is model guidance. Call the
+first reading by the smoke block's "now_label" exactly ("now" or "at <time>").
 If an "ndvi_change" block is present, weave the vegetation delta (with both dates) into TL;DR and
 What changed — a real change signal outranks scene bookkeeping.
 If a "previous_run" block is present, "What changed" means changed SINCE THAT RUN: name events that
@@ -76,7 +79,7 @@ PAGE = """<!doctype html>
 <main>
 <div class="card">__BODY__</div>
 <div class="card"><h2>Latest scene</h2><p>__SCENE_CAPTION__</p><img src="__PREVIEW__" alt="latest satellite preview">
-<br><a class="button" href="__MAP__">Open interactive map</a></div>
+<br><a class="button" href="__MAP__">Open interactive map</a>__STACMAP__</div>
 </main>
 <footer>groundstation &middot; Development Seed labs prototype &middot; STAC + TiTiler + EONET + GDACS + Open-Meteo</footer>
 </body></html>
@@ -186,6 +189,9 @@ def synthesize(data: dict) -> str:
     ev = data["events"]
     lines = ["## TL;DR", f"Automated data summary for {data['place']} (no LLM synthesis available)."]
     ev_lines = [f"- {e['category']}: {e['title']} ({e.get('date','')})" for e in ev.get("eonet", [])[:8]]
+    sm = data.get("smoke")
+    if sm:
+        lines += ["## Smoke", f"- {sm['now_ugm3']} µg/m³ ({tools.smoke_word(sm['now_ugm3'])}) {sm['now_label']}, {sm['forecast_ugm3']} µg/m³ ({tools.smoke_word(sm['forecast_ugm3'])}) forecast for {sm['valid_time']} (NOAA HRRR model guidance)"]
     lines += ["## What changed"] + (ev_lines or ["- No open events."])
     lines += ["## Fresh eyes on the ground"] + [
         f"- {i['collection']} {i['datetime'][:10]} cloud {i.get('cloud_cover')}%"
@@ -242,6 +248,14 @@ def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
     }
 
 
+def _smoke_for_llm(smoke: dict) -> dict:
+    """Numbers, times, units and caveats only: the tile template and bounds are noise to the model."""
+    out = {k: v for k, v in smoke.items() if k not in ("tiles", "bounds", "source")}
+    age = dt.datetime.now(dt.timezone.utc) - dt.datetime.strptime(smoke["now_valid_time"], "%Y-%m-%dT%H:%MZ").replace(tzinfo=dt.timezone.utc)
+    out["now_label"] = "now" if age <= dt.timedelta(hours=1) else f"at {smoke['now_valid_time']}"
+    return out
+
+
 def build_brief(place: str, days: int, out_dir: Path) -> dict:
     today = dt.date.today()
     print(f"[1/5] geocoding {place!r}...")
@@ -255,6 +269,11 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     print("[2/5] gathering events + weather...")
     events = tools.active_events(bbox=bbox, days=30, pad=pad)
     weather = tools.weather_summary(g["lat"], g["lon"], past_days=7)
+    smoke = None
+    try:
+        smoke = tools.smoke_forecast(g["lat"], g["lon"], hours_ahead=24)
+    except Exception as e:
+        print(f"smoke forecast skipped: {e}", file=sys.stderr)
 
     print("[3/5] searching fresh imagery...")
     imagery = tools.search_imagery(
@@ -316,6 +335,16 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
             f"Sentinel-2, {best['datetime'][:10]}, {round(best.get('cloud_cover') or 0, 1)}% cloud cover — "
             f"clearest of {imagery['count']} scenes in the last {days} days."
         )
+    if smoke and smoke.get("tiles"):
+        layers.append(
+            {
+                "type": "raster",
+                "name": f"HRRR smoke forecast, valid {smoke['valid_time']}",
+                "tiles": smoke["tiles"],
+                "bounds": smoke["bounds"],
+                "opacity": 0.75,
+            }
+        )
     if fc["features"]:
         layers.append({"type": "geojson", "name": f"Active events ({len(fc['features'])})", "data": fc, "color": "#d63b3b"})
 
@@ -344,6 +373,8 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         "weather": weather,
         "imagery": {"count": imagery.get("count"), "items": imagery.get("items", [])[:8]},
     }
+    if smoke and smoke.get("tiles"):
+        data["smoke"] = _smoke_for_llm(smoke)
     if change:
         data["ndvi_change"] = change
     state_path = Path(__file__).parent / "state" / f"{slug}.json"
@@ -362,6 +393,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         .replace("__PREVIEW__", preview_url)
         .replace("__SCENE_CAPTION__", scene_caption)
         .replace("__MAP__", map_path.name)
+        .replace("__STACMAP__", f' <a class="button" href="{tools.stac_map_link("earth-search", best["collection"], best["id"])}" target="_blank">Open in stac-map</a>' if best else "")
     )
     brief_path = out_dir / f"brief-{slug}-{today.isoformat()}.html"
     brief_path.write_text(html, encoding="utf-8")
