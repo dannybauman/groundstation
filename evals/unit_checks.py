@@ -1801,28 +1801,36 @@ def _archive_item(i, x, cloud):
     return {"type": "Feature", "stac_version": "1.1.0", "id": i, "collection": "sentinel-2-l2a",
             "geometry": {"type": "Polygon", "coordinates": [[[x, 0], [x + 1, 0], [x + 1, 1], [x, 1], [x, 0]]]},
             "bbox": [x, 0, x + 1, 1],
-            "properties": {"datetime": f"2026-10-0{x + 1}T00:00:00Z", "eo:cloud_cover": cloud},
+            "properties": {"datetime": f"2026-10-0{x % 9 + 1}T00:00:00Z", "eo:cloud_cover": cloud},
             "assets": {"visual": {"href": "https://e/v.tif", "type": "image/tiff"}},
-            "links": [{"rel": "self", "href": f"https://earth-search/items/{i}"}]}
+            "links": [{"rel": "self", "href": f"https://earth-search.aws.element84.com/v1/items/{i}"}]}
 
 
 def t_geoparquet_archive_searches_like_a_catalog():
     import rustac
-    assert [tools._is_archive(c) for c in ("a.parquet", "s3://x.parquet", "/tmp/a/b.GEOPARQUET", "earth-search", "veda")] == [True, True, True, False, False]
+    assert [tools._is_archive(c) for c in ("a.parquet", "s3://x.parquet", "/tmp/a/b.GEOPARQUET", "https://h/x.parquet?v=1", "https://h/x.parquet#f", "earth-search", "veda")] == [True] * 5 + [False] * 2
     saved = tools._client
     tools._client = None  # any STAC API call in the archive path raises
     try:
         with tempfile.TemporaryDirectory() as d:
             href = str(Path(d) / "a.parquet")
-            rustac.write_sync(href, [_archive_item("a", 0, 5.0), _archive_item("b", 1, 50.0)])
+            rustac.write_sync(href, [_archive_item("a", 0, 5.0), _archive_item("b", 1, 50.0), _archive_item("n", 2, None), _archive_item("w", 175, 1.0)])
             out = tools.search_imagery(href, [], bbox=[0, 0, 3, 1])
-            assert out["count"] == 2 and [i["id"] for i in out["items"]] == ["b", "a"]
+            assert out["count"] == 3 and [i["id"] for i in out["items"]] == ["n", "b", "a"]
             assert set(out["items"][0]) >= {"catalog", "collection", "id", "datetime", "cloud_cover", "bbox", "assets", "self_url", "covers_aoi_pct"}
-            assert out["items"][0]["self_url"].endswith("/items/b") and out["recommended"]
-            assert out["archive"]["href"] == href and out["archive"]["datetime_range"] == ["2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z"]
+            assert out["items"][0]["self_url"].endswith("/items/n") and out["recommended"]
+            assert out["archive"]["href"] == href and out["archive"]["datetime_range"] == ["2026-10-01T00:00:00Z", "2026-10-05T00:00:00Z"]
             assert out["archive"]["written"] and "snapshot" in out["archive"]["note"]
             assert tools.search_imagery(href, [], bbox=[0, 0, 0.9, 1])["count"] == 1
-            assert tools.search_imagery(href, [], bbox=[0, 0, 3, 1], max_cloud_cover=10)["count"] == 1
+            capped = tools.search_imagery(href, [], bbox=[0, 0, 3, 1], max_cloud_cover=10)
+            assert [i["id"] for i in capped["items"]] == ["a"]  # no cloud value is dropped, as the API does
+            wrap = tools.search_imagery(href, [], bbox=[170, 0, -170, 1])  # antimeridian: not read as -170..170
+            assert [i["id"] for i in wrap["items"]] == ["w"]
+            assert "'earth-search'" in out["archive"]["note"]
+            noc = tools._recommend([{"id": "x", "cloud_cover": None, "covers_aoi_pct": 50.0, "datetime": "d"}, {"id": "y", "cloud_cover": 5.0, "covers_aoi_pct": 50.0, "datetime": "c"}])
+            assert noc["id"] == "x"  # a None cloud value must not crash the reason text
+            err = tools.write_archive("earth-search", ["c"], bbox=[0, 0, 1, 1], out_path=str(Path(d) / "a.txt"))
+            assert "error" in err and not (Path(d) / "a.txt").exists()
     finally:
         tools._client = saved
 
