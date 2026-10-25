@@ -1292,6 +1292,13 @@ def t_search_datasets_spatial_and_resolution_filters():
         assert "no gsd" in out[1]["note"] and "no spatial extent" in out[1]["note"]
         assert [h["id"] for h in tools.search_datasets("", catalog="veda", bbox=efate)] == ["inside", "blank", "nulls", "short", "coarse"]
         assert "covers_aoi" not in tools.search_datasets("", catalog="veda")[0]
+        # Antimeridian: bbox crossing 180 matches collections covering that longitude
+        fiji = [177.0, -19.0, -179.0, -16.0]
+        fiji_col = {"id": "fiji-cross", "extent": {"spatial": {"bbox": [[175, -20, 180, -15]]}}, "summaries": {"gsd": [10]}}
+        tools._collections = lambda cat: [fiji_col, {"id": "other", "extent": {"spatial": {"bbox": [[0, 0, 10, 10]]}}, "summaries": {"gsd": [10]}}]
+        fiji_out = tools.search_datasets("", catalog="veda", bbox=fiji, max_gsd=10)
+        assert [h["id"] for h in fiji_out] == ["fiji-cross"]
+        assert fiji_out[0]["covers_aoi"] is True
     finally:
         tools._collections = saved
 
@@ -1965,6 +1972,79 @@ def t_zarr_select_says_how_far_it_snapped():
     da = xr.DataArray(np.zeros((2, 2, 2)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=[1.0, 0.0], longitude=[0.0, 1.0]))
     _, used, notes = tools._zarr_select(da, dict(valid_time="2026-10-25T00:00"))
     assert used["time"].startswith("2023-01-10") and "outside the store's range" in notes[0] and "off by" in notes[0], notes
+
+
+def t_http_zarr_store_range_206():
+    import asyncio
+    from zarr.abc.store import RangeByteRequest
+
+    store = tools._http_zarr_store("https://example.com/test.zarr")
+    class FakeBuf:
+        @classmethod
+        def from_bytes(cls, b): return b
+    class FakeProto:
+        buffer = FakeBuf
+
+    class FakeResp:
+        def __init__(self, status, content):
+            self.status_code = status
+            self.content = content
+        def raise_for_status(self):
+            if self.status_code >= 400: raise RuntimeError(f"HTTP {self.status_code}")
+
+    async def run():
+        # 206 partial content returns bytes
+        async def get_206(url, headers): return FakeResp(206, b"abc")
+        store._c.get = get_206
+        res = await store.get("data", FakeProto, RangeByteRequest(0, 3))
+        assert res == b"abc"
+
+        # 200 on a Range request raises RuntimeError (server ignored Range)
+        async def get_200(url, headers): return FakeResp(200, b"full content")
+        store._c.get = get_200
+        try:
+            await store.get("data", FakeProto, RangeByteRequest(0, 3))
+            raise AssertionError("expected server Range refusal error")
+        except RuntimeError as e:
+            assert "ignored a Range request" in str(e)
+
+        # 404 returns None
+        async def get_404(url, headers): return FakeResp(404, b"")
+        store._c.get = get_404
+        assert (await store.get("data", FakeProto, None)) is None
+
+    asyncio.run(run())
+
+
+def t_write_archive_paging_get_merge():
+    # Test next-link GET paging and merge in write_archive
+    saved_client = tools._client
+    calls = []
+    class FakeClient:
+        def post(self, url, json=None, **kw):
+            calls.append(("POST", url, json))
+            return _FakeResp({
+                "features": [_archive_item("item-1", 1, 10.0)],
+                "links": [{"rel": "next", "href": "search?page=2", "method": "GET", "merge": True, "body": {"token": "abc"}}]
+            })
+        def get(self, url, **kw):
+            calls.append(("GET", url, kw))
+            return _FakeResp({
+                "features": [_archive_item("item-2", 2, 20.0)],
+                "links": []
+            })
+    tools._client = FakeClient()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            out_p = str(Path(d) / "paged.parquet")
+            res = tools.write_archive("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1], out_path=out_p, limit=5)
+            assert res["count"] == 2
+            assert Path(out_p).exists()
+            assert len(calls) == 2
+            assert calls[0][0] == "POST"
+            assert calls[1][0] == "GET" and calls[1][1].endswith("/search?page=2")
+    finally:
+        tools._client = saved_client
 
 
 def t_versions_agree():
