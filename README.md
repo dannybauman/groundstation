@@ -139,6 +139,7 @@ Any TiTiler deployment with the `/stac` router works. One caveat: NAIP and Lands
 
 - `docs/examples.md`: the field tests. Real prompts run through the agent and graded, with the fixes each round produced. The pages are at `/docs/field-test.html` when the console is running
 - `docs/architecture.md`: how it fits together, the design decisions, and what is deliberately not built
+- `docs/plan-2026-10-devseed-stack.md`: where it is going next: Zarr through titiler.xyz, HRRR smoke in the briefs, cross-catalog discovery, stac-geoparquet archives, and a hosted toolset on mcp-toolsets-runtime, each tied to the Development Seed work it rides on
 - Deep exploration hands off to [stac-map](https://github.com/developmentseed/stac-map) (Pete Gadomski), which renders COGs client-side with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster) (Kyle Barron). Tiling and pixel math ride [TiTiler](https://github.com/developmentseed/titiler)
 
 MIT licensed, see `LICENSE`.
