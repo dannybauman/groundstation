@@ -758,6 +758,14 @@ def _default_assets(collection: str) -> list[str]:
     return []
 
 
+def _default_nodata(collection: str) -> str | None:
+    # MODIS burned area stores "did not burn" as 0, not as nodata, so an
+    # unmasked layer paints every unburned pixel black over the basemap
+    if collection.startswith("modis-64A1"):
+        return "0"
+    return None
+
+
 def preview_item(
     catalog: str,
     collection_id: str,
@@ -967,8 +975,12 @@ def tile_url_template(
     rescale: str | None = None,
     colormap_name: str | None = None,
     expression: str | None = None,
+    nodata: str | None = None,
 ) -> str:
     """XYZ tile URL template ({z}/{x}/{y}) for a STAC item, for web maps.
+
+    nodata names a pixel value to draw clear. Collections that store
+    "nothing here" as a real value (MODIS burned area's 0) get it by default.
 
     For index layers (NDVI etc.) pass expression over asset names, e.g.
     "(nir-red)/(nir+red)" with colormap_name="rdylgn" — supported on
@@ -979,6 +991,7 @@ def tile_url_template(
     assets = assets or ([] if expression else _default_assets(collection_id))
     if expression and not rescale:
         rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
+    nodata = nodata if nodata is not None else _default_nodata(collection_id)
     backend = CATALOGS[catalog]["raster"]
     if backend == "pc":
         # item-tiles render empty for reprojection-heavy sources (MODIS
@@ -989,6 +1002,8 @@ def tile_url_template(
             params.append(("rescale", rescale))
         if colormap_name:
             params.append(("colormap_name", colormap_name))
+        if nodata:
+            params.append(("nodata", nodata))
         try:
             mid = _pc_mosaic_id(collection_id, item_id)
         except httpx.HTTPError:
@@ -1008,6 +1023,8 @@ def tile_url_template(
             params.append(("rescale", rescale))
         if colormap_name:
             params.append(("colormap_name", colormap_name))
+        if nodata:
+            params.append(("nodata", nodata))
         q = str(httpx.QueryParams(params))
         return (
             f"https://openveda.cloud/api/raster/collections/{collection_id}/items/{item_id}"
@@ -1023,6 +1040,8 @@ def tile_url_template(
         params.append(("rescale", rescale))
     if colormap_name:
         params.append(("colormap_name", colormap_name))
+    if nodata:
+        params.append(("nodata", nodata))
     q = str(httpx.QueryParams(params))
     return f"{TITILER}/stac/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + q
 
@@ -1258,6 +1277,7 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
             l.get("rescale"),
             l.get("colormap_name"),
             l.get("expression"),
+            l.get("nodata"),
         ),
         "opacity": l.get("opacity", 1),
         **({"bounds": item_bounds} if item_bounds else {}),
@@ -1279,7 +1299,7 @@ def _expand_coverage_set(layer: dict[str, Any]) -> list[dict[str, Any]]:
     if not items:
         raise ValueError("coverage_set layer has no items — pass search_imagery's full_coverage_set")
     prefix = layer.get("name") or (layer.get("set") or {}).get("date") or "coverage"
-    params = {k: layer[k] for k in ("assets", "expression", "colormap_name", "rescale", "opacity") if k in layer}
+    params = {k: layer[k] for k in ("assets", "expression", "colormap_name", "rescale", "nodata", "opacity") if k in layer}
     out = []
     for it in items:
         out.append({
