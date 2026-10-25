@@ -470,16 +470,31 @@ def _collection_gsd(c: dict[str, Any]) -> float | None:
     return min(nums) if nums else None
 
 
+def _split_antimeridian(box: list[float]) -> list[list[float]]:
+    # Per RFC 7946 §5.2, a bbox with west > east is the antimeridian-crossing form, not an invalid box
+    if not box or len(box) < 4:
+        return []
+    w, s, e, n = box
+    if w > e:
+        return [
+            [w, s, 180.0, n],
+            [-180.0, s, e, n]
+        ]
+    return [box]
+
+
 def _covers_aoi(c: dict[str, Any], aoi: list[float]) -> bool | str:
     boxes = ((c.get("extent") or {}).get("spatial") or {}).get("bbox") or []
     if not boxes:
         return "unknown"
-    w, s, e, n = aoi
     try:
+        aoi_parts = _split_antimeridian(aoi)
         for b in boxes:
-            bw, bs, be, bn = (b[0], b[1], b[2], b[3]) if len(b) == 4 else (b[0], b[1], b[3], b[4])
-            if bw <= e and be >= w and bs <= n and bn >= s:
-                return True
+            b_2d = [b[0], b[1], b[2], b[3]] if len(b) == 4 else [b[0], b[1], b[3], b[4]]
+            for bw, bs, be, bn in _split_antimeridian(b_2d):
+                for pw, ps, pe, pn in aoi_parts:
+                    if bw <= pe and be >= pw and bs <= pn and bn >= ps:
+                        return True
     except (TypeError, IndexError, ValueError):
         return "unknown"
     return False
@@ -953,17 +968,7 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
         **({"read_note": read_note} if read_note else {}),
     }
 
-def _split_antimeridian(box: list[float]) -> list[list[float]]:
-    # Per RFC 7946 §5.2, a bbox with west > east is the antimeridian-crossing form, not an invalid box
-    if not box or len(box) < 4:
-        return []
-    w, s, e, n = box
-    if w > e:
-        return [
-            [w, s, 180.0, n],
-            [-180.0, s, e, n]
-        ]
-    return [box]
+
 
 
 def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float | None:
@@ -1704,10 +1709,13 @@ function addLayerTo(m, l, i) {
       ...(l.bounds ? { bounds: l.bounds } : {}) });
     m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": l.opacity ?? 1 } });
     if (l.fallback_tiles) {
-      // titiler.xyz rate-limits (429): swap this source to raster.eoapi.dev, once
+      // titiler.xyz rate-limits (429): swap this source to raster.eoapi.dev, once.
+      // If titiler.xyz 429 lacks CORS headers, the browser reports status 0 / network error.
       let swapped = false;
       m.on("error", (e) => {
-        if (swapped || e.sourceId !== id || !e.error || e.error.status !== 429) return console.error(e.error);
+        if (swapped || e.sourceId !== id || !e.error) return;
+        const s = e.error.status;
+        if (s !== 429 && s !== 0 && s !== undefined) return console.error(e.error);
         swapped = true;
         m.getSource(id).setTiles([l.fallback_tiles]);
         const lab = document.getElementById("lbl" + id);
@@ -1802,6 +1810,8 @@ if (COMPARE && rasters.length === 2) {
 
 def stac_map_link(catalog: str, collection_id: str, item_id: str) -> str:
     """stac-map opens any STAC URL from ?href= (src/utils/href.ts)."""
+    if catalog not in CATALOGS or "stac" not in CATALOGS[catalog]:
+        return ""
     self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
     return "https://developmentseed.org/stac-map/?href=" + quote(self_url, safe="")
 
