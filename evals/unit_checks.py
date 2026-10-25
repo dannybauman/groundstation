@@ -1931,6 +1931,48 @@ def t_zarr_select_says_how_far_it_snapped():
     assert used["time"].startswith("2023-01-10") and "outside the store's range" in notes[0] and "off by" in notes[0], notes
 
 
+def t_http_zarr_store_range_206():
+    import asyncio
+    from zarr.abc.store import RangeByteRequest
+
+    store = tools._http_zarr_store("https://example.com/test.zarr")
+    class FakeBuf:
+        @classmethod
+        def from_bytes(cls, b): return b
+    class FakeProto:
+        buffer = FakeBuf
+
+    class FakeResp:
+        def __init__(self, status, content):
+            self.status_code = status
+            self.content = content
+        def raise_for_status(self):
+            if self.status_code >= 400: raise RuntimeError(f"HTTP {self.status_code}")
+
+    async def run():
+        # 206 partial content returns bytes
+        async def get_206(url, headers): return FakeResp(206, b"abc")
+        store._c.get = get_206
+        res = await store.get("data", FakeProto, RangeByteRequest(0, 3))
+        assert res == b"abc"
+
+        # 200 on a Range request raises RuntimeError (server ignored Range)
+        async def get_200(url, headers): return FakeResp(200, b"full content")
+        store._c.get = get_200
+        try:
+            await store.get("data", FakeProto, RangeByteRequest(0, 3))
+            raise AssertionError("expected server Range refusal error")
+        except RuntimeError as e:
+            assert "ignored a Range request" in str(e)
+
+        # 404 returns None
+        async def get_404(url, headers): return FakeResp(404, b"")
+        store._c.get = get_404
+        assert (await store.get("data", FakeProto, None)) is None
+
+    asyncio.run(run())
+
+
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files

@@ -91,6 +91,15 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - link: https://registry.opendata.aws/noaa-hrrr-pds/
 - when: tiler_hosts=raster.eoapi.dev
 
+## smokehrrr
+- stage: pixels
+- what: the recipe for tiling NOAA HRRR smoke GRIBs through eoAPI vrt://
+- ds-role: uses
+- integration: the vrt:// URL construction and colormap that turns HRRR MASSDEN GRIBs into transparent smoke tiles
+- speaks-to: NOAA HRRR, eoAPI raster
+- link: https://github.com/hrodmn/smokehrrr
+- when: tiler_hosts=raster.eoapi.dev
+
 ## stac-fastapi
 - stage: catalog
 - what: the STAC API server — the one NASA VEDA and Planetary Computer both answer searches with
@@ -361,4 +370,40 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - integration: titiler.xyz `/zarr/tiles` draws the stores that open there (ERA5 today); GFS, HRRR and MUR do not and say why in `tiles_note`
 - speaks-to: TiTiler, Zarr, xarray
 - link: https://github.com/developmentseed/titiler
+- when: collection=weatherbench2-era5
+
+## NOAA HRRR Zarr (University of Utah)
+- stage: data
+- what: University of Utah's hourly HRRR Zarr archive on AWS Open Data
+- ds-role: uses
+- integration: the hourly CONUS temperature forecast grid behind compute_statistics on noaa-hrrr-forecast
+- speaks-to: Zarr, xarray, obstore
+- link: https://registry.opendata.aws/noaa-hrrr-zarr/
+- when: collection=noaa-hrrr-forecast
+
+## GFS Zarr (Dynamical.org)
+- stage: data
+- what: NOAA Global Forecast System weather model archived in Zarr format by Dynamical.org
+- ds-role: uses
+- integration: the global GFS forecast grid (deprecated plain Zarr copy; Icechunk is the upgrade path)
+- speaks-to: Zarr, xarray
+- link: https://data.dynamical.org
+- when: collection=noaa-gfs-forecast
+
+## NASA MUR SST
+- stage: data
+- what: NASA Multi-scale Ultra-high Resolution (MUR) Sea Surface Temperature on AWS Open Data
+- ds-role: uses
+- integration: 1 km daily global sea surface temperature analysis in Zarr format
+- speaks-to: Zarr, obstore
+- link: https://registry.opendata.aws/mur/
+- when: collection=nasa-mur-sst
+
+## WeatherBench 2 ERA5
+- stage: data
+- what: Google Research benchmark dataset — ECMWF ERA5 reanalysis regridded to Zarr on Google Cloud
+- ds-role: uses
+- integration: global 1.5 degree atmospheric reanalysis drawn by titiler.xyz and computed by compute_statistics
+- speaks-to: Zarr, xarray, TiTiler
+- link: https://weatherbench2.readthedocs.io
 - when: collection=weatherbench2-era5
