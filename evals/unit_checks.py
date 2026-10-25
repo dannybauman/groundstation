@@ -1813,7 +1813,11 @@ def t_zarr_catalog_surfaces():
     url = tools.tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel=sel)
     assert "/zarr/tiles/" in url and "variable=2m_temperature" in url and "time%3Dnearest%3A%3A2023-01-10T12%3A00" in url
     assert tools.tile_url_template("zarr", "noaa-gfs-forecast", "temperature_2m") == tools.ZARR_STORES["noaa-gfs-forecast"]["tiles_note"]
-    assert "error" in tools.compute_statistics("zarr", "nasa-mur-sst", "analysed_sst", bbox=[0, 0, 1, 1])
+    for sid, var in (("nasa-mur-sst", "analysed_sst"), ("noaa-gfs-forecast", "temperature_2m")):
+        assert "error" in tools.compute_statistics("zarr", sid, var, bbox=[0, 0, 1, 1])
+    assert "unknown" in tools.tile_url_template("zarr", "nope", "x")
+    assert "unknown variable" in tools.tile_url_template("zarr", "weatherbench2-era5", "nope")
+    assert tools.ZARR_STORES["noaa-hrrr-forecast"]["coverage"].startswith("CONUS only")
 
 
 def t_zarr_clip_reduce_and_select():
@@ -1833,6 +1837,35 @@ def t_zarr_clip_reduce_and_select():
     ts = xr.DataArray(np.zeros((2, 6, 10)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=lat, longitude=lon))
     _, used, notes = tools._zarr_select(ts, dict(valid_time="2026-10-25T05:00"))
     assert used["time"] == "2026-10-25 06:00:00" and "snapped" in notes[0]
+
+
+def t_zarr_bbox_outside_coverage_is_refused():
+    import numpy as np
+    import xarray as xr
+
+    lat, lon = np.arange(30.0, 24.0, -1.0), np.arange(255.0, 265.0, 1.0)
+    da = xr.DataArray(np.zeros((6, 10)), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=lon))
+    assert "outside" in tools._clip_reduce(da, [5.0, 45.0, 6.0, 46.0])["error"]
+    wide = xr.DataArray(np.zeros((6, 360)), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=np.arange(360.0)))
+    assert "outside" in tools._clip_reduce(wide, [-1.0, 26.0, 1.0, 28.0])["error"]  # across 0 on a 0..360 grid
+    z = tools.ZARR_STORES["weatherbench2-era5"]
+    saved = tools._open_zarr
+    tools._open_zarr = lambda sid: xr.Dataset({"2m_temperature": wide.expand_dims(time=[np.datetime64("2023-01-10", "ns")])})
+    try:
+        err = tools._zarr_statistics("weatherbench2-era5", "2m_temperature", [-1.0, 26.0, 1.0, 28.0], None)
+    finally:
+        tools._open_zarr = saved
+    assert z["title"] in err["error"] and z["coverage"] in err["error"], err
+
+
+def t_zarr_select_says_how_far_it_snapped():
+    import numpy as np
+    import xarray as xr
+
+    t = np.array(["2022-12-31T18", "2023-01-10T12"], dtype="datetime64[ns]")
+    da = xr.DataArray(np.zeros((2, 2, 2)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=[1.0, 0.0], longitude=[0.0, 1.0]))
+    _, used, notes = tools._zarr_select(da, dict(valid_time="2026-10-25T00:00"))
+    assert used["time"].startswith("2023-01-10") and "outside the store's range" in notes[0] and "off by" in notes[0], notes
 
 
 def t_versions_agree():

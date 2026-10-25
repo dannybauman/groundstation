@@ -156,8 +156,8 @@ def t_pc():
 @check("zarr forecast store opens and a bbox statistic comes back with the dataset named")
 def t_zarr_live():
     tomorrow = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=1)).strftime("%Y-%m-%dT21:00")
-    r = tools.compute_statistics("zarr", "noaa-gfs-forecast", "temperature_2m", bbox=[-99.6, 27.4, -99.4, 27.6], sel=dict(valid_time=tomorrow))
-    assert -40 < r["temperature_2m"]["mean"] < 55 and "GFS" in r["dataset"], r
+    r = tools.compute_statistics("zarr", "noaa-hrrr-forecast", "TMP", bbox=[-99.6, 27.4, -99.4, 27.6], sel=dict(valid_time=tomorrow))
+    assert 233 < r["TMP"]["mean"] < 328 and "HRRR" in r["dataset"], r
 
 
 @check("local synth brief passes brief_checks (loud SKIP without an endpoint)")
