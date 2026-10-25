@@ -894,10 +894,12 @@ def compute_statistics(
         r = _client.post(base, params=params, json=aoi_geojson, timeout=60)
     else:
         r = _client.get(base, params=params, timeout=60)
+    retried = False
     if r.status_code == 429 and backend == "titiler-xyz":
         # one retry on the other tiler, never a loop: the shared tiler is a courtesy
         href = None if expression or len(used) != 1 else _asset_href(catalog, collection_id, item_id, used[0])
         if href:
+            retried = True
             base, params = f"{EOAPI}/external/statistics", [("max_size", "512"), ("url", href)]
             if aoi_geojson:
                 r = _client.post(base, params=params, json=aoi_geojson, timeout=60)
@@ -937,10 +939,14 @@ def compute_statistics(
     # TiTiler names the bands of a plain asset request b1..bN. Field test No.8:
     # a caller asking for "vv" got "b1" back and had to guess. Give the asset
     # its name back when the mapping is one to one and no expression is involved
-    if assets and not expression and isinstance(out, dict):
-        for i, a in enumerate(assets, 1):
+    # (the eoapi.dev retry always answers b1..bN, so it renames by the asset it was sent)
+    names = assets or (used if retried else None)
+    if names and not expression and isinstance(out, dict):
+        for i, a in enumerate(names, 1):
             if f"b{i}" in out and a not in out:
                 out[a] = out.pop(f"b{i}")
+    if retried and isinstance(out, dict):
+        out["note"] = "titiler.xyz rate-limited; statistics from raster.eoapi.dev"
     try:
         item = _get_json(
             f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
@@ -1169,7 +1175,7 @@ function addLayerTo(m, l, i) {
       // titiler.xyz rate-limits (429): swap this source to raster.eoapi.dev, once
       let swapped = false;
       m.on("error", (e) => {
-        if (swapped || e.sourceId !== id || !e.error || e.error.status !== 429) return;
+        if (swapped || e.sourceId !== id || !e.error || e.error.status !== 429) return console.error(e.error);
         swapped = true;
         m.getSource(id).setTiles([l.fallback_tiles]);
         const lab = document.getElementById("lbl" + id);
@@ -1262,28 +1268,35 @@ if (COMPARE && rasters.length === 2) {
 """
 
 
-_ASSET_HREFS: dict[str, str] = {}
-
-
 def stac_map_link(catalog: str, collection_id: str, item_id: str) -> str:
-    """Pete's stac-map opens any STAC URL from ?href= (src/utils/href.ts)."""
+    """stac-map opens any STAC URL from ?href= (src/utils/href.ts)."""
     self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
     return "https://developmentseed.org/stac-map/?href=" + quote(self_url, safe="")
 
 
-def _asset_href(catalog: str, collection_id: str, item_id: str, asset: str) -> str | None:
-    """Public https href of one item asset, cached per item; None when unavailable."""
-    key = f"{catalog}:{collection_id}:{item_id}:{asset}"
-    if key not in _ASSET_HREFS:
+_ITEMS: dict[str, dict[str, Any] | None] = {}
+
+
+def _item(catalog: str, collection_id: str, item_id: str) -> dict[str, Any] | None:
+    """The STAC item, fetched at most once per process; a failure is cached as None.
+
+    ponytail: a transient failure sticks until the server restarts; add a TTL
+    if a flaky catalog makes fallbacks disappear in a long-lived session
+    """
+    key = f"{catalog}:{collection_id}:{item_id}"
+    if key not in _ITEMS:
         try:
-            item = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}")
-            href = item["assets"][asset]["href"]
+            _ITEMS[key] = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}")
         except Exception:
-            return None
-        if not href.startswith("http"):
-            return None  # s3:// and friends: the public tiler cannot read them
-        _ASSET_HREFS[key] = href
-    return _ASSET_HREFS[key]
+            _ITEMS[key] = None
+    return _ITEMS[key]
+
+
+def _asset_href(catalog: str, collection_id: str, item_id: str, asset: str) -> str | None:
+    """http(s) href of one item asset; None when absent or not publicly readable."""
+    href = ((_item(catalog, collection_id, item_id) or {}).get("assets", {}).get(asset) or {}).get("href")
+    # s3:// and friends: the public tiler cannot read them
+    return href if isinstance(href, str) and href.startswith(("http://", "https://")) else None
 
 
 def _fallback_tiles(l: dict[str, Any]) -> str | None:
@@ -1299,8 +1312,7 @@ def _fallback_tiles(l: dict[str, Any]) -> str | None:
     assets = l.get("assets") or _default_assets(l["collection_id"])
     if len(assets) != 1:
         return None
-    # one extra STAC GET per item layer (cached) when the caller did not pass
-    # asset_href: the href lives in the item, and a bbox-bearing layer never fetched it
+    # no asset_href from the caller: read it from the cached item (one GET per item, ever)
     href = l.get("asset_href") or _asset_href(l["catalog"], l["collection_id"], l["item_id"], assets[0])
     if not href:
         return None
@@ -1320,13 +1332,7 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
     if item_bounds is None:
         # scene footprint bounds stop the map requesting (and the tiler
         # serving 404s for) every out-of-footprint tile in the viewport
-        try:
-            item = _get_json(
-                f"{CATALOGS[l['catalog']]['stac']}/collections/{l['collection_id']}/items/{l['item_id']}"
-            )
-            item_bounds = item.get("bbox")
-        except Exception:
-            item_bounds = None
+        item_bounds = (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("bbox")
     fallback = _fallback_tiles(l)
     return {
         "type": "raster",
@@ -2647,6 +2653,7 @@ HRRR_COLORMAP = json.dumps([
     [[35, 150], [214, 40, 0, 205]], [[150, 1000000], [110, 0, 20, 235]],
 ])
 # approximate reading scale, NOT the AQI: the bounds are a judgment call, tune them
+SMOKE_SOURCE = {"model": "NOAA HRRR", "band": "MASSDEN (76)", "tiler": EOAPI, "recipe": "https://github.com/hrodmn/smokehrrr"}
 SMOKE_SCALE = "under 5 clear, 5 to 35 light, 35 to 150 moderate, above 150 heavy"
 
 
@@ -2663,6 +2670,14 @@ def _hrrr_tile_template(grib_url: str) -> str:
     return f"{EOAPI}/external/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + q
 
 
+def smoke_word(ugm3: float | None) -> str:
+    return "no data" if ugm3 is None else "clear" if ugm3 < 5 else "light" if ugm3 < 35 else "moderate" if ugm3 < 150 else "heavy"
+
+
+def _utcnow() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
 def smoke_forecast(lat: float, lon: float, hours_ahead: int = 24) -> dict[str, Any]:
     """Smoke near the ground now and hours_ahead from now, at a point in the contiguous US.
 
@@ -2671,62 +2686,74 @@ def smoke_forecast(lat: float, lon: float, hours_ahead: int = 24) -> dict[str, A
     (https://github.com/hrodmn/smokehrrr). CONUS only. Forecast frames are
     model guidance, not observation, and new runs can lag in NOAA's bucket.
 
-    Returns now_ugm3 and forecast_ugm3 (µg/m³), a tiles XYZ template for the
+    Returns now_ugm3 (the frame nearest the current time, stamped
+    now_valid_time) and forecast_ugm3 (µg/m³), a tiles XYZ template for the
     forecast frame (clear air is transparent, so it drapes on a map), and
-    caveats to read before quoting the numbers.
+    a caveat list to read before quoting the numbers.
     """
     w, s, e, n = HRRR_BBOX
     if not (w <= lon <= e and s <= lat <= n):
         return {"error": "HRRR smoke covers the contiguous US only", "coverage_bbox": HRRR_BBOX}
-    now = dt.datetime.now(dt.timezone.utc)
-    run = None
-    for back in range(37):  # smokehrrr probes back 36 h too, but only the long runs are worth a HEAD
-        t = (now - dt.timedelta(hours=back)).replace(minute=0, second=0, microsecond=0)
-        if t.hour % 6 == 0 and _client.head(_hrrr_grib_url(t.date(), t.hour, 0)).status_code == 200:
-            run = t
-            break
-    if run is None:
-        return {"error": "no HRRR run found in NOAA's bucket for the last 36 hours"}
-    want = max(1, min(HRRR_MAX_HOURS, round((now + dt.timedelta(hours=hours_ahead) - run).total_seconds() / 3600)))
-    fh = None
-    # ponytail: tries at most 5 hours at or below the wanted one, not the whole run;
-    # a bucket listing would find the true latest hour in one call
-    for f in dict.fromkeys(f for f in (want, want - 1, want - 3, want - 6, want - 12) if f >= 1):
-        if _client.head(_hrrr_grib_url(run.date(), run.hour, f)).status_code == 200:
-            fh = f
-            break
-    if fh is None:
-        return {"error": f"HRRR run {run:%Y-%m-%dT%H:%MZ} has no forecast frames in NOAA's bucket yet"}
+    now = _utcnow()
+    hour = dt.timedelta(hours=1)
+    try:
+        run = None
+        for back in range(37):  # smokehrrr probes back 36 h too, but only the long runs are worth a HEAD
+            t = (now - back * hour).replace(minute=0, second=0, microsecond=0)
+            if t.hour % 6 == 0 and _client.head(_hrrr_grib_url(t.date(), t.hour, 0)).status_code == 200:
+                run = t
+                break
+        if run is None:
+            return {"error": "no HRRR run found in NOAA's bucket for the last 36 hours", "source": SMOKE_SOURCE}
 
-    def read(f: int) -> float:
-        d = _get_json(
-            f"{EOAPI}/external/point/{lon},{lat}",
-            params={"url": _hrrr_vrt(_hrrr_grib_url(run.date(), run.hour, f)), "expression": HRRR_EXPR},
-            timeout=60,
-        )
-        return round(d["values"][0], 1)
+        def have(f: int) -> bool:
+            return _client.head(_hrrr_grib_url(run.date(), run.hour, f)).status_code == 200
 
-    grib = _hrrr_grib_url(run.date(), run.hour, fh)
-    caveats = [
+        def read(f: int) -> float | None:
+            d = _get_json(
+                f"{EOAPI}/external/point/{lon},{lat}",
+                params={"url": _hrrr_vrt(_hrrr_grib_url(run.date(), run.hour, f)), "expression": HRRR_EXPR},
+                timeout=60,
+            )
+            v = d["values"][0]
+            return None if v is None else round(v, 1)
+
+        want = max(1, min(HRRR_MAX_HOURS, round((now + hours_ahead * hour - run) / hour)))
+        # ponytail: tries at most 5 hours at or below the wanted one, not the whole run;
+        # a bucket listing would find the true latest hour in one call
+        fh = next((f for f in dict.fromkeys((want, want - 1, want - 3, want - 6, want - 12)) if f >= 1 and have(f)), None)
+        if fh is None:
+            return {"error": f"HRRR run {run:%Y-%m-%dT%H:%MZ} has no forecast frames in NOAA's bucket yet", "source": SMOKE_SOURCE}
+        # runs are 6-hourly here, so f00 can be hours old: read the frame nearest the clock
+        fh_now = max(0, min(HRRR_MAX_HOURS, round((now - run) / hour)))
+        if fh_now and not have(fh_now):
+            fh_now = 0
+        now_ugm3, forecast_ugm3 = read(fh_now), read(fh)
+    except Exception as ex:
+        return {"error": f"HRRR smoke lookup failed: {type(ex).__name__}: {ex}", "source": SMOKE_SOURCE}
+    valid = run + fh * hour
+    caveat = [
         "this is model guidance from NOAA HRRR, not a measurement; a smoke plume's timing and edges can be off by hours and miles",
         "the model grid is 3 km, so a valley or a ridge can read differently from the cell value",
         "HRRR covers the contiguous US only",
         f"approximate reading scale in µg/m³, not the AQI: {SMOKE_SCALE}",
     ]
-    if fh < want:
-        caveats.insert(0, f"the frame for {hours_ahead} h ahead has not landed in NOAA's bucket yet, so this uses forecast hour {fh}, which is earlier than asked")
+    if valid < now + hours_ahead * hour - hour:
+        caveat.insert(0, f"the frame for {hours_ahead} h ahead is not in NOAA's bucket (the run is old or the newer frames have not landed), so this uses the frame valid {valid:%Y-%m-%dT%H:%MZ}, which is earlier than asked")
+    if now_ugm3 is None or forecast_ugm3 is None:
+        caveat.append("a reading came back empty (no data at this point), so that number is null")
     return {
         "run": f"{run:%Y-%m-%dT%H:%MZ}",
         "forecast_hour": fh,
-        "valid_time": f"{run + dt.timedelta(hours=fh):%Y-%m-%dT%H:%MZ}",
-        "now_valid_time": f"{run:%Y-%m-%dT%H:%MZ}",
-        "now_ugm3": read(0),
-        "forecast_ugm3": read(fh),
+        "valid_time": f"{valid:%Y-%m-%dT%H:%MZ}",
+        "now_valid_time": f"{run + fh_now * hour:%Y-%m-%dT%H:%MZ}",
+        "now_ugm3": now_ugm3,
+        "forecast_ugm3": forecast_ugm3,
         "units": "µg/m³ near-surface smoke mass density",
-        "tiles": _hrrr_tile_template(grib),
+        "tiles": _hrrr_tile_template(_hrrr_grib_url(run.date(), run.hour, fh)),
         "bounds": HRRR_BBOX,
-        "source": {"model": "NOAA HRRR", "band": "MASSDEN (76)", "tiler": EOAPI, "recipe": "https://github.com/hrodmn/smokehrrr"},
-        "caveats": caveats,
+        "source": SMOKE_SOURCE,
+        "caveat": caveat,
     }
 
 

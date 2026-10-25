@@ -32,6 +32,7 @@ The fix already existed in this codebase several times over. `next_pass` returns
 | `render_map`, `render_map_3d` | coverage_pct | `coverage_note` below `PARTIAL_COVERAGE_PCT`, or when no imagery layer exists |
 | `next_pass` | pass times | `note`: swath geometry from TLEs, a pass is a possible capture |
 | `conditions_brief` | signals | `note`: conditions from live sources, not a prediction |
+| `smoke_forecast` | smoke µg/m³, now and ahead | `caveat` list: model guidance not observation, 3 km grid, CONUS only, an earlier-than-asked frame, an empty reading |
 | `weather_summary` | none, passthrough | exempt; `elevation_note` only when the grid cell sits high |
 | `preview_item`, `tile_url_template`, `render_postcard`, `active_events`, `list_catalogs`, `describe_collection` | none | exempt, no derived number |
 

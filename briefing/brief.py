@@ -46,7 +46,8 @@ Which new satellite scenes arrived, their dates and cloud cover, and what to loo
 Rules: be specific, cite dates, no filler, no speculation beyond the data. If data sections have
 errors or are empty, work with what's there and note the gap in one clause, not a paragraph.
 If a "smoke" block is present, add one sentence about smoke to Weather signal: now versus the
-forecast, both in µg/m³ with the approximate scale word, and say it is model guidance.
+forecast, both in µg/m³ with the approximate scale word, and say it is model guidance. Call the
+first reading by the smoke block's "now_label" exactly ("now" or "at <time>").
 If an "ndvi_change" block is present, weave the vegetation delta (with both dates) into TL;DR and
 What changed — a real change signal outranks scene bookkeeping.
 If a "previous_run" block is present, "What changed" means changed SINCE THAT RUN: name events that
@@ -190,7 +191,7 @@ def synthesize(data: dict) -> str:
     ev_lines = [f"- {e['category']}: {e['title']} ({e.get('date','')})" for e in ev.get("eonet", [])[:8]]
     sm = data.get("smoke")
     if sm:
-        lines += ["## Smoke", f"- {sm['now_ugm3']} µg/m³ now, {sm['forecast_ugm3']} µg/m³ forecast for {sm['valid_time']} (NOAA HRRR model guidance)"]
+        lines += ["## Smoke", f"- {sm['now_ugm3']} µg/m³ ({tools.smoke_word(sm['now_ugm3'])}) {sm['now_label']}, {sm['forecast_ugm3']} µg/m³ ({tools.smoke_word(sm['forecast_ugm3'])}) forecast for {sm['valid_time']} (NOAA HRRR model guidance)"]
     lines += ["## What changed"] + (ev_lines or ["- No open events."])
     lines += ["## Fresh eyes on the ground"] + [
         f"- {i['collection']} {i['datetime'][:10]} cloud {i.get('cloud_cover')}%"
@@ -245,6 +246,14 @@ def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
         "delta": round(now_mean - ref_mean, 3),
         "delta_pct": round((now_mean - ref_mean) / abs(ref_mean) * 100, 1) if ref_mean else None,
     }
+
+
+def _smoke_for_llm(smoke: dict) -> dict:
+    """Numbers, times, units and caveats only: the tile template and bounds are noise to the model."""
+    out = {k: v for k, v in smoke.items() if k not in ("tiles", "bounds", "source")}
+    age = dt.datetime.now(dt.timezone.utc) - dt.datetime.strptime(smoke["now_valid_time"], "%Y-%m-%dT%H:%MZ").replace(tzinfo=dt.timezone.utc)
+    out["now_label"] = "now" if age <= dt.timedelta(hours=1) else f"at {smoke['now_valid_time']}"
+    return out
 
 
 def build_brief(place: str, days: int, out_dir: Path) -> dict:
@@ -365,7 +374,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         "imagery": {"count": imagery.get("count"), "items": imagery.get("items", [])[:8]},
     }
     if smoke and smoke.get("tiles"):
-        data["smoke"] = smoke
+        data["smoke"] = _smoke_for_llm(smoke)
     if change:
         data["ndvi_change"] = change
     state_path = Path(__file__).parent / "state" / f"{slug}.json"

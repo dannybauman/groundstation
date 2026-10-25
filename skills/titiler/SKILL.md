@@ -23,7 +23,7 @@ The `/stac` endpoints merge the `assets` list into positional bands `b1..bN`. An
 NDVI: expression=(b1-b2)/(b1+b2)&assets=nir&assets=red
 ```
 
-Writing `(nir-red)/(nir+red)` directly fails or silently misreads. (`asset_as_band=true` appears nowhere in the TiTiler changelog; if a deployment accepts it, treat that as luck, not API.) TiTiler 2 says it outright: `expression` cannot declare `assets`, so always pass `assets=Red&assets=Green&expression=b1/b2`. The same expression syntax works on `/stac/statistics`, `/stac/preview.png`, and tiles.
+Writing `(nir-red)/(nir+red)` directly fails or silently misreads. (`asset_as_band=true` is a titiler.core option since 0.15 that not every deployment enables; test before relying on it.) TiTiler 2 says it outright: `expression` cannot declare `assets`, so always pass `assets=Red&assets=Green&expression=b1/b2`. The same expression syntax works on `/stac/statistics`, `/stac/preview.png`, and tiles.
 
 ## Rescale and colormaps — why layers render blank
 
