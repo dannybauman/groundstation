@@ -16,7 +16,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 from typing import Any
 
 import httpx
@@ -1136,8 +1136,8 @@ def write_archive(
         feats += page.get("features", [])
         nxt = next((l for l in page.get("links", []) if l.get("rel") == "next"), None)
         if nxt and page.get("features"):
-            url, method = nxt["href"], (nxt.get("method") or "GET").upper()
-            body = {**body, **nxt["body"]} if nxt.get("merge") else nxt.get("body", body)
+            url, method = urljoin(url, nxt["href"]), (nxt.get("method") or "GET").upper()
+            body = {**body, **(nxt.get("body") or {})} if nxt.get("merge") else nxt.get("body", body)
         else:
             url = None
     feats = feats[:limit]

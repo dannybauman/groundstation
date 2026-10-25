@@ -2016,6 +2016,37 @@ def t_http_zarr_store_range_206():
     asyncio.run(run())
 
 
+def t_write_archive_paging_get_merge():
+    # Test next-link GET paging and merge in write_archive
+    saved_client = tools._client
+    calls = []
+    class FakeClient:
+        def post(self, url, json=None, **kw):
+            calls.append(("POST", url, json))
+            return _FakeResp({
+                "features": [_archive_item("item-1", 1, 10.0)],
+                "links": [{"rel": "next", "href": "search?page=2", "method": "GET", "merge": True, "body": {"token": "abc"}}]
+            })
+        def get(self, url, **kw):
+            calls.append(("GET", url, kw))
+            return _FakeResp({
+                "features": [_archive_item("item-2", 2, 20.0)],
+                "links": []
+            })
+    tools._client = FakeClient()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            out_p = str(Path(d) / "paged.parquet")
+            res = tools.write_archive("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1], out_path=out_p, limit=5)
+            assert res["count"] == 2
+            assert Path(out_p).exists()
+            assert len(calls) == 2
+            assert calls[0][0] == "POST"
+            assert calls[1][0] == "GET" and calls[1][1].endswith("/search?page=2")
+    finally:
+        tools._client = saved_client
+
+
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files

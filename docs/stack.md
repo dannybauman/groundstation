@@ -140,6 +140,16 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - link: https://github.com/stac-utils/rustac-py
 - when: catalog=geoparquet
 
+## stac-geoparquet
+- stage: catalog
+- what: the open specification for storing STAC collections and item records in GeoParquet
+- ds-role: contributes
+- island: cng
+- integration: the file format write_archive writes and search_imagery searches like a catalog
+- speaks-to: STAC, rustac
+- link: https://github.com/stac-utils/stac-geoparquet
+- when: catalog=geoparquet
+
 ## stac-server
 - stage: catalog
 - what: Element 84's serverless STAC API, the one Earth Search runs on
