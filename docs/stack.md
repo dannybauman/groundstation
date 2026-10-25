@@ -72,6 +72,25 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - link: https://eoapi.dev
 - when: catalog=veda
 
+## eoAPI raster
+- stage: pixels
+- what: Development Seed's public eoAPI instance, raster.eoapi.dev — it reads HRRR GRIB through GDAL's vrt:// and is the fallback tiler when titiler.xyz rate-limits
+- ds-role: created
+- island: cng
+- integration: the HRRR smoke frames on a brief's map, and the tiles a map swaps to on a titiler.xyz 429
+- speaks-to: eoAPI, TiTiler, NOAA HRRR
+- link: https://github.com/developmentseed/eoAPI
+- when: tiler_hosts=raster.eoapi.dev
+
+## NOAA HRRR
+- stage: data
+- what: NOAA's 3 km hourly CONUS weather model — the near-surface smoke mass density band
+- ds-role: uses
+- integration: tomorrow's smoke over the area, as a map frame and two numbers
+- speaks-to: eoAPI raster
+- link: https://registry.opendata.aws/noaa-hrrr-pds/
+- when: tiler_hosts=raster.eoapi.dev
+
 ## stac-fastapi
 - stage: catalog
 - what: the STAC API server — the one NASA VEDA and Planetary Computer both answer searches with

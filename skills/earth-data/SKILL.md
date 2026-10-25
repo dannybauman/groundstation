@@ -9,7 +9,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 ## First: use the tools, never route around them
 
-The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 16 tools in about a second.
+The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 17 tools in about a second.
 
 - **Wait and retry discovery** a few times over ~10-15 seconds before doing anything else. The tools almost always appear.
 - **Never fall back to raw STAC / TiTiler / FIRMS / `httpx` calls to work around missing tools.** Hand-rolling the pipeline gives a worse answer and hides a fixable setup problem. Missing tools are a thing to fix, not to route around.

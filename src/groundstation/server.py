@@ -47,6 +47,7 @@ TOOLS = (
     tools.render_postcard,
     tools.active_events,
     tools.weather_summary,
+    tools.smoke_forecast,
     tools.next_pass,
     tools.conditions_brief,
 )

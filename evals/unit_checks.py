@@ -21,6 +21,9 @@ from groundstation.tools import _bbox_coverage_pct, _expression_to_bands  # noqa
 import brief  # noqa: E402
 import brief_checks  # noqa: E402
 
+# the 429 fallback looks up an asset href with one STAC GET; the offline suite never does
+tools._asset_href = lambda *a: None
+
 FAILED = []
 
 
@@ -1620,6 +1623,62 @@ def t_no_artifact_rides_the_watermarked_basemap():
         m3 = tools.render_map_3d("t", [0, 0, 10, 10], {"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}, out_path=str(Path(d) / "m3.html"))
         html3 = Path(m3["path"]).read_text()
         assert "cartocdn" not in html3 and "tile.openstreetmap.org" in html3
+
+
+def t_hrrr_url_builders():
+    import datetime as dt
+    g = tools._hrrr_grib_url(dt.date(2026, 10, 25), 6, 24)
+    assert g == "https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.20261025/conus/hrrr.t06z.wrfsfcf24.grib2"
+    t = tools._hrrr_tile_template(g)
+    assert t.startswith(tools.EOAPI + "/external/tiles/WebMercatorQuad/{z}/{x}/{y}.png?")
+    # bands=76 rides INSIDE the vrt value (encoded), the expression and colormap outside it
+    assert "url=vrt%3A%2F%2F" in t and "bands%3D76" in t and "&expression=b1%2A1000000000" in t and "&colormap=" in t
+
+
+def t_smoke_forecast_outside_conus_makes_no_network_call():
+    real = tools._client
+    class Boom:
+        def __getattr__(self, k):
+            raise AssertionError("network touched")
+    tools._client = Boom()
+    try:
+        r = tools.smoke_forecast(51.5, -0.1)
+    finally:
+        tools._client = real
+    assert r["error"].startswith("HRRR smoke covers") and r["coverage_bbox"] == tools.HRRR_BBOX
+
+
+def _fallback_map(**extra):
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        layer = {"type": "item", "name": "s2", "catalog": "earth-search", "collection_id": "sentinel-2-l2a",
+                 "item_id": "X", "bbox": [0, 0, 1, 1], **extra}
+        r = tools.render_map("t", [0, 0, 1, 1], [layer], out_path=out)
+        return Path(out).read_text(encoding="utf-8"), r
+
+
+def t_render_map_429_fallback_tiles():
+    html, r = _fallback_map(asset_href="https://example.com/visual.tif")
+    fb = r["state"]["layers"][0]["fallback_tiles"]
+    assert fb.startswith(tools.EOAPI + "/external/tiles/") and "visual.tif" in fb
+    assert r["state"]["fallback"] == "raster.eoapi.dev" and fb in html and "setTiles" in html
+    # an expression layer cannot fall back (eoapi.dev has no /stac), and carries no key
+    _, r2 = _fallback_map(expression="(nir-red)/(nir+red)", asset_href="https://example.com/visual.tif")
+    assert "fallback" not in r2["state"] and "fallback_tiles" not in r2["state"]["layers"][0]
+
+
+def t_stac_map_link_only_with_an_item_layer():
+    html, r = _fallback_map(asset_href="https://example.com/visual.tif")
+    assert 'id="stacmap"' in html and r["stac_map_url"].startswith("https://developmentseed.org/stac-map/?href=https%3A%2F%2F")
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        r = tools.render_map("t", [0, 0, 1, 1], [{"type": "raster", "name": "r", "tiles": "https://x/{z}/{x}/{y}"}], out_path=out)
+        assert 'id="stacmap"' not in Path(out).read_text(encoding="utf-8") and "stac_map_url" not in r
+
+
+def t_llms_txt_present():
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "llms.txt").read_text(encoding="utf-8").startswith("# groundstation")
 
 
 def t_versions_agree():
