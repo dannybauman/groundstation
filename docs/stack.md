@@ -91,6 +91,15 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - link: https://registry.opendata.aws/noaa-hrrr-pds/
 - when: tiler_hosts=raster.eoapi.dev
 
+## smokehrrr
+- stage: pixels
+- what: the recipe for tiling NOAA HRRR smoke GRIBs through eoAPI vrt://
+- ds-role: uses
+- integration: the vrt:// URL construction and colormap that turns HRRR MASSDEN GRIBs into transparent smoke tiles
+- speaks-to: NOAA HRRR, eoAPI raster
+- link: https://github.com/hrodmn/smokehrrr
+- when: tiler_hosts=raster.eoapi.dev
+
 ## stac-fastapi
 - stage: catalog
 - what: the STAC API server — the one NASA VEDA and Planetary Computer both answer searches with
