@@ -92,7 +92,7 @@ The first `search_datasets` call takes 20 to 30 seconds while collection lists c
 | Tool | What it does | Backed by |
 |---|---|---|
 | `geocode` | place name to coordinates and a bbox | the fuzzy index in Gazet, Development Seed's geocoder (Overture divisions, urban centres, Natural Earth), with Nominatim as the fallback |
-| `list_catalogs` / `search_datasets` / `describe_collection` | find the right data across catalogs | Earth Search, NASA VEDA, Planetary Computer |
+| `list_catalogs` / `search_datasets` / `describe_collection` | find the right data across catalogs, filtered by place and resolution (`bbox`/`place`, `max_gsd`) | Earth Search, NASA VEDA, Planetary Computer |
 | `search_imagery` | recent scenes with cloud filtering, plus the scene to start from and why | STAC APIs |
 | `preview_item` / `tile_url_template` | browser-openable previews and XYZ tiles | titiler.xyz, VEDA raster API, PC data API |
 | `compute_statistics` | band math over a scene: NDVI is `(nir-red)/(nir+red)` | TiTiler statistics |
@@ -101,7 +101,7 @@ The first `search_datasets` call takes 20 to 30 seconds while collection lists c
 | `render_map_3d` | terrain fly-throughs: imagery draped over real relief | MapLibre terrain + keyless AWS Terrarium tiles |
 | `render_postcard` | share cards with the pixels embedded and attribution baked in, so nothing expires | TiTiler previews |
 | `active_events` / `weather_summary` | open fires, floods and storms, plus the past and coming week of weather | NASA EONET, GDACS, Open-Meteo |
-| `next_pass` | when a satellite could next image a place | Celestrak orbits, following [eo-predictor](https://github.com/developmentseed/eo-predictor) |
+| `next_pass` | when a satellite could next image a place | Celestrak orbits, constellations read from [eo-predictor](https://github.com/developmentseed/eo-predictor)'s catalog |
 | `conditions_brief` | current conditions around a place in one call: dryness, wind, events, the latest look, the next pass | the tools above |
 
 The tools say when not to trust them. A tool that returns a derived number also returns, on the same object, the conditions under which it should not be read at face value: a cloudy scene behind a change figure, statistics that cover a whole tile, a scene the tiler cannot read. The rule is in `docs/adr-caveats.md`.

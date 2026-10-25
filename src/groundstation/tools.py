@@ -14,6 +14,7 @@ import json
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote
 from typing import Any
@@ -448,23 +449,82 @@ def _collections(catalog: str) -> list[dict[str, Any]]:
     return out
 
 
-def search_datasets(keywords: str, catalog: str | None = None) -> list[dict[str, Any]]:
+def _collection_gsd(c: dict[str, Any]) -> float | None:
+    """Finest ground sample distance (m) a collection declares, or None."""
+    vals: list[Any] = []
+    summ = c.get("summaries") or {}
+    for v in (summ.get("gsd"), summ.get("eo:gsd")):
+        vals += v if isinstance(v, list) else [v]
+    vals += [a.get("gsd") for a in (c.get("item_assets") or {}).values()]
+    nums = []
+    for v in vals:
+        if isinstance(v, dict):  # a STAC range summary {"minimum", "maximum"}
+            v = v.get("minimum")
+        if isinstance(v, (int, float)) and v > 0:
+            nums.append(float(v))
+    return min(nums) if nums else None
+
+
+def _covers_aoi(c: dict[str, Any], aoi: list[float]) -> bool | str:
+    boxes = ((c.get("extent") or {}).get("spatial") or {}).get("bbox") or []
+    if not boxes:
+        return "unknown"
+    w, s, e, n = aoi
+    for b in boxes:
+        bw, bs, be, bn = (b[0], b[1], b[2], b[3]) if len(b) == 4 else (b[0], b[1], b[3], b[4])
+        if bw <= e and be >= w and bs <= n and bn >= s:
+            return True
+    return False
+
+
+def search_datasets(
+    keywords: str,
+    catalog: str | None = None,
+    bbox: list[float] | None = None,
+    place: str | None = None,
+    max_gsd: float | None = None,
+) -> list[dict[str, Any]]:
     """Find dataset collections matching keywords, across all catalogs or one.
 
     Case-insensitive match against collection id, title, description, and
-    keywords. Returns up to 20 hits with {catalog, id, title, summary}.
+    keywords. Returns up to 20 hits with {catalog, id, title, summary, gsd}.
+    The catalogs are queried concurrently and filtered locally; the pattern
+    follows developmentseed/stac-fastapi-collection-discovery, which does the
+    same federation as a service.
+
+    Pass `bbox` or `place` to keep collections whose declared spatial extent
+    intersects the area (each hit gets `covers_aoi`), and `max_gsd` (metres) to
+    keep collections at that resolution or finer (finest first). Read both
+    honestly: a collection's extent is its overall envelope, not proof of
+    imagery over your area, and `gsd` is what the collection declares. A
+    collection with no declared extent (`covers_aoi: "unknown"`) or no declared
+    gsd (`gsd: null`) is kept and flagged, because missing metadata is not
+    missing coverage or resolution.
 
     An empty result comes back as one record naming the catalogs `searched`,
     with a `note`: "not in these catalogs" is NOT "no such data exists".
     Himawari is the live example: real, and not here.
     """
+    aoi = None
+    if bbox or place:
+        aoi = _resolve_bbox(place, bbox)
+        if isinstance(aoi, dict):
+            return [aoi]
     terms = [t.lower() for t in keywords.split() if t]
-    hits = []
-    for cat in [catalog] if catalog else list(CATALOGS):
+    cats = [catalog] if catalog else list(CATALOGS)
+
+    def fetch(cat: str):
         try:
-            cols = _collections(cat)
+            return cat, _collections(cat)
         except Exception as e:
-            hits.append({"catalog": cat, "error": str(e)})
+            return cat, e
+
+    with ThreadPoolExecutor(max_workers=len(cats)) as pool:
+        fetched = list(pool.map(fetch, cats))
+    hits = []
+    for cat, cols in fetched:
+        if isinstance(cols, Exception):
+            hits.append({"catalog": cat, "error": str(cols)})
             continue
         for c in cols:
             hay = " ".join(
@@ -475,20 +535,38 @@ def search_datasets(keywords: str, catalog: str | None = None) -> list[dict[str,
                     " ".join(c.get("keywords") or []),
                 ]
             ).lower()
-            if all(t in hay for t in terms):
-                hits.append(
-                    {
-                        "catalog": cat,
-                        "id": c.get("id"),
-                        "title": c.get("title"),
-                        "summary": (c.get("description") or "")[:240],
-                    }
-                )
+            if not all(t in hay for t in terms):
+                continue
+            gsd = _collection_gsd(c)
+            hit = {
+                "catalog": cat,
+                "id": c.get("id"),
+                "title": c.get("title"),
+                "summary": (c.get("description") or "")[:240],
+                "gsd": gsd,
+            }
+            notes = []
+            if aoi:
+                hit["covers_aoi"] = _covers_aoi(c, aoi)
+                if hit["covers_aoi"] is False:
+                    continue
+                if hit["covers_aoi"] == "unknown":
+                    notes.append("no spatial extent declared, may or may not cover the area")
+            if max_gsd is not None:
+                if gsd is not None and gsd > max_gsd:
+                    continue
+                if gsd is None:
+                    notes.append("no gsd declared, resolution unknown (not necessarily coarse)")
+            if notes:
+                hit["note"] = "; ".join(notes)
+            hits.append(hit)
+    if max_gsd is not None:
+        hits.sort(key=lambda h: ("error" not in h, "gsd" in h and h["gsd"] is None, h.get("gsd") or 0))
     if not hits:
         # An empty list is the return most likely to be narrated into "no such
         # data exists". Say what was searched in the return the model cannot
         # skip, not only in the docstring it might (docs/adr-caveats.md)
-        searched = [catalog] if catalog else list(CATALOGS)
+        searched = cats
         return [{
             "searched": searched,
             "note": (
@@ -2796,8 +2874,8 @@ def weather_summary(lat: float, lon: float, past_days: int = 7) -> dict[str, Any
 
 # ---------------------------------------------------------------- next pass
 
-# constellation constants vendored from developmentseed/eo-predictor
-# (scripts/satellites/*.json is the maintained source of truth — sync there)
+# offline fallback for the live developmentseed/eo-predictor catalog
+# (scripts/satellites/*.json is the maintained source of truth)
 _CONSTELLATIONS = {
     "sentinel-2": {"norad_ids": [40697, 42063, 60989], "swath_km": 290, "optical": True},
     "sentinel-1": {"norad_ids": [39634, 62261], "swath_km": 410, "optical": False},
@@ -2807,6 +2885,9 @@ _TLE_CACHE = Path(os.environ.get(
     "GROUNDSTATION_TLE_CACHE", Path.home() / ".cache" / "groundstation" / "tle.txt"
 ))
 _TLE_MAX_AGE_S = 24 * 3600  # TLEs drift slowly; a day-old set is fine for swath math
+_CATALOG_CACHE = _TLE_CACHE.with_name("eo-predictor.json")
+_EO_PREDICTOR_API = "https://api.github.com/repos/developmentseed/eo-predictor/contents/scripts/satellites"
+EO_PREDICTOR_URL = "https://developmentseed.org/eo-predictor"
 
 
 def _local_solar_hour(utc_hour: float, lon: float) -> float:
@@ -2826,19 +2907,71 @@ def _pass_minima(dists_km: list[float], within_km: float) -> list[int]:
     return hits
 
 
-def _fetch_tles() -> str:
+def _eo_predictor_cfgs(files: dict[str, dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Map eo-predictor satellite JSON (keyed by file stem) to next_pass cfgs."""
+    import math
+
+    cfgs, skipped = {}, []
+    for name, d in files.items():
+        if not d.get("norad_ids") or not d.get("swath_km"):
+            skipped.append(name)
+            continue
+        # a pointable sensor reaches past its own swath: half-swath + altitude * tan(off-nadir)
+        reach = d["swath_km"] / 2 + (d.get("altitude_km") or 0) * math.tan(math.radians(d.get("off_nadir_deg") or 0))
+        cfgs[name] = {
+            "norad_ids": d["norad_ids"],
+            "swath_km": d["swath_km"],
+            "optical": d.get("sensor_type") != "SAR",
+            "reach_km": reach,
+            "access": d.get("data_access", "unknown"),
+        }
+    return cfgs, skipped
+
+
+def _load_constellations() -> tuple[dict[str, dict[str, Any]], str, list[str]]:
+    """eo-predictor's catalog (24 h disk cache), else the built-in list."""
+    try:
+        if _CATALOG_CACHE.exists() and time.time() - _CATALOG_CACHE.stat().st_mtime < _TLE_MAX_AGE_S:
+            files = json.loads(_CATALOG_CACHE.read_text(encoding="utf-8"))
+        else:
+            listing = _client.get(_EO_PREDICTOR_API)
+            listing.raise_for_status()
+            entries = [e for e in listing.json() if e["name"].endswith(".json")]
+
+            def one(e):
+                r = _client.get(e["download_url"])
+                r.raise_for_status()
+                return e["name"][:-5], r.json()
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                files = dict(pool.map(one, entries))
+            _CATALOG_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            _CATALOG_CACHE.write_text(json.dumps(files), encoding="utf-8")
+        cfgs, skipped = _eo_predictor_cfgs(files)
+        if cfgs:
+            return cfgs, "developmentseed/eo-predictor", skipped
+    except Exception:
+        pass
+    return _CONSTELLATIONS, "built-in list (eo-predictor catalog unreachable)", []
+
+
+def _fetch_tles(cfgs: dict[str, dict[str, Any]] | None = None) -> str:
     if _TLE_CACHE.exists() and time.time() - _TLE_CACHE.stat().st_mtime < _TLE_MAX_AGE_S:
         return _TLE_CACHE.read_text(encoding="utf-8")
-    chunks = []
-    for c in _CONSTELLATIONS.values():
-        for nid in c["norad_ids"]:
-            r = _client.get(
-                "https://celestrak.org/NORAD/elements/gp.php",
-                params={"CATNR": nid, "FORMAT": "tle"},
-            )
-            r.raise_for_status()
-            if "No GP data found" not in r.text:
-                chunks.append(r.text.strip())
+
+    def one(nid: int) -> str:
+        r = _client.get(
+            "https://celestrak.org/NORAD/elements/gp.php",
+            params={"CATNR": nid, "FORMAT": "tle"},
+        )
+        if r.status_code == 404:  # a decayed satellite still listed in the catalog
+            return ""
+        r.raise_for_status()
+        return "" if "No GP data found" in r.text else r.text.strip()
+
+    ids = sorted({n for c in (cfgs or _CONSTELLATIONS).values() for n in c["norad_ids"]})
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        chunks = [t for t in pool.map(one, ids) if t]
     text = "\n".join(chunks) + "\n"
     _TLE_CACHE.parent.mkdir(parents=True, exist_ok=True)
     _TLE_CACHE.write_text(text, encoding="utf-8")
@@ -2851,7 +2984,7 @@ def next_pass(
     days: int = 3,
     constellations: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Predict upcoming satellite passes over a point (Sentinel-2, Sentinel-1, Landsat).
+    """Predict upcoming satellite passes over a point, for the constellations EO Predictor shows.
 
     Answers "when could we next get imagery of this place." Propagates live
     Celestrak TLEs with Skyfield and reports each time a satellite's swath
@@ -2864,15 +2997,21 @@ def next_pass(
     Sentinel-1 follows an observation scenario). Cloud cover is its own
     gamble, and imagery lands in the public catalogs hours to a day later.
 
-    The prediction pattern follows developmentseed/eo-predictor, which does
-    this for many more constellations with an interactive map.
+    The constellation catalog (swath, altitude, off-nadir pointing, NORAD ids)
+    is read from developmentseed/eo-predictor; if it is unreachable a built-in
+    list of Sentinel-2, Sentinel-1 and Landsat is used and
+    `constellations_source` says so. Commercial and tasked sensors (`access`
+    other than "open") only image on order, and a pointable one is counted as
+    a pass whenever the target is inside its off-nadir reach. The result links
+    EO Predictor (`eo_predictor_url`), the richer interactive view.
     """
     import numpy as np
     from skyfield.api import load, wgs84
 
     days = min(days, 7)
-    wanted = constellations or list(_CONSTELLATIONS)
-    _fetch_tles()  # ensures the cache file exists and is fresh
+    cfgs, source, skipped = _load_constellations()
+    wanted = constellations or list(cfgs)
+    _fetch_tles(cfgs)  # ensures the cache file exists and is fresh
     sats = load.tle_file(str(_TLE_CACHE))
     by_id = {s.model.satnum: s for s in sats}
 
@@ -2885,7 +3024,7 @@ def next_pass(
 
     passes = []
     for cname in wanted:
-        cfg = _CONSTELLATIONS.get(cname)
+        cfg = cfgs.get(cname)
         if not cfg:
             continue
         for nid in cfg["norad_ids"]:
@@ -2902,7 +3041,7 @@ def next_pass(
                     -1, 1,
                 )
             )
-            for i in _pass_minima(d.tolist(), cfg["swath_km"] / 2):
+            for i in _pass_minima(d.tolist(), cfg.get("reach_km", cfg["swath_km"] / 2)):
                 t = times[i]
                 utc = t.utc_datetime()
                 if cfg["optical"]:
@@ -2916,6 +3055,7 @@ def next_pass(
                         "time_utc": utc.strftime("%Y-%m-%d %H:%M"),
                         "track_distance_km": round(float(d[i]), 1),
                         "kind": "optical" if cfg["optical"] else "radar (day or night, sees through cloud)",
+                        "access": cfg.get("access", "open"),
                     }
                 )
     passes.sort(key=lambda p: p["time_utc"])
@@ -2923,10 +3063,13 @@ def next_pass(
         "point": {"lat": lat, "lon": lon},
         "window_days": days,
         "passes": passes,
+        "constellations_source": source,
+        "skipped": skipped,
+        "eo_predictor_url": EO_PREDICTOR_URL,
         "note": (
             "swath geometry from live TLEs, not the acquisition plan — a pass is a "
             "possible capture, and imagery reaches public catalogs hours to a day later. "
-            "Pattern: developmentseed/eo-predictor"
+            f"Commercial sensors only image if tasked. Richer view: {EO_PREDICTOR_URL}"
         ),
     }
 

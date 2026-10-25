@@ -1262,11 +1262,68 @@ def t_empty_dataset_search_says_what_it_searched():
         one = tools.search_datasets("himawari", catalog="veda")
         assert one[0]["searched"] == ["veda"], one
         hit = tools.search_datasets("sentinel")
-        assert hit == [{"catalog": c, "id": "sentinel-2-l2a", "title": "Sentinel-2", "summary": ""}
+        assert hit == [{"catalog": c, "id": "sentinel-2-l2a", "title": "Sentinel-2", "summary": "", "gsd": None}
                        for c in tools.CATALOGS], hit
         assert not any("note" in h for h in hit)
     finally:
         tools._collections = saved
+
+
+def t_search_datasets_spatial_and_resolution_filters():
+    efate = [168.0, -18.0, 168.6, -17.4]
+    cols = [
+        {"id": "inside", "extent": {"spatial": {"bbox": [[160, -25, 175, -10]]}},
+         "summaries": {"gsd": [10, 20]}},
+        {"id": "outside", "extent": {"spatial": {"bbox": [[-10, 40, 10, 60]]}},
+         "summaries": {"gsd": [10]}},
+        {"id": "blank"},
+        {"id": "coarse", "extent": {"spatial": {"bbox": [[160, -25, 175, -10]]}},
+         "item_assets": {"b": {"gsd": 30}}},
+    ]
+    saved = tools._collections
+    tools._collections = lambda cat: cols
+    try:
+        out = tools.search_datasets("", catalog="veda", bbox=efate, max_gsd=10)
+        assert [h["id"] for h in out] == ["inside", "blank"], out
+        assert out[0]["gsd"] == 10.0 and out[0]["covers_aoi"] is True
+        assert out[1]["gsd"] is None and out[1]["covers_aoi"] == "unknown"
+        assert "no gsd" in out[1]["note"] and "no spatial extent" in out[1]["note"]
+        assert [h["id"] for h in tools.search_datasets("", catalog="veda", bbox=efate)] == ["inside", "blank", "coarse"]
+        assert "covers_aoi" not in tools.search_datasets("", catalog="veda")[0]
+    finally:
+        tools._collections = saved
+
+
+def t_eo_predictor_mapping_and_fallback():
+    fixture = json.loads("""{"constellation": "WorldView-3", "sensor_type": "optical",
+      "swath_km": 13, "altitude_km": 617, "off_nadir_deg": 30, "data_access": "commercial",
+      "tasking": true, "norad_ids": [40115]}""")
+    sar = {"sensor_type": "SAR", "swath_km": 410, "altitude_km": 693, "off_nadir_deg": 0,
+           "data_access": "open", "norad_ids": [39634, 62261]}
+    cfgs, skipped = tools._eo_predictor_cfgs(
+        {"worldview-3": fixture, "sentinel-1": sar, "bad": {"swath_km": 5}}
+    )
+    assert skipped == ["bad"] and cfgs["sentinel-1"]["optical"] is False
+    assert cfgs["sentinel-1"]["reach_km"] == 205 and cfgs["worldview-3"]["access"] == "commercial"
+    assert abs(cfgs["worldview-3"]["reach_km"] - (6.5 + 617 * 0.57735)) < 0.1
+    saved = (tools._client, tools._CATALOG_CACHE, tools._fetch_tles, tools._TLE_CACHE)
+    try:
+        class Dead:
+            def get(self, *a, **k):
+                raise RuntimeError("offline")
+        with tempfile.TemporaryDirectory() as d:
+            tools._client = Dead()
+            tools._CATALOG_CACHE = Path(d) / "eo-predictor.json"
+            tools._TLE_CACHE = Path(d) / "tle.txt"
+            tools._TLE_CACHE.write_text("")
+            tools._fetch_tles = lambda cfgs=None: ""
+            c, src, sk = tools._load_constellations()
+            assert c is tools._CONSTELLATIONS and "built-in list" in src
+            out = tools.next_pass(-17.7, 168.3, days=1, constellations=["sentinel-2"])
+            assert "built-in list" in out["constellations_source"], out
+            assert out["eo_predictor_url"] == "https://developmentseed.org/eo-predictor"
+    finally:
+        tools._client, tools._CATALOG_CACHE, tools._fetch_tles, tools._TLE_CACHE = saved
 
 
 def t_recommended_is_the_covering_scene_not_the_clearest():
