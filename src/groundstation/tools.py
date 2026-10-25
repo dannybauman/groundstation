@@ -1508,10 +1508,13 @@ function addLayerTo(m, l, i) {
       ...(l.bounds ? { bounds: l.bounds } : {}) });
     m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": l.opacity ?? 1 } });
     if (l.fallback_tiles) {
-      // titiler.xyz rate-limits (429): swap this source to raster.eoapi.dev, once
+      // titiler.xyz rate-limits (429): swap this source to raster.eoapi.dev, once.
+      // If titiler.xyz 429 lacks CORS headers, the browser reports status 0 / network error.
       let swapped = false;
       m.on("error", (e) => {
-        if (swapped || e.sourceId !== id || !e.error || e.error.status !== 429) return console.error(e.error);
+        if (swapped || e.sourceId !== id || !e.error) return;
+        const s = e.error.status;
+        if (s !== 429 && s !== 0 && s !== undefined) return console.error(e.error);
         swapped = true;
         m.getSource(id).setTiles([l.fallback_tiles]);
         const lab = document.getElementById("lbl" + id);
@@ -1606,6 +1609,8 @@ if (COMPARE && rasters.length === 2) {
 
 def stac_map_link(catalog: str, collection_id: str, item_id: str) -> str:
     """stac-map opens any STAC URL from ?href= (src/utils/href.ts)."""
+    if catalog not in CATALOGS or "stac" not in CATALOGS[catalog]:
+        return ""
     self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
     return "https://developmentseed.org/stac-map/?href=" + quote(self_url, safe="")
 
