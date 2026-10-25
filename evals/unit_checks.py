@@ -1867,6 +1867,42 @@ def t_statistics_429_retries_once_on_eoapi():
         tools._ITEMS.clear()
 
 
+def _archive_item(i, x, cloud):
+    return {"type": "Feature", "stac_version": "1.1.0", "id": i, "collection": "sentinel-2-l2a",
+            "geometry": {"type": "Polygon", "coordinates": [[[x, 0], [x + 1, 0], [x + 1, 1], [x, 1], [x, 0]]]},
+            "bbox": [x, 0, x + 1, 1],
+            "properties": {"datetime": f"2026-10-0{x % 9 + 1}T00:00:00Z", "eo:cloud_cover": cloud},
+            "assets": {"visual": {"href": "https://e/v.tif", "type": "image/tiff"}},
+            "links": [{"rel": "self", "href": f"https://earth-search.aws.element84.com/v1/items/{i}"}]}
+
+
+def t_geoparquet_archive_searches_like_a_catalog():
+    import rustac
+    assert [tools._is_archive(c) for c in ("a.parquet", "s3://x.parquet", "/tmp/a/b.GEOPARQUET", "https://h/x.parquet?v=1", "https://h/x.parquet#f", "earth-search", "veda")] == [True] * 5 + [False] * 2
+    saved = tools._client
+    tools._client = None  # any STAC API call in the archive path raises
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            href = str(Path(d) / "a.parquet")
+            rustac.write_sync(href, [_archive_item("a", 0, 5.0), _archive_item("b", 1, 50.0), _archive_item("n", 2, None), _archive_item("w", 175, 1.0)])
+            out = tools.search_imagery(href, [], bbox=[0, 0, 3, 1])
+            assert out["count"] == 3 and [i["id"] for i in out["items"]] == ["n", "b", "a"]
+            assert set(out["items"][0]) >= {"catalog", "collection", "id", "datetime", "cloud_cover", "bbox", "assets", "self_url", "covers_aoi_pct"}
+            assert out["items"][0]["self_url"].endswith("/items/n") and out["recommended"]
+            assert out["archive"]["href"] == href and out["archive"]["datetime_range"] == ["2026-10-01T00:00:00Z", "2026-10-05T00:00:00Z"]
+            assert out["archive"]["written"] and "snapshot" in out["archive"]["note"]
+            assert tools.search_imagery(href, [], bbox=[0, 0, 0.9, 1])["count"] == 1
+            capped = tools.search_imagery(href, [], bbox=[0, 0, 3, 1], max_cloud_cover=10)
+            assert [i["id"] for i in capped["items"]] == ["a"]  # no cloud value is dropped, as the API does
+            wrap = tools.search_imagery(href, [], bbox=[170, 0, -170, 1])  # antimeridian: not read as -170..170
+            assert [i["id"] for i in wrap["items"]] == ["w"]
+            assert "'earth-search'" in out["archive"]["note"]
+            noc = tools._recommend([{"id": "x", "cloud_cover": None, "covers_aoi_pct": 50.0, "datetime": "d"}, {"id": "y", "cloud_cover": 5.0, "covers_aoi_pct": 50.0, "datetime": "c"}])
+            assert noc["id"] == "x"  # a None cloud value must not crash the reason text
+            err = tools.write_archive("earth-search", ["c"], bbox=[0, 0, 1, 1], out_path=str(Path(d) / "a.txt"))
+            assert "error" in err and not (Path(d) / "a.txt").exists()
+    finally:
+        tools._client = saved
 def t_zarr_catalog_surfaces():
     keys = {"title", "url", "variables", "sel", "coverage", "chunks", "stats", "tiles", "source"}
     for sid, z in tools.ZARR_STORES.items():
@@ -1978,6 +2014,37 @@ def t_http_zarr_store_range_206():
         assert (await store.get("data", FakeProto, None)) is None
 
     asyncio.run(run())
+
+
+def t_write_archive_paging_get_merge():
+    # Test next-link GET paging and merge in write_archive
+    saved_client = tools._client
+    calls = []
+    class FakeClient:
+        def post(self, url, json=None, **kw):
+            calls.append(("POST", url, json))
+            return _FakeResp({
+                "features": [_archive_item("item-1", 1, 10.0)],
+                "links": [{"rel": "next", "href": "search?page=2", "method": "GET", "merge": True, "body": {"token": "abc"}}]
+            })
+        def get(self, url, **kw):
+            calls.append(("GET", url, kw))
+            return _FakeResp({
+                "features": [_archive_item("item-2", 2, 20.0)],
+                "links": []
+            })
+    tools._client = FakeClient()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            out_p = str(Path(d) / "paged.parquet")
+            res = tools.write_archive("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1], out_path=out_p, limit=5)
+            assert res["count"] == 2
+            assert Path(out_p).exists()
+            assert len(calls) == 2
+            assert calls[0][0] == "POST"
+            assert calls[1][0] == "GET" and calls[1][1].endswith("/search?page=2")
+    finally:
+        tools._client = saved_client
 
 
 def t_versions_agree():

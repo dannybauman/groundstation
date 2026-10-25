@@ -16,7 +16,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 from typing import Any
 
 import httpx
@@ -1037,7 +1037,7 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     elif cov(clearest) >= cov(best) - RECOMMEND_COVERAGE_TIE and len(near) > 1:
         # the clearest scene is inside both tie bands, so freshness decided
         reason = (
-            f"{bc:.1f}% cloud, covers {cov(best):.1f}% of the area, and newest of {len(near)} near-equal scenes; "
+            f"{'no cloud figure' if bc is None else f'{bc:.1f}% cloud'}, covers {cov(best):.1f}% of the area, and newest of {len(near)} near-equal scenes; "
             f"the clearest ({cloud(clearest):.1f}% cloud) is from {(clearest.get('datetime') or '')[:10]}"
         )
     else:
@@ -1049,6 +1049,109 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     if all_cloudy:
         reason = f"every scene is over {RECOMMEND_MAX_CLOUD:.0f}% cloud, so this is the least bad: " + reason
     return {"id": best["id"], "covers_aoi_pct": cov(best), "cloud_cover": bc, "reason": reason}
+
+
+def _is_archive(catalog: str) -> bool:
+    return catalog not in CATALOGS and re.split(r"[?#]", catalog)[0].lower().endswith((".parquet", ".geoparquet"))
+
+
+def _search_archive(href: str, body: dict[str, Any], max_cloud_cover: float | None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # rustac's search is async-first; search_sync works with or without a running
+    # event loop (checked inside asyncio.run), and its `query` is not implemented,
+    # so cloud cover is filtered here
+    import rustac
+
+    kw = {k: body[k] for k in ("bbox", "datetime") if body.get(k)}
+    if body.get("collections"):
+        kw["collections"] = body["collections"]
+    # ponytail: loads every match then sorts and slices in Python, and scans the
+    # whole archive for its time range; fine to ~1e5 items, then push sortby and
+    # a max_items into rustac's duckdb search
+    # rustac reads west > east as a plain box, so an antimeridian AOI is two searches
+    feats, seen = [], set()
+    for box in _split_antimeridian(kw["bbox"]) if "bbox" in kw else [None]:
+        for f in rustac.search_sync(href, **{**kw, **({"bbox": box} if box else {})}):
+            if f["id"] not in seen:
+                seen.add(f["id"])
+                feats.append(f)
+    for f in feats:  # rustac writes +00:00 where the API says Z; keep one shape
+        if f["properties"].get("datetime"):
+            f["properties"]["datetime"] = f["properties"]["datetime"].replace("+00:00", "Z")
+    if max_cloud_cover is not None:
+        # the API's query lte drops items with no cloud value; match it
+        feats = [f for f in feats if f["properties"].get("eo:cloud_cover") is not None and f["properties"]["eo:cloud_cover"] <= max_cloud_cover]
+    feats.sort(key=lambda f: f["properties"].get("datetime") or "", reverse=True)
+    everything = rustac.search_sync(href)
+    stamps = sorted(f["properties"]["datetime"].replace("+00:00", "Z") for f in everything if f["properties"].get("datetime"))
+    self_url = next((l["href"] for l in (everything[0].get("links") or []) if l.get("rel") == "self"), "") if everything else ""
+    source = next((k for k, v in CATALOGS.items() if self_url.startswith(v["stac"])), None)
+    path = Path(href)
+    return feats[: body["limit"]], {
+        "href": href,
+        "written": dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).date().isoformat() if path.exists() else None,
+        "datetime_range": [stamps[0], stamps[-1]] if stamps else None,
+        "note": "a snapshot of the catalog as of the written date, not the live catalog: newer scenes may exist. "
+        "Analysis of these items (preview_item, compute_statistics, render_map) goes through the live catalog: "
+        f"call them with catalog '{source or 'the catalog it was written from'}' and the item id.",
+    }
+
+
+def write_archive(
+    catalog: str,
+    collections: list[str],
+    bbox: list[float] | None = None,
+    place: str | None = None,
+    datetime_range: str | None = None,
+    out_path: str | None = None,
+    limit: int = 500,
+) -> dict[str, Any]:
+    """Cache a live STAC search as a stac-geoparquet archive.
+
+    Pages the catalog's search (up to `limit` items) and writes the items with
+    rustac. Pass the returned path as `catalog` to search_imagery to search the
+    snapshot with the network off. Returns path, count, datetime_range, written.
+    """
+    import rustac
+
+    if out_path and not out_path.lower().endswith((".parquet", ".geoparquet")):
+        return {"error": "out_path must end in .parquet or .geoparquet"}
+    where = place
+    bbox = _resolve_bbox(place, bbox)
+    if isinstance(bbox, dict):
+        return bbox
+    if not out_path:
+        out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
+        slug = slugify("-".join([*collections, where or "-".join(f"{x:.2f}" for x in bbox)]))
+        out_path = str(out_dir / "archives" / f"{slug}.parquet")
+    body: dict[str, Any] = {"collections": collections, "bbox": bbox, "limit": min(limit, 100)}
+    if datetime_range:
+        body["datetime"] = datetime_range
+    url = f"{CATALOGS[catalog]['stac']}/search"
+    feats: list[dict[str, Any]] = []
+    method = "POST"
+    while url and len(feats) < limit:
+        r = _client.get(url) if method == "GET" else _client.post(url, json=body)
+        r.raise_for_status()
+        page = r.json()
+        feats += page.get("features", [])
+        nxt = next((l for l in page.get("links", []) if l.get("rel") == "next"), None)
+        if nxt and page.get("features"):
+            url, method = urljoin(url, nxt["href"]), (nxt.get("method") or "GET").upper()
+            body = {**body, **(nxt.get("body") or {})} if nxt.get("merge") else nxt.get("body", body)
+        else:
+            url = None
+    feats = feats[:limit]
+    if not feats:
+        return {"error": "the search returned no items, so no archive was written"}
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    rustac.write_sync(out_path, feats)
+    stamps = sorted(f["properties"]["datetime"] for f in feats if f["properties"].get("datetime"))
+    return {
+        "path": out_path,
+        "count": len(feats),
+        "datetime_range": [stamps[0], stamps[-1]] if stamps else None,
+        "written": dt.date.today().isoformat(),
+    }
 
 
 def search_imagery(
@@ -1076,6 +1179,10 @@ def search_imagery(
     opposite directions, and sorting on one of them alone picks wrong.
     An item carrying read_note cannot be read by the tiler; it is listed so
     the gap is visible, and never recommended or put in a coverage set.
+    catalog may also be a stac-geoparquet archive (a path or URL ending in
+    .parquet, e.g. one made by write_archive): it is searched with the same
+    filters, offline for a local file, and the result carries an `archive`
+    block (href, written date, time range) because it is a snapshot.
     """
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
@@ -1090,17 +1197,23 @@ def search_imagery(
         body["datetime"] = datetime_range
     if max_cloud_cover is not None:
         body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
-    base = CATALOGS[catalog]["stac"]
-    r = _client.post(f"{base}/search", json=body)
-    if r.status_code == 400 and "sortby" in body:
-        body.pop("sortby")  # some APIs reject sortby; retry without
+    archive = None
+    if _is_archive(catalog):
+        feats, archive = _search_archive(catalog, body, max_cloud_cover)
+    else:
+        base = CATALOGS[catalog]["stac"]
         r = _client.post(f"{base}/search", json=body)
-    r.raise_for_status()
-    feats = r.json().get("features", [])
+        if r.status_code == 400 and "sortby" in body:
+            body.pop("sortby")  # some APIs reject sortby; retry without
+            r = _client.post(f"{base}/search", json=body)
+        r.raise_for_status()
+        feats = r.json().get("features", [])
     items = [_compact_item(catalog, f) for f in feats]
     for it in items:
         it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
     result = {"bbox": bbox, "count": len(feats), "items": items}
+    if archive:
+        result["archive"] = archive
     readable = [it for it in items if "read_note" not in it]
     rec = _recommend(readable)
     if rec:

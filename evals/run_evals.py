@@ -66,6 +66,17 @@ def t_search():
     t_search.item = r["items"][0]
 
 
+@check("write_archive caches a live Earth Search window as stac-geoparquet")
+def t_write_archive():
+    with tempfile.TemporaryDirectory() as d:
+        out = tools.write_archive(
+            "earth-search", ["sentinel-2-l2a"], bbox=[-120.2, 47.8, -120.0, 48.0],
+            datetime_range=tools.last_days_window(3), out_path=str(Path(d) / "a.parquet"),
+        )
+        assert out.get("count", 0) >= 1, out
+        assert Path(out["path"]).stat().st_size > 0
+
+
 @check("search_imagery assembles a full-coverage set for Calgary (two UTM zones)")
 def t_full_coverage_calgary():
     # the Kevin regression: no single S2 tile covers Calgary, ever — the
@@ -205,7 +216,7 @@ def t_local_synth_live():
 
 
 if __name__ == "__main__":
-    checks = [t_geocode, t_datasets, t_eo_predictor_catalog, t_search, t_full_coverage_calgary, t_preview, t_stats, t_map, t_postcard, t_events, t_weather, t_veda, t_pc, t_local_synth_live]
+    checks = [t_geocode, t_datasets, t_eo_predictor_catalog, t_search, t_write_archive, t_full_coverage_calgary, t_preview, t_stats, t_map, t_postcard, t_events, t_weather, t_veda, t_pc, t_local_synth_live]
     for fn in checks:
         fn()
     print(f"\n{len(checks) - len(FAILURES)}/{len(checks)} passed")

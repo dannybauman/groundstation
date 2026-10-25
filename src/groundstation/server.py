@@ -38,6 +38,7 @@ TOOLS = (
     tools.search_datasets,
     tools.describe_collection,
     tools.search_imagery,
+    tools.write_archive,
     tools.preview_item,
     tools.compute_statistics,
     tools.compare_dates,
