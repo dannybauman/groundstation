@@ -49,6 +49,12 @@ def t_datasets():
     assert any(h.get("catalog") == "earth-search" for h in hits if "id" in h)
 
 
+@check("eo-predictor constellation catalog loads live")
+def t_eo_predictor_catalog():
+    cfgs, source, _ = tools._load_constellations()
+    assert source == "developmentseed/eo-predictor" and len(cfgs) >= 10, (source, len(cfgs))
+
+
 @check("search_imagery returns recent low-cloud Sentinel-2")
 def t_search():
     r = tools.search_imagery(
@@ -199,7 +205,7 @@ def t_local_synth_live():
 
 
 if __name__ == "__main__":
-    checks = [t_geocode, t_datasets, t_search, t_full_coverage_calgary, t_preview, t_stats, t_map, t_postcard, t_events, t_weather, t_veda, t_pc, t_local_synth_live]
+    checks = [t_geocode, t_datasets, t_eo_predictor_catalog, t_search, t_full_coverage_calgary, t_preview, t_stats, t_map, t_postcard, t_events, t_weather, t_veda, t_pc, t_local_synth_live]
     for fn in checks:
         fn()
     print(f"\n{len(checks) - len(FAILURES)}/{len(checks)} passed")

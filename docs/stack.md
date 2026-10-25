@@ -110,6 +110,16 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - link: https://github.com/stac-utils/stac-fastapi
 - when: catalog=veda,planetary-computer
 
+## stac-fastapi-collection-discovery
+- stage: catalog
+- what: Development Seed's STAC API extension for federated collection discovery across catalogs
+- ds-role: created
+- island: cng
+- integration: search_datasets queries multiple catalogs concurrently and filters collections in-process by place and resolution following this pattern
+- speaks-to: STAC, stac-fastapi
+- link: https://github.com/developmentseed/stac-fastapi-collection-discovery
+- when: catalog=veda,planetary-computer
+
 ## pgstac
 - stage: catalog
 - what: the PostgreSQL STAC database under eoAPI and under Planetary Computer's catalog
