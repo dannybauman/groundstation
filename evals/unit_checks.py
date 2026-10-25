@@ -1797,6 +1797,36 @@ def t_statistics_429_retries_once_on_eoapi():
         tools._ITEMS.clear()
 
 
+def _archive_item(i, x, cloud):
+    return {"type": "Feature", "stac_version": "1.1.0", "id": i, "collection": "sentinel-2-l2a",
+            "geometry": {"type": "Polygon", "coordinates": [[[x, 0], [x + 1, 0], [x + 1, 1], [x, 1], [x, 0]]]},
+            "bbox": [x, 0, x + 1, 1],
+            "properties": {"datetime": f"2026-10-0{x + 1}T00:00:00Z", "eo:cloud_cover": cloud},
+            "assets": {"visual": {"href": "https://e/v.tif", "type": "image/tiff"}},
+            "links": [{"rel": "self", "href": f"https://earth-search/items/{i}"}]}
+
+
+def t_geoparquet_archive_searches_like_a_catalog():
+    import rustac
+    assert [tools._is_archive(c) for c in ("a.parquet", "s3://x.parquet", "/tmp/a/b.GEOPARQUET", "earth-search", "veda")] == [True, True, True, False, False]
+    saved = tools._client
+    tools._client = None  # any STAC API call in the archive path raises
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            href = str(Path(d) / "a.parquet")
+            rustac.write_sync(href, [_archive_item("a", 0, 5.0), _archive_item("b", 1, 50.0)])
+            out = tools.search_imagery(href, [], bbox=[0, 0, 3, 1])
+            assert out["count"] == 2 and [i["id"] for i in out["items"]] == ["b", "a"]
+            assert set(out["items"][0]) >= {"catalog", "collection", "id", "datetime", "cloud_cover", "bbox", "assets", "self_url", "covers_aoi_pct"}
+            assert out["items"][0]["self_url"].endswith("/items/b") and out["recommended"]
+            assert out["archive"]["href"] == href and out["archive"]["datetime_range"] == ["2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z"]
+            assert out["archive"]["written"] and "snapshot" in out["archive"]["note"]
+            assert tools.search_imagery(href, [], bbox=[0, 0, 0.9, 1])["count"] == 1
+            assert tools.search_imagery(href, [], bbox=[0, 0, 3, 1], max_cloud_cover=10)["count"] == 1
+    finally:
+        tools._client = saved
+
+
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files

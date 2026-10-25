@@ -111,6 +111,16 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - link: https://github.com/stac-utils/pgstac
 - when: catalog=veda,planetary-computer
 
+## rustac
+- stage: catalog
+- what: the Rust STAC library with Python bindings; reads, searches and writes stac-geoparquet
+- ds-role: contributes
+- island: cng
+- integration: searches a cached stac-geoparquet archive like a catalog, and writes the archive from a live search, so the search step runs with the network off
+- speaks-to: STAC, Earth Search
+- link: https://github.com/stac-utils/rustac-py
+- when: catalog=geoparquet
+
 ## stac-server
 - stage: catalog
 - what: Element 84's serverless STAC API, the one Earth Search runs on

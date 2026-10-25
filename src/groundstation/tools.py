@@ -658,6 +658,87 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     return {"id": best["id"], "covers_aoi_pct": cov(best), "cloud_cover": bc, "reason": reason}
 
 
+def _is_archive(catalog: str) -> bool:
+    return catalog not in CATALOGS and catalog.lower().endswith((".parquet", ".geoparquet"))
+
+
+def _search_archive(href: str, body: dict[str, Any], max_cloud_cover: float | None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # rustac's search is async-first; search_sync works with or without a running
+    # event loop (checked inside asyncio.run), and its `query` is not implemented,
+    # so cloud cover is filtered here
+    import rustac
+
+    kw = {k: body[k] for k in ("bbox", "datetime") if body.get(k)}
+    if body.get("collections"):
+        kw["collections"] = body["collections"]
+    # ponytail: loads every match then sorts and slices in Python, and scans the
+    # whole archive for its time range; fine to ~1e5 items, then push sortby and
+    # a max_items into rustac's duckdb search
+    feats = rustac.search_sync(href, **kw)
+    for f in feats:  # rustac writes +00:00 where the API says Z; keep one shape
+        if f["properties"].get("datetime"):
+            f["properties"]["datetime"] = f["properties"]["datetime"].replace("+00:00", "Z")
+    if max_cloud_cover is not None:
+        feats = [f for f in feats if (f["properties"].get("eo:cloud_cover") or 0) <= max_cloud_cover]
+    feats.sort(key=lambda f: f["properties"].get("datetime") or "", reverse=True)
+    stamps = sorted(f["properties"]["datetime"].replace("+00:00", "Z") for f in rustac.search_sync(href) if f["properties"].get("datetime"))
+    path = Path(href)
+    return feats[: body["limit"]], {
+        "href": href,
+        "written": dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).date().isoformat() if path.exists() else None,
+        "datetime_range": [stamps[0], stamps[-1]] if stamps else None,
+        "note": "a snapshot of the catalog as of the written date, not the live catalog: newer scenes may exist. "
+        "Analysis of these items (preview_item, compute_statistics, render_map) goes through the live catalog: "
+        "call them with catalog 'earth-search' and the item id.",
+    }
+
+
+def write_archive(
+    catalog: str,
+    collections: list[str],
+    bbox: list[float] | None = None,
+    place: str | None = None,
+    datetime_range: str | None = None,
+    out_path: str = "demo/archives/archive.parquet",
+    limit: int = 500,
+) -> dict[str, Any]:
+    """Cache a live STAC search as a stac-geoparquet archive.
+
+    Pages the catalog's search (up to `limit` items) and writes the items with
+    rustac. Pass the returned path as `catalog` to search_imagery to search the
+    snapshot with the network off. Returns path, count, datetime_range, written.
+    """
+    import rustac
+
+    bbox = _resolve_bbox(place, bbox)
+    if isinstance(bbox, dict):
+        return bbox
+    body: dict[str, Any] = {"collections": collections, "bbox": bbox, "limit": min(limit, 100)}
+    if datetime_range:
+        body["datetime"] = datetime_range
+    url = f"{CATALOGS[catalog]['stac']}/search"
+    feats: list[dict[str, Any]] = []
+    while url and len(feats) < limit:
+        r = _client.post(url, json=body)
+        r.raise_for_status()
+        page = r.json()
+        feats += page.get("features", [])
+        nxt = next((l for l in page.get("links", []) if l.get("rel") == "next"), None)
+        url, body = (nxt["href"], nxt.get("body") or body) if nxt and page.get("features") else (None, body)
+    feats = feats[:limit]
+    if not feats:
+        return {"error": "the search returned no items, so no archive was written"}
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    rustac.write_sync(out_path, feats)
+    stamps = sorted(f["properties"]["datetime"] for f in feats if f["properties"].get("datetime"))
+    return {
+        "path": out_path,
+        "count": len(feats),
+        "datetime_range": [stamps[0], stamps[-1]] if stamps else None,
+        "written": dt.date.today().isoformat(),
+    }
+
+
 def search_imagery(
     catalog: str,
     collections: list[str],
@@ -683,6 +764,10 @@ def search_imagery(
     opposite directions, and sorting on one of them alone picks wrong.
     An item carrying read_note cannot be read by the tiler; it is listed so
     the gap is visible, and never recommended or put in a coverage set.
+    catalog may also be a stac-geoparquet archive (a path or URL ending in
+    .parquet, e.g. one made by write_archive): it is searched with the same
+    filters, offline for a local file, and the result carries an `archive`
+    block (href, written date, time range) because it is a snapshot.
     """
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
@@ -697,17 +782,23 @@ def search_imagery(
         body["datetime"] = datetime_range
     if max_cloud_cover is not None:
         body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
-    base = CATALOGS[catalog]["stac"]
-    r = _client.post(f"{base}/search", json=body)
-    if r.status_code == 400 and "sortby" in body:
-        body.pop("sortby")  # some APIs reject sortby; retry without
+    archive = None
+    if _is_archive(catalog):
+        feats, archive = _search_archive(catalog, body, max_cloud_cover)
+    else:
+        base = CATALOGS[catalog]["stac"]
         r = _client.post(f"{base}/search", json=body)
-    r.raise_for_status()
-    feats = r.json().get("features", [])
+        if r.status_code == 400 and "sortby" in body:
+            body.pop("sortby")  # some APIs reject sortby; retry without
+            r = _client.post(f"{base}/search", json=body)
+        r.raise_for_status()
+        feats = r.json().get("features", [])
     items = [_compact_item(catalog, f) for f in feats]
     for it in items:
         it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
     result = {"bbox": bbox, "count": len(feats), "items": items}
+    if archive:
+        result["archive"] = archive
     readable = [it for it in items if "read_note" not in it]
     rec = _recommend(readable)
     if rec:
