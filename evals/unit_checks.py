@@ -2830,14 +2830,24 @@ def t_geocode_note_names_the_state():
     out, _ = _with_geocoders({"ids": _PORTLAND_GAZET}, [], lambda: tools.geocode("Portland"), reverse=_STATE_OF)
     note = out["geocode_note"]
     assert "Oregon, United States" in note and "Maine, United States" in note and "122.7W" not in note, note
+    assert "using Portland (Oregon" in note, note
 
 
-def t_timelapse_caveat_says_frames_are_the_callers():
-    # Field test 15: Hobet's 2016 window found 0 scenes at the cap and the frames began at 2018 unsaid
-    layer = lambda n: {"type": "raster", "name": n, "tiles": "https://t.example/{z}/{x}/{y}.png"}
-    with tempfile.TemporaryDirectory() as d:
-        out = tools.render_timelapse("t", [0, 0, 1, 1], [layer("2018"), layer("2020")], out_path=str(Path(d) / "t.html"))
-    assert "caller's" in out["caveat"][0] and "0 scenes" in out["caveat"][0], out
+def t_search_imagery_names_an_empty_window_at_the_cap():
+    # Field test 15: Hobet's 2016 window found 0 scenes at the cap and nothing said so
+    saved = tools._client.post
+    class R:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"features": []}
+    tools._client.post = lambda *a, **k: R()
+    try:
+        out = tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1], max_cloud_cover=15)
+        bare = tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1])
+    finally:
+        tools._client.post = saved
+    assert "0 scenes at max_cloud_cover 15" in out["note"] and "higher cap" in out["note"], out
+    assert "note" not in bare, bare
 
 
 def t_compare_dates_cloud_caveat_names_side_and_scene():
@@ -2852,12 +2862,22 @@ def t_stack_facts_geocoded_is_the_tools_alone():
     # Field test 15: a caller's {"geocoded": "nominatim"} for a hand-picked box credited a lookup that never ran
     out = _compare_fixture(1, lambda **kw: {"map_path": "x.html"}, stack_facts={"geocoded": "nominatim"})
     assert out["stack_facts_ignored"] == ["geocoded"], out
-    assert tools._map_stack_facts([], [], {"geocoded": "nominatim"})["geocoded"] is False
+    assert tools._map_stack_facts([], [], {"geocoded": "nominatim"}, [0, 0, 1, 1])["geocoded"] is False
+    # a box geocode returned keeps the claim, with its source, matched at 4 decimals
+    tools._record_geocode({"bbox": [10.00001, 20, 11, 21], "source": "gazet"})
+    keep = lambda v, b: tools._map_stack_facts([], [], {"geocoded": v}, b)["geocoded"]
+    assert keep("gazet", [10, 20, 11, 21]) == "gazet"
+    assert keep("nominatim", [10, 20, 11, 21]) is False, "source must match"
+    assert keep("gazet", [10, 20, 12, 21]) is False, "a box geocode never returned"
     token = tools._tool_geocoded.set("gazet")
     try:
-        assert tools._map_stack_facts([], [], {"geocoded": "nominatim"})["geocoded"] == "gazet"
+        assert tools._map_stack_facts([], [], {"geocoded": "nominatim"}, [0, 0, 1, 1])["geocoded"] == "gazet"
     finally:
         tools._tool_geocoded.reset(token)
+
+
+def t_geocode_accent_strip_matches_zurich():
+    assert tools._names_the_ask("Zürich", "Zurich") and not tools._names_the_ask("Le Moule", "Portland")
 
 
 def t_versions_agree():
