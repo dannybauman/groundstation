@@ -1735,6 +1735,67 @@ _BRAND_CSS = """  :root { --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --r
     --k-place: #7a5c2e; --k-catalog: #1d4e8f; --k-data: #6b4c8f; --k-pixels: #CF3F02; --k-draw: #2a5c45;
     --k-orbit: #4a4440; }"""
 
+# Categorical colormaps the tools can explain: colormap_name -> legend. The
+# WorldCover colours are the tiler's own classmap
+# (planetarycomputer.microsoft.com/api/data/v1/legend/classmap/esa-worldcover)
+LEGENDS: dict[str, dict] = {
+    "esa-worldcover": {"title": "ESA WorldCover 2021", "classes": [
+        (10, "Tree cover", "#006400"), (20, "Shrubland", "#ffbb22"), (30, "Grassland", "#ffff4c"),
+        (40, "Cropland", "#f096ff"), (50, "Built-up", "#fa0000"), (60, "Bare / sparse vegetation", "#b4b4b4"),
+        (70, "Snow and ice", "#f0f0f0"), (80, "Permanent water bodies", "#0064c8"),
+        (90, "Herbaceous wetland", "#0096a0"), (95, "Mangroves", "#00cf75"), (100, "Moss and lichen", "#fae6a0"),
+    ]},
+}
+
+
+def _legends_for(layers: list[dict[str, Any]], colormap_name: str | None = None) -> list[dict[str, Any]]:
+    """One legend per distinct known categorical colormap, in layer order."""
+    names = [colormap_name] + [l.get("colormap_name") for l in layers]
+    seen = dict.fromkeys(n for n in names if n in LEGENDS)
+    return [
+        {"colormap_name": n, "title": LEGENDS[n]["title"],
+         "classes": [{"value": v, "name": nm, "color": c} for v, nm, c in LEGENDS[n]["classes"]]}
+        for n in seen
+    ]
+
+
+def _legend_map_html(legends: list[dict[str, Any]]) -> str:
+    if not legends:
+        return ""
+    boxes = "".join(
+        f'<details class="legend" open><summary>{escape(g["title"])}</summary>'
+        + "".join(f'<div><i style="background:{c["color"]}"></i>{escape(c["name"])}</div>' for c in g["classes"])
+        + "</details>"
+        for g in legends
+    )
+    # phone rule: collapsed at 390 px and capped to 40vh with its own scroll, so it never covers the map
+    return f"""<div id="legends" aria-label="Legend">{boxes}</div>
+<style>
+  #legends {{ position: absolute; bottom: 60px; right: 12px; z-index: 2; display: flex; flex-direction: column;
+    gap: 6px; max-width: min(230px, 60vw); max-height: 40vh; overflow-y: auto;
+    font: 12px/1.35 "Roboto", system-ui, sans-serif; }}
+  .legend {{ background: rgba(247,244,239,.96); color: var(--ink); border-top: 3px solid var(--accent);
+    border-radius: 0 0 8px 8px; padding: 6px 10px; box-shadow: 0 2px 10px rgba(0,0,0,.18); }}
+  .legend summary {{ cursor: pointer; font-weight: 700; }}
+  .legend div {{ display: flex; align-items: center; gap: 7px; margin: 3px 0; }}
+  .legend i {{ flex: none; width: 14px; height: 14px; border: 1px solid rgba(0,0,0,.35); border-radius: 3px; }}
+  .clean #legends {{ display: none !important; }}
+</style>
+<script>
+  if (innerWidth <= 500) document.querySelectorAll(".legend").forEach(d => d.removeAttribute("open"));
+</script>
+"""
+
+
+def _legend_card_html(legends: list[dict[str, Any]]) -> str:
+    return "".join(
+        f'<div class="legend"><b>{escape(g["title"])}</b>'
+        + "".join(f'<span><i style="background:{c["color"]}"></i>{escape(c["name"])}</span>' for c in g["classes"])
+        + "</div>"
+        for g in legends
+    )
+
+
 # the stack layer chunk — injected into _MAP_TEMPLATE only when stack_layer=True,
 # so default artifacts carry zero extra bytes
 _STACK_CHUNK = """<button id="stack-toggle" aria-expanded="false">Stack</button>
@@ -1837,6 +1898,7 @@ __TLBAR__
 <div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div>__STACMAP__</div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
 __STACK__
+__LEGEND__
 <script>
 const esc = s => String(s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
 const LAYERS = __LAYERS__;
@@ -2520,6 +2582,7 @@ def render_map(
         stack_html = _stack_chunk_for(resolved, layers, stack_facts)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
+    legends = _legends_for(layers)
     first = next((l for l in layers if l.get("type") == "item"), None)
     stac_map_url = first and stac_map_link(first["catalog"], first["collection_id"], first["item_id"])
     html = (
@@ -2528,7 +2591,7 @@ def render_map(
             "LAYERS": _js(resolved), "BBOX": _js(bbox), "COMPARE": _js(compare),
             "TLBAR": "", "TIMELAPSE": "false", "INTERVAL": "0",
             "STACMAP": f'<a id="stacmap" href="{escape(stac_map_url)}" target="_blank">Open in stac-map</a>' if stac_map_url else "",
-            "STACK": stack_html,
+            "STACK": stack_html, "LEGEND": _legend_map_html(legends),
         })
     )
     try:
@@ -2541,6 +2604,10 @@ def render_map(
     # file, so every rendering bug this repo has shipped was caught by eye and
     # not by a check. `state` is the same thing the HTML was built from, in a
     # form an eval (or an MCP Apps view) can read. The file is unchanged.
+    if legends:
+        out["legend"] = legends[0]
+        if len(legends) > 1:
+            out["legends"] = legends
     out["state"] = {
         "bbox": bbox,
         "compare": bool(compare),
@@ -2636,7 +2703,7 @@ def render_timelapse(
             "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
             "LAYERS": _js(resolved), "BBOX": _js(bbox), "COMPARE": "false",
             "TLBAR": _TIMELAPSE_BAR, "TIMELAPSE": "true", "INTERVAL": str(int(interval_ms)),
-            "STACMAP": "", "STACK": stack_html,
+            "STACMAP": "", "STACK": stack_html, "LEGEND": "",
         })
     )
     try:
@@ -2985,6 +3052,10 @@ __BRAND__
   .caption { margin: 0 0 16px; }
   .credit { border-top: 1px solid var(--rule); padding-top: 12px; font: 12px/1.6 "Roboto Mono", monospace; color: var(--mid); }
   .credit div { margin: 2px 0; }
+  .legend { margin: 0 0 14px; font-size: 13px; }
+  .legend b { display: block; margin-bottom: 4px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; margin: 2px 12px 2px 0; }
+  .legend i { flex: none; width: 12px; height: 12px; border: 1px solid rgba(0,0,0,.35); border-radius: 2px; }
   .stack-list { margin-top: 8px; font-size: 11px; }
   .stack-list b { color: var(--ink); font-weight: 600; }
   .stack-list b.ds { color: var(--accent); }
@@ -2995,6 +3066,7 @@ __BRAND__
     <h1>__PLACE__</h1>
     <p class="meta">__DATE__ · __COLLECTION__</p>
     __CAPTION__
+    __LEGEND__
     <div class="credit">
       <div>Development Seed labs · __ENGINE__ · __SOURCE__</div>
       __LICENSE__
@@ -3137,6 +3209,7 @@ def _postcard_html(
     license_: str | None = None,
     stack_html: str | None = None,
     engine: str = "STAC · TiTiler",
+    legends: list[dict[str, Any]] | None = None,
 ) -> str:
     import base64
 
@@ -3148,7 +3221,7 @@ def _postcard_html(
             "COLLECTION": escape(collection_id), "SOURCE": escape(source),
             "CAPTION": f'<p class="caption">{escape(caption)}</p>' if caption else "",
             "LICENSE": f"<div>license: {escape(license_)}</div>" if license_ else "",
-            "STACK": stack_html or "",
+            "STACK": stack_html or "", "LEGEND": _legend_card_html(legends or []),
         })
     )
 
@@ -3259,10 +3332,11 @@ def render_postcard(
         stack_html = _stack_credit_for(catalog, collection_id, tiler_host, mosaic_scenes)
         if stack_html is None:
             stack_note = "stack listing skipped: docs/stack.md missing, malformed, or nothing to attribute"
+    legends = _legends_for([], colormap_name)
     html = _postcard_html(
         png, place, date, collection_id,
         _catalog_source(catalog, collection_id), caption, license_, stack_html,
-        engine="STAC · rio-tiler" if mosaic_scenes else "STAC · TiTiler",
+        engine="STAC · rio-tiler" if mosaic_scenes else "STAC · TiTiler", legends=legends,
     )
     try:
         out_path = _artifact_path(out_path, "postcard", f"{place}-{date}")
@@ -3270,6 +3344,8 @@ def render_postcard(
         return {"error": str(e)}
     _write_artifact(out_path, html)
     out = {"path": out_path}
+    if legends:
+        out["legend"] = legends[0]
     if mosaic_scenes:
         out["mosaic_scenes"] = mosaic_scenes
     notes = "; ".join(n for n in (mosaic_note, stack_note) if n)
