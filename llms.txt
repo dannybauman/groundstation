@@ -1,0 +1,26 @@
+# groundstation
+
+> Earth data, agent-ready: an MCP server, web console and scheduled briefings that put the cloud-native geospatial stack (STAC, TiTiler, eoAPI) in the hands of AI agents.
+
+A Development Seed labs prototype. Ask about any place on Earth and it finds fresh satellite imagery, active fires and disaster alerts, weather and smoke, does the pixel math, and returns an interactive map. Every tool that returns a derived number also returns the conditions under which not to trust it.
+
+## Docs
+
+- [README](https://github.com/dannybauman/groundstation/blob/main/README.md): what it is and how to install
+- [Architecture](https://github.com/dannybauman/groundstation/blob/main/docs/architecture.md): how the tools, server and console fit together
+- [The stack](https://github.com/dannybauman/groundstation/blob/main/docs/stack.md): the open-source projects behind an artifact, curated
+- [Caveats ADR](https://github.com/dannybauman/groundstation/blob/main/docs/adr-caveats.md): why a number carries its failure conditions
+- [Briefings](https://github.com/dannybauman/groundstation/blob/main/docs/briefing.md): the proactive daily brief pipeline
+- [Evals](https://github.com/dannybauman/groundstation/blob/main/evals/README.md): offline and live checks
+
+## Skills
+
+- [earth-data](https://github.com/dannybauman/groundstation/blob/main/skills/earth-data/SKILL.md): driving the groundstation tools
+- [groundstation](https://github.com/dannybauman/groundstation/blob/main/skills/groundstation/SKILL.md): the agent entry point
+- [stac-api](https://github.com/dannybauman/groundstation/blob/main/skills/stac-api/SKILL.md): searching any STAC catalog
+- [titiler](https://github.com/dannybauman/groundstation/blob/main/skills/titiler/SKILL.md): previews, tiles, statistics and band math on any TiTiler
+
+## Optional
+
+- [Plan, October 2026](https://github.com/dannybauman/groundstation/blob/main/docs/plan-2026-10-devseed-stack.md): what ships next
+- [Field test №10, October 2026](https://github.com/dannybauman/groundstation/blob/main/docs/field-test-2026-10-25-no10.html): the latest showcase run

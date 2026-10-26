@@ -14,7 +14,10 @@ import json
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
+from html import escape
 from pathlib import Path
+from urllib.parse import quote, urljoin
 from typing import Any
 
 import httpx
@@ -23,6 +26,10 @@ UA = {"User-Agent": "groundstation/0.1 (Development Seed labs prototype)"}
 # titiler.xyz is a shared community endpoint with rate limits (429s under heavy
 # use) — point GROUNDSTATION_TITILER at your own TiTiler deployment for real work
 TITILER = os.environ.get("GROUNDSTATION_TITILER", "https://titiler.xyz")
+# Development Seed's public eoAPI raster instance: the HRRR smoke tiler, and the
+# fallback when titiler.xyz rate-limits. Its /external routes read any COG or
+# GDAL-readable URL; it has no /stac routes
+EOAPI = os.environ.get("GROUNDSTATION_EOAPI", "https://raster.eoapi.dev")
 
 CATALOGS: dict[str, dict[str, str]] = {
     "earth-search": {
@@ -53,6 +60,8 @@ _gazet_skip_until = 0.0
 # miss: "Salinas Valley" came back as Salinas, Mexico at 0.9
 GAZET_URL = os.environ.get("GAZET_URL", "https://developmentseed-gazet.hf.space/api/search")
 GAZET_MIN_SIMILARITY = 0.95
+# ponytail: one margin for all geocoders; per-source margins if the live list below ever disagrees
+AMBIGUITY_MARGIN = 0.15
 GAZET_TIMEOUT_S = 10.0  # geocode is a hot path: a cold Space takes ~8s, a dead one must not hang the tool
 
 
@@ -60,11 +69,54 @@ def slugify(text: str, max_len: int = 60) -> str:
     return "".join(ch if ch.isalnum() else "-" for ch in text.lower())[:max_len].strip("-")
 
 
+# a feature word in the ask -> the candidate kinds that count as that feature.
+# The sources use several words for one kind: Nominatim tags the Berkeley Pit
+# "water", Gazet has "alkaline lake" (field test No.13)
+_FEATURE_KINDS = {
+    **dict.fromkeys(("lake", "reservoir"), {"lake", "reservoir", "water", "alkaline lake"}),
+    **dict.fromkeys(("mountain", "mount", "peak"), {"mountain", "peak", "volcano"}),
+    **{w: {w} for w in ("volcano", "river", "glacier", "bay", "island", "crater", "dam", "mine")},
+    "falls": {"waterfall"},
+}
+
+
+def _feature_word(query: str) -> tuple[str | None, set[str]]:
+    return next(((t, _FEATURE_KINDS[t]) for t in re.findall(r"[a-z]+", query.lower()) if t in _FEATURE_KINDS), (None, set()))
+
+
+def _nominatim_kind(r: dict[str, Any]) -> str:
+    return str(r.get("addresstype") or r.get("type") or "place").lower()
+
+
+def _kind_where(c: dict[str, Any]) -> str:
+    """County, state and country for a Nominatim candidate; a Gazet record carries only its country and position"""
+    if c.get("source") != "nominatim":
+        return c.get("where") or ""
+    parts = [p for p in c["name"].split(", ") if not p.strip().isdigit()]
+    county = [p for p in parts[1:-2] if p.endswith(("County", "Parish"))][:1]
+    return ", ".join(county + parts[1:][-2:]) or c.get("where") or ""
+
+
+def _ambiguous_error(place: str, g: dict[str, Any]) -> dict[str, Any]:
+    which = " or ".join(f"{c.get('kind', 'place')} ({_kind_where(c)})" for c in g["candidates"])
+    return dict(
+        error=f"{place!r} matches more than one place: {which}? Pass a fuller name or a bbox",
+        candidates=g["candidates"],
+        geocode_note=g.get("geocode_note"),
+    )
+
+
+def _bboxes_overlap(a: list[float], b: list[float]) -> bool:
+    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
+
+
 def _resolve_bbox(place: str | None, bbox: list[float] | None) -> list[float] | dict[str, Any]:
     if bbox is None and place:
         g = geocode(place)
         if "error" in g:
             return g
+        if g.get("ambiguous"):
+            return _ambiguous_error(place, g)
         bbox = g["bbox"]
     if bbox is None:
         return {"error": "Provide bbox or place"}
@@ -224,6 +276,10 @@ def _where(o: dict[str, Any]) -> str:
     return ", ".join(x for x in (o.get("country"), o.get("subtype")) if x)
 
 
+def _gazet_where(o: dict[str, Any]) -> str:
+    return ", ".join(x for x in (o.get("country"), _at(o)) if x)
+
+
 def _at(o: dict[str, Any]) -> str:
     """A Gazet record's centre as a speakable position, so two same-named places read apart."""
     b = o.get("bbox") or []
@@ -273,8 +329,18 @@ def geocode(query: str) -> dict[str, Any]:
     and physical features with their real extent. Everything else (towns,
     landmarks, descriptive phrases) falls back to OSM Nominatim. Use concise
     names ("Barotse Floodplain", "Chelan County") rather than long phrases.
-    Returns {name, lat, lon, bbox: [w, s, e, n], source}, plus geocode_note
-    when several places match the name equally well and one was picked.
+    Returns {name, lat, lon, bbox: [w, s, e, n], source, candidates}, plus
+    geocode_note when several places match the name and one was picked.
+    candidates lists up to 4 {name, bbox, source, where, kind}, kind being the
+    source's own word lowercased (Gazet subtype, Nominatim addresstype or type:
+    volcano, reservoir, town, county...) or "place". A feature word in the query
+    (lake, volcano, river, peak...) makes the one candidate of that kind the
+    chosen result and clears ambiguous; the others stay listed. Lake, reservoir
+    and water count as one kind. The word yields when the source's top result
+    is another place whose own name carries it and that outranks the feature by
+    more than AMBIGUITY_MARGIN ("Lake Charles" is the city). ambiguous is true
+    when the top two are real contenders in different places, and the
+    place-taking tools then refuse the name until a fuller name or bbox is passed.
     """
     global _gazet_skip_until
     try:
@@ -294,6 +360,13 @@ def geocode(query: str) -> dict[str, Any]:
             if h.get("bbox") and len(h["bbox"]) == 4
             and (h.get("similarity") or 0.0) >= GAZET_MIN_SIMILARITY
         ]
+        # the feature word picks among the top ties too: "Lake Powell" ties an
+        # Australian locality with the Utah reservoir (field test No.13)
+        _, want = _feature_word(query)
+        top = [o for o in hits if o.get("similarity") == hits[0].get("similarity")] if hits else []
+        pick = [o for o in top if str(o.get("subtype") or "").lower() in want]
+        if len(pick) == 1:
+            hits = pick + [o for o in hits if o is not pick[0]]
         if hits:
             h = hits[0]
             w, s, e, n = (float(x) for x in h["bbox"])
@@ -321,6 +394,8 @@ def geocode(query: str) -> dict[str, Any]:
                 "bbox": [w, s, e, n],
                 "source": "gazet",
             }
+            cands = [dict(name=out["name"], bbox=[w, s, e, n], source="gazet", where=_gazet_where(h),
+                          kind=str(h.get("subtype") or "place").lower())]
             # Jaro-Winkler ties are real places sharing a name (Loja Province and
             # Loja Canton both score 1.0). Picking one silently is the geocoder
             # deciding for the caller, so say which and name the rest. Field test
@@ -333,6 +408,18 @@ def geocode(query: str) -> dict[str, Any]:
                     + ", ".join(f"{o.get('name')} ({_where(o)}) {_at(o)}" for o in ties[:3])
                     + ". Pass the fuller name if another was meant"
                 )
+                cands += [
+                    dict(name=f"{o.get('name')} ({_where(o)})", bbox=[float(x) for x in o["bbox"]],
+                         source="gazet", where=_gazet_where(o), kind=str(o.get("subtype") or "place").lower())
+                    for o in ties[:3]
+                ]
+                # ties share a similarity score, so each is a real contender. Any one
+                # elsewhere counts, not just the second: both top Portland hits are
+                # Oregon (urban centre and locality), Portland Maine is third
+                if len(pick) != 1 and any(not _bboxes_overlap(cands[0]["bbox"], c["bbox"]) for c in cands[1:]):
+                    out["ambiguous"] = True
+                    out["geocode_note"] += ". ambiguous: pass the fuller name or a bbox"
+            out["candidates"] = cands
             return out
     except httpx.HTTPError:
         _gazet_skip_until = time.time() + 300  # a slow or dead Space must not tax every geocode
@@ -368,6 +455,21 @@ def geocode(query: str) -> dict[str, Any]:
             break
     if not results:
         return {"error": f"No geocoding result for {query!r}"}
+    # a feature word in the ask picks the one result of that kind ("Shasta Lake"
+    # is the reservoir, not the town). It yields when the source's top result is
+    # another place whose own name carries the word and that outranks the feature
+    # by more than the ambiguity margin: "Lake Charles" is the city at 0.55 over
+    # the lake at 0.18, Shasta Lake town only 0.44 over the reservoir at 0.34
+    # (field test No.13). Stay with the source's order otherwise
+    word, want = _feature_word(query)
+    hit = [r for r in results if _nominatim_kind(r) in want]
+    imp = lambda r: float(r.get("importance") or 0)
+    top_name = str(results[0].get("name") or results[0].get("display_name", "").split(", ")[0])
+    yielded = (len(hit) == 1 and hit[0] is not results[0] and word in re.findall(r"[a-z]+", top_name.lower())
+               and imp(results[0]) - imp(hit[0]) > AMBIGUITY_MARGIN)
+    picked = len(hit) == 1 and not yielded
+    if picked:
+        results = hit + [r for r in results if r is not hit[0]]
     r0 = results[0]
     s, n, w, e = (float(x) for x in r0["boundingbox"])
     lat, lon = float(r0["lat"]), float(r0["lon"])
@@ -384,12 +486,29 @@ def geocode(query: str) -> dict[str, Any]:
     mine = _short(r0.get("display_name", ""))
     others = list(dict.fromkeys(_short(r.get("display_name", "")) for r in results[1:]))
     others = [o for o in others if o != mine][:3]
-    if matched != query or others:
+    seen = {(mine, _nominatim_kind(r0))}
+    cands = [dict(name=out["name"], bbox=[w, s, e, n], source="nominatim", where=mine, kind=_nominatim_kind(r0))]
+    for r in results[1:]:
+        sh = _short(r.get("display_name", ""))
+        if (sh, _nominatim_kind(r)) in seen or len(cands) == 4:
+            continue
+        seen.add((sh, _nominatim_kind(r)))
+        bb = [float(x) for x in r["boundingbox"]]
+        cands.append(dict(name=r.get("display_name", sh), bbox=[bb[2], bb[0], bb[3], bb[1]],
+                          source="nominatim", where=sh, kind=_nominatim_kind(r)))
+        if len(cands) == 2:
+            contender = abs(float(r0.get("importance") or 0) - float(r.get("importance") or 0)) <= AMBIGUITY_MARGIN
+            out["ambiguous"] = contender and not _bboxes_overlap(cands[0]["bbox"], cands[1]["bbox"]) and not picked
+    out["candidates"] = cands
+    if matched != query or others or out.get("ambiguous") or yielded:
         out["geocode_note"] = (
             f"matched {matched!r}"
             + (f" after simplifying {query!r}" if matched != query else "")
+            + (f"; {word!r} is part of the {_nominatim_kind(r0)}'s own name and the source ranks it well above"
+               f" the {_nominatim_kind(hit[0])}, so the {_nominatim_kind(r0)} it is" if yielded else "")
             + (f"; other places share it: {' / '.join(others)}" if others else "")
             + ". Pass a state or country if another was meant"
+            + (". ambiguous: pass the fuller name or a bbox" if out.get("ambiguous") else "")
         )
     # Nominatim returns a NODE for peaks and landmarks, so the bbox collapses to
     # a point (Mount Rainier came back 0.0001 deg wide). A degenerate bbox makes
@@ -422,7 +541,12 @@ def reverse_geocode(lat: float, lon: float) -> dict[str, Any]:
 
 def list_catalogs() -> list[dict[str, str]]:
     """List the STAC catalogs this server can search, with what each is good for."""
-    return [{"catalog": k, **v} for k, v in CATALOGS.items()]
+    return [{"catalog": k, **v} for k, v in CATALOGS.items()] + [{
+        "catalog": "zarr",
+        "notes": "Curated Zarr stores, not STAC: forecast and reanalysis grids (GFS, HRRR, ERA5, MUR SST). "
+        "search_datasets finds them, describe_collection('zarr', id) lists variables, compute_statistics "
+        "reads a clipped number, tile_url_template draws it where the store renders.",
+    }]
 
 
 def _collections(catalog: str) -> list[dict[str, Any]]:
@@ -443,23 +567,104 @@ def _collections(catalog: str) -> list[dict[str, Any]]:
     return out
 
 
-def search_datasets(keywords: str, catalog: str | None = None) -> list[dict[str, Any]]:
+def _collection_gsd(c: dict[str, Any]) -> float | None:
+    """Finest ground sample distance (m) a collection declares, or None."""
+    vals: list[Any] = []
+    summ = c.get("summaries") or {}
+    for v in (summ.get("gsd"), summ.get("eo:gsd")):
+        vals += v if isinstance(v, list) else [v]
+    vals += [a.get("gsd") for a in (c.get("item_assets") or {}).values()]
+    nums = []
+    for v in vals:
+        if isinstance(v, dict):  # a STAC range summary {"minimum", "maximum"}
+            v = v.get("minimum")
+        if isinstance(v, (int, float)) and v > 0:
+            nums.append(float(v))
+    return min(nums) if nums else None
+
+
+def _split_antimeridian(box: list[float]) -> list[list[float]]:
+    # Per RFC 7946 §5.2, a bbox with west > east is the antimeridian-crossing form, not an invalid box
+    if not box or len(box) < 4:
+        return []
+    w, s, e, n = box
+    if w > e:
+        return [
+            [w, s, 180.0, n],
+            [-180.0, s, e, n]
+        ]
+    return [box]
+
+
+def _covers_aoi(c: dict[str, Any], aoi: list[float]) -> bool | str:
+    boxes = ((c.get("extent") or {}).get("spatial") or {}).get("bbox") or []
+    if not boxes:
+        return "unknown"
+    try:
+        aoi_parts = _split_antimeridian(aoi)
+        for b in boxes:
+            b_2d = [b[0], b[1], b[2], b[3]] if len(b) == 4 else [b[0], b[1], b[3], b[4]]
+            for bw, bs, be, bn in _split_antimeridian(b_2d):
+                for pw, ps, pe, pn in aoi_parts:
+                    if bw <= pe and be >= pw and bs <= pn and bn >= ps:
+                        return True
+    except (TypeError, IndexError, ValueError):
+        return "unknown"
+    return False
+
+
+def search_datasets(
+    keywords: str,
+    catalog: str | None = None,
+    bbox: list[float] | None = None,
+    place: str | None = None,
+    max_gsd: float | None = None,
+) -> list[dict[str, Any]]:
     """Find dataset collections matching keywords, across all catalogs or one.
 
     Case-insensitive match against collection id, title, description, and
-    keywords. Returns up to 20 hits with {catalog, id, title, summary}.
+    keywords. Returns up to 20 hits with {catalog, id, title, summary, gsd}.
+    The catalogs are queried concurrently and filtered locally; the pattern
+    follows developmentseed/stac-fastapi-collection-discovery, which does the
+    same federation as a service.
+
+    Pass `bbox` or `place` to keep collections whose declared spatial extent
+    intersects the area (each hit gets `covers_aoi`), and `max_gsd` (metres) to
+    keep collections at that resolution or finer (finest first). Read both
+    honestly: a collection's extent is its overall envelope, not proof of
+    imagery over your area, and `gsd` is what the collection declares. A
+    collection with no declared extent (`covers_aoi: "unknown"`) or no declared
+    gsd (`gsd: null`) is kept and flagged, because missing metadata is not
+    missing coverage or resolution.
 
     An empty result comes back as one record naming the catalogs `searched`,
     with a `note`: "not in these catalogs" is NOT "no such data exists".
     Himawari is the live example: real, and not here.
     """
+    aoi = None
+    if bbox or place:
+        aoi = _resolve_bbox(place, bbox)
+        if isinstance(aoi, dict):
+            return [aoi]
     terms = [t.lower() for t in keywords.split() if t]
-    hits = []
-    for cat in [catalog] if catalog else list(CATALOGS):
+    cats = [c for c in ([catalog] if catalog else list(CATALOGS)) if c != "zarr"]
+    zarr_hits = _zarr_hits(terms) if catalog in (None, "zarr") else []
+    if aoi or max_gsd is not None:
+        for h in zarr_hits:
+            h.setdefault("note", "curated zarr store: place and gsd filters not applied, see its coverage")
+
+    def fetch(cat: str):
         try:
-            cols = _collections(cat)
+            return cat, _collections(cat)
         except Exception as e:
-            hits.append({"catalog": cat, "error": str(e)})
+            return cat, e
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        fetched = list(pool.map(fetch, cats))
+    hits = zarr_hits
+    for cat, cols in fetched:
+        if isinstance(cols, Exception):
+            hits.append({"catalog": cat, "error": str(cols)})
             continue
         for c in cols:
             hay = " ".join(
@@ -470,20 +675,38 @@ def search_datasets(keywords: str, catalog: str | None = None) -> list[dict[str,
                     " ".join(c.get("keywords") or []),
                 ]
             ).lower()
-            if all(t in hay for t in terms):
-                hits.append(
-                    {
-                        "catalog": cat,
-                        "id": c.get("id"),
-                        "title": c.get("title"),
-                        "summary": (c.get("description") or "")[:240],
-                    }
-                )
+            if not all(t in hay for t in terms):
+                continue
+            gsd = _collection_gsd(c)
+            hit = {
+                "catalog": cat,
+                "id": c.get("id"),
+                "title": c.get("title"),
+                "summary": (c.get("description") or "")[:240],
+                "gsd": gsd,
+            }
+            notes = []
+            if aoi:
+                hit["covers_aoi"] = _covers_aoi(c, aoi)
+                if hit["covers_aoi"] is False:
+                    continue
+                if hit["covers_aoi"] == "unknown":
+                    notes.append("no spatial extent declared, may or may not cover the area")
+            if max_gsd is not None:
+                if gsd is not None and gsd > max_gsd:
+                    continue
+                if gsd is None:
+                    notes.append("no gsd declared, resolution unknown (not necessarily coarse)")
+            if notes:
+                hit["note"] = "; ".join(notes)
+            hits.append(hit)
+    if max_gsd is not None:
+        hits.sort(key=lambda h: ("error" not in h, "gsd" in h and h["gsd"] is None, h.get("gsd") or 0))
     if not hits:
         # An empty list is the return most likely to be narrated into "no such
         # data exists". Say what was searched in the return the model cannot
         # skip, not only in the docstring it might (docs/adr-caveats.md)
-        searched = [catalog] if catalog else list(CATALOGS)
+        searched = [catalog] if catalog else [*CATALOGS, "zarr"]
         return [{
             "searched": searched,
             "note": (
@@ -497,7 +720,15 @@ def search_datasets(keywords: str, catalog: str | None = None) -> list[dict[str,
 
 
 def describe_collection(catalog: str, collection_id: str) -> dict[str, Any]:
-    """Get a collection's description, extent, and asset/band layout."""
+    """Get a collection's description, extent, and asset/band layout.
+
+    catalog="zarr" with a store id from search_datasets returns the store:
+    its variables and units, the dims to select on, coverage, chunking, and
+    whether titiler.xyz can draw it (tiles, and tiles_note when it cannot).
+    """
+    if catalog == "zarr":
+        z = ZARR_STORES.get(collection_id)
+        return {"catalog": "zarr", "id": collection_id, **z} if z else {"error": f"unknown zarr store {collection_id!r}; options: {', '.join(ZARR_STORES)}"}
     cached = _collections_cache.get(catalog)
     c = None
     if cached and time.time() - cached[0] < 3600:
@@ -515,6 +746,339 @@ def describe_collection(catalog: str, collection_id: str) -> dict[str, Any]:
         "assets": {
             k: (v.get("title") or v.get("type", "")) for k, v in item_assets.items()
         },
+    }
+
+
+# ---------------------------------------------------------------- zarr stores
+
+# Curated, not discovered: a Zarr store has no search API, so each entry here was
+# opened by hand (2026-10-25). tiles=False says why titiler.xyz cannot render it
+ZARR_STORES: dict[str, dict[str, Any]] = {
+    "noaa-gfs-forecast": {
+        "title": "NOAA GFS forecast (dynamical.org)",
+        "url": "https://data.dynamical.org/noaa/gfs/forecast/latest.zarr",
+        "variables": {
+            "temperature_2m": {"description": "air temperature 2 m above ground", "units": "degree_Celsius"},
+            "relative_humidity_2m": {"description": "relative humidity 2 m above ground", "units": "percent"},
+            "wind_u_10m": {"description": "eastward wind 10 m above ground", "units": "m s-1"},
+            "wind_v_10m": {"description": "northward wind 10 m above ground", "units": "m s-1"},
+            "total_cloud_cover_atmosphere": {"description": "total cloud cover", "units": "percent"},
+        },
+        "sel": "valid_time (when the forecast is for, UTC; picks the latest run and its lead time), or init_time and lead_time",
+        "time_range_note": "the range is rolling: the store holds the newest run only, up to 384 h ahead, and past dates are not in this store",
+        "coverage": "global, 0.25 degrees (~20 km); runs every 6 h, lead 0-384 h (hourly to 120 h, then 3-hourly)",
+        "chunks": "1 run x 210 lead steps x 726 x 726 per chunk: one point costs a quarter-globe chunk",
+        "stats": False,
+        "stats_note": "the data.dynamical.org plain Zarr copy is deprecated (sunset header 2026-10-01) and its last run is 2026-10-25T06Z; the supported copy is Icechunk, the upgrade path",
+        "tiles": False,
+        "tiles_note": "titiler.xyz cannot open this store: the host sends its metadata compressed without a Content-Length and the tiler's reader (obstore) refuses it",
+        "source": "NOAA NWS NCEP GFS, processed by dynamical.org (CC-BY-4.0). The data.dynamical.org Zarr copy is deprecated (sunset 2026-10-01, still served 2026-10-25); the supported copy is Icechunk",
+    },
+    "noaa-hrrr-forecast": {
+        "title": "NOAA HRRR forecast, 2 m temperature (University of Utah)",
+        "url": "s3://hrrrzarr/sfc/{date}/{date}_{hh}z_fcst.zarr",
+        "group": "2m_above_ground/TMP/2m_above_ground",
+        "region": "us-west-1",
+        "variables": {"TMP": {"description": "air temperature 2 m above ground", "units": "K"}},
+        "sel": "valid_time (UTC); the newest 00/06/12/18z run is used, up to 48 h ahead",
+        "time_range_note": "the range is rolling: the store holds the newest run only, up to 48 h ahead, and past dates are not in this store",
+        "coverage": "CONUS only, 3 km Lambert conformal grid",
+        "chunks": "48 steps x 150 x 150 per chunk",
+        "stats": True,
+        "tiles": False,
+        "tiles_note": "titiler.xyz opens the group but fails on its projected x/y coordinates, which are not stored in the group",
+        "source": "NOAA HRRR via the University of Utah Open Source Weather archive (AWS Open Data hrrrzarr)",
+    },
+    "nasa-mur-sst": {
+        "title": "NASA MUR sea surface temperature, 1 km daily",
+        "url": "s3://mur-sst/zarr-v1",
+        "region": "us-west-2",
+        "variables": {"analysed_sst": {"description": "analysed sea surface temperature", "units": "kelvin"}},
+        "sel": "time (daily, 2002-06-01 to 2020-01-20)",
+        "coverage": "global ocean, 0.01 degrees",
+        "chunks": "5 days x 1799 x 3600 per chunk, about 123 MB: one cell costs a whole chunk",
+        "stats": False,
+        "stats_note": "the record ends 2020-01-20, and one cell costs a 123 MB chunk read, so statistics are not offered",
+        "time_dim": "time",
+        "time_range": ["2002-06-01", "2020-01-20"],
+        "tiles": False,
+        "tiles_note": "titiler.xyz does not reach this bucket, and a 123 MB chunk makes a tile read slow",
+        "source": "NASA JPL MUR SST on AWS Open Data (metadata only here)",
+    },
+    "weatherbench2-era5": {
+        "title": "ERA5 reanalysis, 1959 to 2023-01-10, 6-hourly, 1.5 degrees (WeatherBench 2)",
+        "url": "https://storage.googleapis.com/weatherbench2/datasets/era5/1959-2023_01_10-6h-240x121_equiangular_with_poles_conservative.zarr",
+        "variables": {
+            "2m_temperature": {"description": "air temperature 2 m above ground", "units": "K", "rescale": "220,320", "colormap_name": "inferno"},
+            "2m_dewpoint_temperature": {"description": "dewpoint temperature 2 m above ground", "units": "K", "rescale": "220,310", "colormap_name": "inferno"},
+            "10m_wind_speed": {"description": "wind speed 10 m above ground", "units": "m s-1", "rescale": "0,25", "colormap_name": "viridis"},
+            "total_precipitation_6hr": {"description": "total precipitation over the 6 h ending at the step", "units": "m", "rescale": "0,0.02", "colormap_name": "blues"},
+            "mean_sea_level_pressure": {"description": "air pressure reduced to mean sea level", "units": "Pa", "rescale": "95000,105000", "colormap_name": "viridis"},
+            "sea_surface_temperature": {"description": "sea surface temperature (NaN over land)", "units": "K", "rescale": "270,305", "colormap_name": "inferno"},
+        },
+        "variables_note": "the store holds 62 variables; compute_statistics accepts any of them by its store name, and the ones listed here are the ones groundstation has checked and can draw",
+        "sel": "time (UTC, 6-hourly, ends 2023-01-10): history, not a forecast",
+        "coverage": "global, 1.5 degrees (~165 km), longitudes 0 to 360",
+        "chunks": "small time-sliced chunks",
+        "stats": True,
+        "tiles": True,
+        "time_dim": "time",
+        "time_range": ["1959-01-01T00:00", "2023-01-10T18:00"],
+        "source": "ECMWF ERA5 regridded by Google Research WeatherBench 2 (CC-BY-4.0)",
+    },
+}
+_ZARR_X = ("longitude", "lon", "x")
+_ZARR_Y = ("latitude", "lat", "y")
+# ponytail: HRRR's Lambert CRS is written out because the Utah store stores x/y
+# in metres but no CRS; a store with a spatial_ref would drop this
+_HRRR_CRS = "+proj=lcc +lat_0=38.5 +lon_0=-97.5 +lat_1=38.5 +lat_2=38.5 +R=6371229 +units=m +no_defs"
+
+
+def _zarr_hits(terms: list[str]) -> list[dict[str, Any]]:
+    out = []
+    for sid, z in ZARR_STORES.items():
+        vars_ = " ".join(f"{k} {v['description']}" for k, v in z["variables"].items())
+        hay = f"{sid} {z['title']} {vars_} {z['coverage']} {z['source']} zarr".lower()
+        if all(t in hay for t in terms):
+            out.append({"catalog": "zarr", "id": sid, "title": z["title"], "summary": f"{z['coverage']}. Variables: {', '.join(z['variables'])}"})
+    return out
+
+
+def _http_zarr_store(base: str):
+    # ponytail: no listing, and one client that is never closed; a Range answered
+    # with 206 is required, so a server ignoring Range errors instead of returning wrong bytes.
+    # Upgrade: obstore's HTTP store once it accepts a missing Content-Length, or Icechunk
+    # obstore's HTTPStore needs a Content-Length, and Cloudflare-fronted hosts
+    # send compressed JSON without one (data.dynamical.org), so over https read with httpx
+    import httpx
+    from zarr.abc.store import ByteRequest, OffsetByteRequest, RangeByteRequest, Store, SuffixByteRequest
+
+    class HttpStore(Store):
+        supports_writes = supports_deletes = supports_listing = False
+
+        def __init__(self) -> None:
+            super().__init__(read_only=True)
+            self._c = httpx.AsyncClient(timeout=60, follow_redirects=True, headers=UA)
+
+        def __eq__(self, o: object) -> bool:
+            return isinstance(o, HttpStore) and o is self
+
+        async def get(self, key: str, prototype: Any, byte_range: ByteRequest | None = None) -> Any:
+            h = {}
+            if isinstance(byte_range, RangeByteRequest):
+                h["Range"] = f"bytes={byte_range.start}-{byte_range.end - 1}"
+            elif isinstance(byte_range, OffsetByteRequest):
+                h["Range"] = f"bytes={byte_range.offset}-"
+            elif isinstance(byte_range, SuffixByteRequest):
+                h["Range"] = f"bytes=-{byte_range.suffix}"
+            r = await self._c.get(f"{base.rstrip('/')}/{key}", headers=h)
+            if r.status_code in (403, 404):
+                return None
+            r.raise_for_status()
+            if h and r.status_code != 206:
+                raise RuntimeError(f"{base} ignored a Range request (status {r.status_code})")
+            return prototype.buffer.from_bytes(r.content)
+
+        async def get_partial_values(self, prototype: Any, key_ranges: Any) -> list:
+            return [await self.get(k, prototype, r) for k, r in key_ranges]
+
+        async def exists(self, key: str) -> bool:
+            return (await self._c.head(f"{base.rstrip('/')}/{key}")).status_code == 200
+
+        async def set(self, *a: Any, **k: Any) -> None:
+            raise NotImplementedError
+
+        async def delete(self, *a: Any, **k: Any) -> None:
+            raise NotImplementedError
+
+        async def set_if_not_exists(self, *a: Any, **k: Any) -> None:
+            raise NotImplementedError
+
+        async def list(self):
+            return
+            yield
+
+        list_prefix = list_dir = lambda self, prefix: self.list()
+
+    return HttpStore()
+
+
+def _s3_zarr_store(url: str, region: str):
+    from obstore.store import S3Store
+    from zarr.storage import ObjectStore
+
+    bucket, _, prefix = url.removeprefix("s3://").partition("/")
+    return ObjectStore(S3Store(bucket, region=region, skip_signature=True, prefix=prefix), read_only=True)
+
+
+def _open_zarr(store_id: str):
+    """Open a curated store as an xarray Dataset (lazy). HRRR gets its time and x/y from the parent group."""
+    import xarray as xr
+
+    z = ZARR_STORES[store_id]
+    url = z["url"]
+    if "{date}" in url:
+        from obstore.store import S3Store
+        import obstore
+
+        now = dt.datetime.now(dt.timezone.utc)
+        for back in range(0, 48, 6):
+            run = (now - dt.timedelta(hours=back)).replace(minute=0, second=0, microsecond=0)
+            run = run.replace(hour=run.hour // 6 * 6)
+            u = url.format(date=run.strftime("%Y%m%d"), hh=f"{run.hour:02d}")
+            bucket, _, prefix = u.removeprefix("s3://").partition("/")
+            try:
+                obstore.head(S3Store(bucket, region=z["region"], skip_signature=True, prefix=prefix), f"{z['group']}/TMP/.zarray")
+                break
+            except Exception:
+                continue
+        else:
+            raise RuntimeError("no HRRR run found in the last 48 h")
+        st = _s3_zarr_store(u, z["region"])
+        ds = xr.open_zarr(st, group=z["group"], consolidated=False, zarr_format=2, chunks=None)
+        # the group one level up carries the real valid times and x/y; the variable's own group has none
+        up = xr.open_zarr(st, group=z["group"].rsplit("/", 1)[0], consolidated=False, zarr_format=2, chunks=None)
+        return ds.rename(projection_y_coordinate="y", projection_x_coordinate="x").assign_coords(
+            x=up["projection_x_coordinate"].values, y=up["projection_y_coordinate"].values, time=up["time"].values
+        )
+    store = _s3_zarr_store(url, z["region"]) if url.startswith("s3://") else _http_zarr_store(url)
+    return xr.open_zarr(store, consolidated=True, chunks=None)
+
+
+def _zarr_select(da: Any, sel: dict[str, str] | None) -> tuple[Any, dict[str, str], list[str]]:
+    """Pick one 2-D slice: every non-spatial dim resolved by nearest match, and say what snapped."""
+    import numpy as np
+    import pandas as pd
+
+    sel = dict(sel or {})
+    used: dict[str, str] = {}
+    notes: list[str] = []
+    kinds = {"M": pd.Timestamp, "m": pd.Timedelta}
+    label = lambda v: str(kinds.get(v.dtype.kind, lambda x: x)(v))  # noqa: E731
+    valid = sel.pop("valid_time", None)
+    if valid and "time" in da.dims:
+        sel["time"] = valid
+    for dim in [d for d in da.dims if d not in _ZARR_X + _ZARR_Y]:
+        want = sel.get(dim)
+        if dim == "lead_time" and valid:
+            want = pd.Timestamp(valid) - pd.Timestamp(used["init_time"])
+        coord = da[dim].values
+        if want is None or want == "latest":
+            idx = len(coord) - 1 if dim in ("init_time", "time") else 0
+        else:
+            if coord.dtype.kind == "M":
+                t = pd.Timestamp(want)
+                target = (t.tz_convert(None) if t.tzinfo else t).to_datetime64()
+            elif coord.dtype.kind == "m":
+                target = (want if isinstance(want, pd.Timedelta) else pd.Timedelta(hours=float(want))).to_timedelta64()
+            else:
+                target = float(want)
+            idx = int(np.abs(coord - target).argmin())
+            if coord[idx] != target:
+                gap = pd.Timedelta(abs(coord[idx] - target)) if coord.dtype.kind in "Mm" else abs(coord[idx] - target)
+                if coord.dtype.kind in "Mm" and len(coord) > 1 and gap > pd.Timedelta(coord[1] - coord[0]):
+                    raise ValueError(
+                        f"{dim} {want} is {gap} from the nearest {dim} in this store ({label(coord[idx])}), more than one step ({pd.Timedelta(coord[1] - coord[0])}); "
+                        f"the store holds {dim} {label(coord[0])} to {label(coord[-1])}"
+                    )
+                edge = " (outside the store's range)" if idx in (0, len(coord) - 1) and (target < coord[0] or target > coord[-1]) else ""
+                notes.append(f"{dim} {want} snapped to {label(coord[idx])}, off by {gap}{edge}")
+        da = da.isel({dim: idx})
+        used[dim] = label(coord[idx])
+    if valid and "init_time" in used:
+        used["valid_time"] = str((pd.Timestamp(used["init_time"]) + pd.Timedelta(used["lead_time"])))
+    return da, used, notes
+
+
+def _clip_reduce(da: Any, bbox: list[float], crs: str | None = None) -> dict[str, Any]:
+    """Clip a 2-D DataArray to bbox [w, s, e, n] (degrees) and reduce it to the COG-path stats."""
+    import numpy as np
+
+    xn = next(d for d in da.dims if d in _ZARR_X)
+    yn = next(d for d in da.dims if d in _ZARR_Y)
+    w, s, e, n = bbox
+    if crs:
+        from rasterio.warp import transform_bounds
+
+        w, s, e, n = transform_bounds("EPSG:4326", crs, w, s, e, n)
+    elif float(da[xn].max()) > 180:
+        w, e = w % 360, e % 360
+    xs, ys = da[xn].values, da[yn].values
+    cell = abs(float(xs[1] - xs[0]))
+    outside = {"error": "bbox outside the store's coverage"}
+    # ponytail: a bbox straddling the prime meridian on a 0..360 grid is refused, not split into 2 reads
+    if w > e or (w + e) / 2 < xs.min() - cell or (w + e) / 2 > xs.max() + cell or (s + n) / 2 < ys.min() - cell or (s + n) / 2 > ys.max() + cell:
+        return outside
+    sub = da.sel({xn: slice(w, e), yn: slice(s, n) if ys[0] < ys[-1] else slice(n, s)})
+    caveats = []
+    if sub.size == 0:
+        sub = da.sel({xn: (w + e) / 2, yn: (s + n) / 2}, method="nearest")
+        caveats.append("bbox is smaller than one grid cell: the value is the nearest cell, not an area statistic")
+    v = np.atleast_1d(sub.values).astype(float).ravel()
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return {"error": "no valid values in the bbox for this selection (outside the grid, or the model run is not written yet)"}
+    if v.size <= 4:
+        caveats.append(f"coarse grid: only {v.size} cell(s) (cell size {cell:g}{'' if crs else ' deg'}) fall in the bbox, so min/max/mean are close to one model value, not a local average")
+    p2, p98 = np.percentile(v, [2, 98])
+    return {
+        "stats": {
+            "min": float(v.min()), "max": float(v.max()), "mean": float(v.mean()), "median": float(np.median(v)),
+            "std": float(v.std()), "percentile_2": float(p2), "percentile_98": float(p98), "count": int(v.size),
+        },
+        "caveats": caveats,
+    }
+
+
+def _zarr_time_refusal(store_id: str, z: dict[str, Any], sel: dict[str, str] | None) -> str | None:
+    """Words for an asked time outside the store's fixed time_range, else None."""
+    lo, hi = z.get("time_range") or (None, None)
+    asked = (sel or {}).get(z.get("time_dim", "time")) or (sel or {}).get("valid_time")
+    if not (asked and lo):
+        return None
+    try:
+        t = dt.datetime.fromisoformat(asked.replace("Z", "")).replace(tzinfo=None)
+    except ValueError:
+        return None
+    if dt.datetime.fromisoformat(lo) <= t <= dt.datetime.fromisoformat(hi):
+        return None
+    return f"time {asked} is outside {store_id}'s range ({lo} to {hi})"
+
+
+def _zarr_statistics(store_id: str, variable: str, bbox: list[float] | None, sel: dict[str, str] | None) -> dict[str, Any]:
+    z = ZARR_STORES.get(store_id)
+    if not z:
+        return {"error": f"unknown zarr store {store_id!r}; options: {', '.join(ZARR_STORES)}"}
+    if refusal := _zarr_time_refusal(store_id, z, sel):
+        return {"error": f"{refusal}; no statistics returned"}
+    if not z["stats"]:
+        return {"error": f"statistics are not offered for {z['title']}: {z.get('stats_note') or z['chunks']}"}
+    if not bbox:
+        return {"error": "bbox [w, s, e, n] is required: a Zarr store is a whole grid, so unclipped statistics would describe the globe or the continent"}
+    ds = _open_zarr(store_id)
+    if variable in z["variables"]:
+        meta = z["variables"][variable]
+    elif variable in ds.data_vars:
+        a = ds[variable].attrs
+        meta = {"description": a.get("long_name") or variable, "units": a.get("units") or "unknown"}
+    else:
+        return {"error": f"unknown variable {variable!r}; curated options: {', '.join(z['variables'])}; the store holds {len(ds.data_vars)} variables"}
+    try:
+        da, used, notes = _zarr_select(ds[variable], sel)
+    except ValueError as e:
+        return {"error": "; ".join(x for x in (f"{z['title']}: {e}", z.get("time_range_note"), "no statistics returned") if x)}
+    r = _clip_reduce(da, bbox, _HRRR_CRS if "{date}" in z["url"] else None)
+    if r.get("error", "").startswith("bbox outside"):
+        return {"error": f"bbox outside {z['title']}'s coverage ({z['coverage']})"}
+    if "error" in r:
+        return r | {"sel": used}
+    return {
+        variable: r["stats"],
+        "clipped_to": bbox,
+        "dataset": f"{z['title']}: {variable} ({meta['description']}), {meta['units']}",
+        "units": meta["units"],
+        "sel": used,
+        "caveats": notes + r["caveats"],
     }
 
 
@@ -560,17 +1124,7 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
         **({"read_note": read_note} if read_note else {}),
     }
 
-def _split_antimeridian(box: list[float]) -> list[list[float]]:
-    # Per RFC 7946 §5.2, a bbox with west > east is the antimeridian-crossing form, not an invalid box
-    if not box or len(box) < 4:
-        return []
-    w, s, e, n = box
-    if w > e:
-        return [
-            [w, s, 180.0, n],
-            [-180.0, s, e, n]
-        ]
-    return [box]
+
 
 
 def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float | None:
@@ -639,7 +1193,7 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     elif cov(clearest) >= cov(best) - RECOMMEND_COVERAGE_TIE and len(near) > 1:
         # the clearest scene is inside both tie bands, so freshness decided
         reason = (
-            f"{bc:.1f}% cloud, covers {cov(best):.1f}% of the area, and newest of {len(near)} near-equal scenes; "
+            f"{'no cloud figure' if bc is None else f'{bc:.1f}% cloud'}, covers {cov(best):.1f}% of the area, and newest of {len(near)} near-equal scenes; "
             f"the clearest ({cloud(clearest):.1f}% cloud) is from {(clearest.get('datetime') or '')[:10]}"
         )
     else:
@@ -651,6 +1205,113 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     if all_cloudy:
         reason = f"every scene is over {RECOMMEND_MAX_CLOUD:.0f}% cloud, so this is the least bad: " + reason
     return {"id": best["id"], "covers_aoi_pct": cov(best), "cloud_cover": bc, "reason": reason}
+
+
+def _is_archive(catalog: str) -> bool:
+    return catalog not in CATALOGS and re.split(r"[?#]", catalog)[0].lower().endswith((".parquet", ".geoparquet"))
+
+
+def _search_archive(href: str, body: dict[str, Any], max_cloud_cover: float | None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    # rustac's search is async-first; search_sync works with or without a running
+    # event loop (checked inside asyncio.run), and its `query` is not implemented,
+    # so cloud cover is filtered here
+    import rustac
+
+    kw = {k: body[k] for k in ("bbox", "datetime") if body.get(k)}
+    if body.get("collections"):
+        kw["collections"] = body["collections"]
+    # ponytail: loads every match then sorts and slices in Python, and scans the
+    # whole archive for its time range; fine to ~1e5 items, then push sortby and
+    # a max_items into rustac's duckdb search
+    # rustac reads west > east as a plain box, so an antimeridian AOI is two searches
+    feats, seen = [], set()
+    for box in _split_antimeridian(kw["bbox"]) if "bbox" in kw else [None]:
+        for f in rustac.search_sync(href, **{**kw, **({"bbox": box} if box else {})}):
+            if f["id"] not in seen:
+                seen.add(f["id"])
+                feats.append(f)
+    for f in feats:  # rustac writes +00:00 where the API says Z; keep one shape
+        if f["properties"].get("datetime"):
+            f["properties"]["datetime"] = f["properties"]["datetime"].replace("+00:00", "Z")
+    if max_cloud_cover is not None:
+        # the API's query lte drops items with no cloud value; match it
+        feats = [f for f in feats if f["properties"].get("eo:cloud_cover") is not None and f["properties"]["eo:cloud_cover"] <= max_cloud_cover]
+    feats.sort(key=lambda f: f["properties"].get("datetime") or "", reverse=True)
+    everything = rustac.search_sync(href)
+    stamps = sorted(f["properties"]["datetime"].replace("+00:00", "Z") for f in everything if f["properties"].get("datetime"))
+    self_url = next((l["href"] for l in (everything[0].get("links") or []) if l.get("rel") == "self"), "") if everything else ""
+    source = next((k for k, v in CATALOGS.items() if self_url.startswith(v["stac"])), None)
+    path = Path(href)
+    return feats[: body["limit"]], {
+        "href": href,
+        "written": dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).date().isoformat() if path.exists() else None,
+        "datetime_range": [stamps[0], stamps[-1]] if stamps else None,
+        "note": "a snapshot of the catalog as of the written date, not the live catalog: newer scenes may exist. "
+        "Analysis of these items (preview_item, compute_statistics, render_map) goes through the live catalog: "
+        f"call them with catalog '{source or 'the catalog it was written from'}' and the item id.",
+    }
+
+
+def write_archive(
+    catalog: str,
+    collections: list[str],
+    bbox: list[float] | None = None,
+    place: str | None = None,
+    datetime_range: str | None = None,
+    out_path: str | None = None,
+    limit: int = 500,
+    max_cloud_cover: float | None = None,
+) -> dict[str, Any]:
+    """Cache a live STAC search as a stac-geoparquet archive.
+
+    Pages the catalog's search (up to `limit` items) and writes the items with
+    rustac. Pass the returned path as `catalog` to search_imagery to search the
+    snapshot with the network off. max_cloud_cover filters the search the way
+    search_imagery's does. Returns path, count, datetime_range, written (UTC date).
+    """
+    import rustac
+
+    if out_path and not out_path.lower().endswith((".parquet", ".geoparquet")):
+        return {"error": "out_path must end in .parquet or .geoparquet"}
+    where = place
+    bbox = _resolve_bbox(place, bbox)
+    if isinstance(bbox, dict):
+        return bbox
+    if not out_path:
+        out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
+        slug = slugify("-".join([*collections, where or "-".join(f"{x:.2f}" for x in bbox)]))
+        out_path = str(out_dir / "archives" / f"{slug}.parquet")
+    body: dict[str, Any] = {"collections": collections, "bbox": bbox, "limit": min(limit, 100)}
+    if datetime_range:
+        body["datetime"] = datetime_range
+    if max_cloud_cover is not None:
+        body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
+    url = f"{CATALOGS[catalog]['stac']}/search"
+    feats: list[dict[str, Any]] = []
+    method = "POST"
+    while url and len(feats) < limit:
+        r = _client.get(url) if method == "GET" else _client.post(url, json=body)
+        r.raise_for_status()
+        page = r.json()
+        feats += page.get("features", [])
+        nxt = next((l for l in page.get("links", []) if l.get("rel") == "next"), None)
+        if nxt and page.get("features"):
+            url, method = urljoin(url, nxt["href"]), (nxt.get("method") or "GET").upper()
+            body = {**body, **(nxt.get("body") or {})} if nxt.get("merge") else nxt.get("body", body)
+        else:
+            url = None
+    feats = feats[:limit]
+    if not feats:
+        return {"error": "the search returned no items, so no archive was written"}
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    rustac.write_sync(out_path, feats)
+    stamps = sorted(f["properties"]["datetime"] for f in feats if f["properties"].get("datetime"))
+    return {
+        "path": out_path,
+        "count": len(feats),
+        "datetime_range": [stamps[0], stamps[-1]] if stamps else None,
+        "written": dt.datetime.now(dt.timezone.utc).date().isoformat(),
+    }
 
 
 def search_imagery(
@@ -678,6 +1339,10 @@ def search_imagery(
     opposite directions, and sorting on one of them alone picks wrong.
     An item carrying read_note cannot be read by the tiler; it is listed so
     the gap is visible, and never recommended or put in a coverage set.
+    catalog may also be a stac-geoparquet archive (a path or URL ending in
+    .parquet, e.g. one made by write_archive): it is searched with the same
+    filters, offline for a local file, and the result carries an `archive`
+    block (href, written date, time range) because it is a snapshot.
     """
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
@@ -692,17 +1357,23 @@ def search_imagery(
         body["datetime"] = datetime_range
     if max_cloud_cover is not None:
         body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
-    base = CATALOGS[catalog]["stac"]
-    r = _client.post(f"{base}/search", json=body)
-    if r.status_code == 400 and "sortby" in body:
-        body.pop("sortby")  # some APIs reject sortby; retry without
+    archive = None
+    if _is_archive(catalog):
+        feats, archive = _search_archive(catalog, body, max_cloud_cover)
+    else:
+        base = CATALOGS[catalog]["stac"]
         r = _client.post(f"{base}/search", json=body)
-    r.raise_for_status()
-    feats = r.json().get("features", [])
+        if r.status_code == 400 and "sortby" in body:
+            body.pop("sortby")  # some APIs reject sortby; retry without
+            r = _client.post(f"{base}/search", json=body)
+        r.raise_for_status()
+        feats = r.json().get("features", [])
     items = [_compact_item(catalog, f) for f in feats]
     for it in items:
         it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
     result = {"bbox": bbox, "count": len(feats), "items": items}
+    if archive:
+        result["archive"] = archive
     readable = [it for it in items if "read_note" not in it]
     rec = _recommend(readable)
     if rec:
@@ -779,24 +1450,62 @@ def preview_item(
 
     bbox [w, s, e, n] crops the preview to that area (the tiler's part
     endpoint) instead of rendering the whole scene — pass the AOI so the
-    subject fills the frame and scene-edge nodata stays out. Ignored on
-    Planetary Computer, whose previews are pre-rendered whole-scene PNGs.
+    subject fills the frame and scene-edge nodata stays out. On Planetary
+    Computer, passing assets or expression (with any of rescale,
+    colormap_name, bbox) renders through the data API's item endpoints; with
+    none of them you get the collection's pre-rendered whole-scene preview.
+    When that fallback cannot honor something you passed, the result lists
+    it under `dropped`.
     """
+    asked = [k for k, v in (("assets", assets), ("expression", expression), ("rescale", rescale),
+                            ("colormap_name", colormap_name), ("bbox", bbox)) if v]
     part = ",".join(str(round(v, 6)) for v in bbox) if bbox else ""
     assets = assets or ([] if expression else _default_assets(collection_id))
     if expression and not rescale:
         rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
     backend = CATALOGS[catalog]["raster"]
     if backend == "pc":
+        # the stored rendered_preview is whole-scene and takes no parameters;
+        # asked-for ones go to the data API's item endpoints instead
+        if asked and (assets or expression):
+            if expression and not assets:
+                assets = _expression_idents(expression)
+            params = [("collection", collection_id), ("item", item_id)] + [("assets", a) for a in assets]
+            if expression:
+                params += [("expression", expression), ("asset_as_band", "true")]
+            if rescale:
+                params.append(("rescale", rescale))
+            if colormap_name:
+                params.append(("colormap_name", colormap_name))
+            params.append(("max_size", str(max_size)))
+            if part:
+                params.append(("dst_crs", "epsg:3857"))  # same mercator crop as the other backends
+            path = f"bbox/{part}.png" if part else "preview.png"
+            return {
+                "preview_url": "https://planetarycomputer.microsoft.com/api/data/v1/item/"
+                + f"{path}?{httpx.QueryParams(params)}",
+                "backend": "pc-data-api",
+            }
         item = _get_json(
             f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
         )
         rp = item.get("assets", {}).get("rendered_preview", {}).get("href")
         if rp:
-            return {"preview_url": rp, "backend": "pc-data-api"}
+            out = {"preview_url": rp, "backend": "pc-data-api"}
+            if asked:
+                out["dropped"] = [
+                    {"param": k, "why": "no assets known for this collection, so the pre-rendered "
+                     "whole-scene preview was used (pass assets to apply it)"}
+                    for k in asked
+                ]
+            return out
         return {"error": "No rendered_preview asset on this Planetary Computer item"}
     if backend == "veda":
+        if expression and not assets:
+            assets = _expression_idents(expression)
         params = [("assets", a) for a in assets or ["cog_default"]]
+        if expression:
+            params += [("expression", expression), ("asset_as_band", "true")]
         if rescale:
             params.append(("rescale", rescale))
         if colormap_name:
@@ -847,11 +1556,13 @@ def compute_statistics(
     assets: list[str] | None = None,
     aoi_geojson: dict[str, Any] | None = None,
     bbox: list[float] | None = None,
+    sel: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Compute pixel statistics (min/max/mean/std/percentiles) for a STAC item.
 
     Same shape clipped or not: {band_or_expression: {min, max, mean, std, ...}},
-    plus clipped_to when an AOI was applied and extent_note when it was not.
+    plus clipped_to when an AOI was applied and extent_note when it was not,
+    and scaling_note when the item's raster:bands carry a scale or offset (the numbers are raw).
 
     expression is band math over asset names, e.g. "(nir-red)/(nir+red)" for
     NDVI on Sentinel-2 (Earth Search asset names; Planetary Computer uses band
@@ -862,7 +1573,15 @@ def compute_statistics(
     the shape callers actually hold. geocode and search_imagery hand back a
     bbox, never a Feature, so unclipped whole-scene stats are usually just the
     cost of the conversion. Pass one of the two and the extent_note goes away.
+
+    catalog="zarr": collection_id is a store id (search_datasets), item_id the
+    variable, bbox required, sel picks the slice by nearest match, e.g.
+    {"valid_time": "2026-10-26T21:00"} (UTC) on a forecast store. Returns
+    {variable: stats, clipped_to, dataset, units, sel (what was actually
+    used), caveats}: read the caveats before quoting the number.
     """
+    if catalog == "zarr":
+        return _zarr_statistics(collection_id, item_id, bbox, sel)
     if bbox and not aoi_geojson:
         aoi_geojson = _bbox_feature(bbox)
     backend = CATALOGS[catalog]["raster"]
@@ -874,7 +1593,8 @@ def compute_statistics(
         else:
             expression, assets = _expression_to_bands(expression, assets)
             params.append(("expression", expression))
-    for a in assets or _default_assets(collection_id) or ["visual"]:
+    used = assets or _default_assets(collection_id) or ["visual"]
+    for a in used:
         params.append(("assets", a))
     if backend == "pc":
         base = "https://planetarycomputer.microsoft.com/api/data/v1/item/statistics"
@@ -888,6 +1608,19 @@ def compute_statistics(
         r = _client.post(base, params=params, json=aoi_geojson, timeout=60)
     else:
         r = _client.get(base, params=params, timeout=60)
+    retried = False
+    if r.status_code == 429 and backend == "titiler-xyz":
+        # one retry on the other tiler, never a loop: the shared tiler is a courtesy
+        href = None if expression or len(used) != 1 else _asset_href(catalog, collection_id, item_id, used[0])
+        if href:
+            retried = True
+            base, params = f"{EOAPI}/external/statistics", [("max_size", "512"), ("url", href)]
+            if aoi_geojson:
+                r = _client.post(base, params=params, json=aoi_geojson, timeout=60)
+            else:
+                r = _client.get(base, params=params, timeout=60)
+        if r.status_code == 429:
+            return {"error": "titiler.xyz rate-limited (429); try again later or set GROUNDSTATION_TITILER"}
     if r.status_code >= 500 and backend not in ("pc", "veda"):
         # a traceback tells an agent nothing. Look at the item only on failure,
         # so the working path costs no extra request
@@ -920,10 +1653,14 @@ def compute_statistics(
     # TiTiler names the bands of a plain asset request b1..bN. Field test No.8:
     # a caller asking for "vv" got "b1" back and had to guess. Give the asset
     # its name back when the mapping is one to one and no expression is involved
-    if assets and not expression and isinstance(out, dict):
-        for i, a in enumerate(assets, 1):
+    # (the eoapi.dev retry always answers b1..bN, so it renames by the asset it was sent)
+    names = assets or (used if retried else None)
+    if names and not expression and isinstance(out, dict):
+        for i, a in enumerate(names, 1):
             if f"b{i}" in out and a not in out:
                 out[a] = out.pop(f"b{i}")
+    if retried and isinstance(out, dict):
+        out["note"] = "titiler.xyz rate-limited; statistics from raster.eoapi.dev"
     try:
         item = _get_json(
             f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
@@ -948,12 +1685,22 @@ def compute_statistics(
         # teaching this tool any one collection's units (MODIS LST is
         # 0.02 K per DN — the caller cannot guess that from raw values).
         # Both paths: a clipped number in the wrong unit is still wrong
-        for a in item.get("assets", {}).values():
+        groups: dict[tuple, dict[str, Any]] = {}
+        for key, a in item.get("assets", {}).items():
             for band in a.get("raster:bands", []) or []:
                 if band.get("scale") is not None or band.get("offset") is not None:
-                    out.setdefault("band_scaling", []).append(
-                        {k: band[k] for k in ("name", "scale", "offset", "unit") if k in band}
-                    )
+                    g = {k: band[k] for k in ("scale", "offset", "unit") if k in band}
+                    groups.setdefault(tuple(sorted(g.items())), {**g, "bands": []})["bands"].append(key)
+        if groups:
+            out["band_scaling"] = list(groups.values())
+            raw = [g for g in groups.values() if g.get("scale") not in (None, 1) or g.get("offset") not in (None, 0)]
+            if raw:
+                g = max(raw, key=lambda g: len(g["bands"]))
+                out["scaling_note"] = (
+                    f"values are raw digital numbers: the item's raster:bands give scale {g.get('scale')} "
+                    f"and offset {g.get('offset')} on {len(g['bands'])} bands (physical = raw * scale + offset), "
+                    "and nothing here applies them; with an expression a non-zero offset shifts the index too"
+                )
     except Exception:
         pass
     return out
@@ -967,14 +1714,38 @@ def tile_url_template(
     rescale: str | None = None,
     colormap_name: str | None = None,
     expression: str | None = None,
+    sel: dict[str, str] | None = None,
 ) -> str:
     """XYZ tile URL template ({z}/{x}/{y}) for a STAC item, for web maps.
+
+    catalog="zarr": item_id is the variable and sel picks the slice, e.g.
+    {"time": "2023-01-10T12:00"}; stores that titiler.xyz cannot draw return
+    their tiles_note instead of a template. Pass the template to render_map
+    as a {"type": "raster", "tiles": ...} layer.
 
     For index layers (NDVI etc.) pass expression over asset names, e.g.
     "(nir-red)/(nir+red)" with colormap_name="rdylgn" — supported on
     earth-search; ignored for veda/planetary-computer. Index expressions
     default to rescale="-1,1" (without a rescale they render blank).
     """
+    if catalog == "zarr":
+        z = ZARR_STORES.get(collection_id)
+        if not z:
+            return f"unknown zarr store {collection_id!r}; options: {', '.join(ZARR_STORES)}"
+        if refusal := _zarr_time_refusal(collection_id, z, sel):
+            return f"{refusal}; pick a time inside it, no tile URL returned"
+        if not z["tiles"]:
+            return z["tiles_note"]
+        v = z["variables"].get(item_id)
+        if v is None:
+            return f"unknown variable {item_id!r}; options: {', '.join(z['variables'])}"
+        params = [("url", z["url"]), ("variable", item_id)]
+        params += [("sel", f"{z['time_dim'] if k == 'valid_time' else k}=nearest::{x}") for k, x in (sel or {}).items()]
+        if rescale or v.get("rescale"):
+            params.append(("rescale", rescale or v["rescale"]))
+        if colormap_name or v.get("colormap_name"):
+            params.append(("colormap_name", colormap_name or v["colormap_name"]))
+        return f"{TITILER}/zarr/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + str(httpx.QueryParams(params))
     # with an expression, assets must be the expression's bands, never defaults
     assets = assets or ([] if expression else _default_assets(collection_id))
     if expression and not rescale:
@@ -1036,6 +1807,67 @@ def tile_url_template(
 _BRAND_CSS = """  :root { --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --rule: #dedad4; --paper: #f7f4ef;
     --k-place: #7a5c2e; --k-catalog: #1d4e8f; --k-data: #6b4c8f; --k-pixels: #CF3F02; --k-draw: #2a5c45;
     --k-orbit: #4a4440; }"""
+
+# Categorical colormaps the tools can explain: colormap_name -> legend. The
+# WorldCover colours are the tiler's own classmap
+# (planetarycomputer.microsoft.com/api/data/v1/legend/classmap/esa-worldcover)
+LEGENDS: dict[str, dict] = {
+    "esa-worldcover": {"title": "ESA WorldCover 2021", "classes": [
+        (10, "Tree cover", "#006400"), (20, "Shrubland", "#ffbb22"), (30, "Grassland", "#ffff4c"),
+        (40, "Cropland", "#f096ff"), (50, "Built-up", "#fa0000"), (60, "Bare / sparse vegetation", "#b4b4b4"),
+        (70, "Snow and ice", "#f0f0f0"), (80, "Permanent water bodies", "#0064c8"),
+        (90, "Herbaceous wetland", "#0096a0"), (95, "Mangroves", "#00cf75"), (100, "Moss and lichen", "#fae6a0"),
+    ]},
+}
+
+
+def _legends_for(layers: list[dict[str, Any]], colormap_name: str | None = None) -> list[dict[str, Any]]:
+    """One legend per distinct known categorical colormap, in layer order."""
+    names = [colormap_name] + [l.get("colormap_name") for l in layers]
+    seen = dict.fromkeys(n for n in names if n in LEGENDS)
+    return [
+        {"colormap_name": n, "title": LEGENDS[n]["title"],
+         "classes": [{"value": v, "name": nm, "color": c} for v, nm, c in LEGENDS[n]["classes"]]}
+        for n in seen
+    ]
+
+
+def _legend_map_html(legends: list[dict[str, Any]]) -> str:
+    if not legends:
+        return ""
+    boxes = "".join(
+        f'<details class="legend" open><summary>{escape(g["title"])}</summary>'
+        + "".join(f'<div><i style="background:{c["color"]}"></i>{escape(c["name"])}</div>' for c in g["classes"])
+        + "</details>"
+        for g in legends
+    )
+    # phone rule: collapsed at 390 px and capped to 40vh with its own scroll, so it never covers the map
+    return f"""<div id="legends" aria-label="Legend">{boxes}</div>
+<style>
+  #legends {{ position: absolute; bottom: 60px; right: 12px; z-index: 2; display: flex; flex-direction: column;
+    gap: 6px; max-width: min(230px, 60vw); max-height: 40vh; overflow-y: auto;
+    font: 12px/1.35 "Roboto", system-ui, sans-serif; }}
+  .legend {{ background: rgba(247,244,239,.96); color: var(--ink); border-top: 3px solid var(--accent);
+    border-radius: 0 0 8px 8px; padding: 6px 10px; box-shadow: 0 2px 10px rgba(0,0,0,.18); }}
+  .legend summary {{ cursor: pointer; font-weight: 700; }}
+  .legend div {{ display: flex; align-items: center; gap: 7px; margin: 3px 0; }}
+  .legend i {{ flex: none; width: 14px; height: 14px; border: 1px solid rgba(0,0,0,.35); border-radius: 3px; }}
+  .clean #legends {{ display: none !important; }}
+</style>
+<script>
+  if (innerWidth <= 500) document.querySelectorAll(".legend").forEach(d => d.removeAttribute("open"));
+</script>
+"""
+
+
+def _legend_card_html(legends: list[dict[str, Any]]) -> str:
+    return "".join(
+        f'<div class="legend"><b>{escape(g["title"])}</b>'
+        + "".join(f'<span><i style="background:{c["color"]}"></i>{escape(c["name"])}</span>' for c in g["classes"])
+        + "</div>"
+        for g in legends
+    )
+
 
 # the stack layer chunk — injected into _MAP_TEMPLATE only when stack_layer=True,
 # so default artifacts carry zero extra bytes
@@ -1121,18 +1953,27 @@ __BRAND__
     display: flex; align-items: center; justify-content: center; font: 13px system-ui; }
   .side-label { position: absolute; bottom: 52px; z-index: 2; background: rgba(247,244,239,.96); color: var(--ink);
     padding: 4px 11px; border-radius: 6px; font: 12px "Roboto", system-ui, sans-serif; box-shadow: 0 1px 5px rgba(0,0,0,.15); }
+  #tl { position: absolute; bottom: 64px; left: 50%; transform: translateX(-50%); z-index: 3;
+    display: flex; align-items: center; gap: 8px; background: rgba(247,244,239,.96); color: var(--ink);
+    padding: 6px 12px; border-radius: 8px; font: 14px "Roboto", system-ui, sans-serif; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+  #tl button { font: inherit; color: inherit; background: none; border: 1px solid var(--mid); border-radius: 6px;
+    min-width: 32px; padding: 2px 8px; cursor: pointer; }
+  #tl span { min-width: 7em; text-align: center; }
   /* #clean = snapshot mode for postcard bakes: map chrome off, story on
      (divider + side labels stay; MapLibre's attribution control stays) */
-  .clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack,
+  .clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack, .clean #tl,
   .clean .maplibregl-ctrl-top-right { display: none !important; }
 </style>
 <script>if (location.hash === "#clean") document.documentElement.classList.add("clean");</script>
 </head><body>
 <div id="map"></div>
-<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div></div>
+__TLBAR__
+<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div>__STACMAP__</div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
 __STACK__
+__LEGEND__
 <script>
+const esc = s => String(s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
 const LAYERS = __LAYERS__;
 const BBOX = __BBOX__;
 // Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
@@ -1142,12 +1983,30 @@ const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 
+// CloudFront on titiler.xyz caches the CORS header with the tile and does not
+// vary by origin, so the URL must differ per origin or a cached tile is refused
+const originKey = (u) => u + (u.includes("?") ? "&" : "?") + "o=" + (location.origin === "null" ? "sandbox" : location.origin.replace(/[^a-z0-9]/gi, "").slice(-16));
+
 function addLayerTo(m, l, i) {
   const id = "layer" + i;
   if (l.type === "raster") {
-    m.addSource(id, { type: "raster", tiles: [l.tiles], tileSize: 256,
+    m.addSource(id, { type: "raster", tiles: [originKey(l.tiles)], tileSize: 256,
       ...(l.bounds ? { bounds: l.bounds } : {}) });
     m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": l.opacity ?? 1 } });
+    if (l.fallback_tiles) {
+      // titiler.xyz rate-limits (429): swap this source to raster.eoapi.dev, once.
+      // If titiler.xyz 429 lacks CORS headers, the browser reports status 0 / network error.
+      let swapped = false;
+      m.on("error", (e) => {
+        if (swapped || e.sourceId !== id || !e.error) return;
+        const s = e.error.status;
+        if (s !== 429 && s !== 0 && s !== undefined) return console.error(e.error);
+        swapped = true;
+        m.getSource(id).setTiles([originKey(l.fallback_tiles)]);
+        const lab = document.getElementById("lbl" + id);
+        if (lab) lab.textContent += " (via raster.eoapi.dev)";
+      });
+    }
   } else if (l.type === "geojson") {
     m.addSource(id, { type: "geojson", data: l.data });
     m.addLayer({ id: id + "-fill", type: "circle", source: id,
@@ -1160,7 +2019,7 @@ function addLayerTo(m, l, i) {
     m.on("click", id + "-fill", (e) => {
       const p = e.features[0].properties;
       new maplibregl.Popup().setLngLat(e.lngLat)
-        .setHTML("<b>" + (p.title || p.name || "") + "</b><br>" + (p.description || p.date || ""))
+        .setHTML("<b>" + esc(p.title || p.name || "") + "</b><br>" + esc(p.description || p.date || ""))
         .addTo(m);
     });
   }
@@ -1174,15 +2033,16 @@ if (COMPARE && rasters.length === 2) {
   // comparison: two synced maps, right one on top clipped left of a draggable divider
   document.getElementById("map").insertAdjacentHTML("afterend",
     `<div id="mapL"></div><div id="divider"><div class="knob">◂▸</div></div>
-     <div class="side-label" style="left:12px">◂ ${rasters[1].name}</div>
-     <div class="side-label" style="right:12px">${rasters[0].name} ▸</div>`);
+     <div class="side-label" style="left:12px">◂ ${esc(rasters[1].name)}</div>
+     <div class="side-label" style="right:12px">${esc(rasters[0].name)} ▸</div>`);
   const mapR = new maplibregl.Map({ container: "map", ...MAP_OPTS });
   const mapL = new maplibregl.Map({ container: "mapL", style: BASE_STYLE(),
     bounds: MAP_OPTS.bounds, fitBoundsOptions: MAP_OPTS.fitBoundsOptions });
   window.gsMaps = [mapL, mapR];  // exposed for scripted screenshots and checks
+  window.gsPending = 2;  // load handlers still to add their layers; a snapshot waits for 0
   mapR.addControl(new maplibregl.NavigationControl());
-  mapR.on("load", () => { addLayerTo(mapR, rasters[0], rasters[0].i); geojsons.forEach(g => addLayerTo(mapR, g, g.i)); });
-  mapL.on("load", () => { addLayerTo(mapL, rasters[1], rasters[1].i); geojsons.forEach(g => addLayerTo(mapL, g, g.i)); });
+  mapR.on("load", () => { addLayerTo(mapR, rasters[0], rasters[0].i); geojsons.forEach(g => addLayerTo(mapR, g, g.i)); window.gsPending--; });
+  mapL.on("load", () => { addLayerTo(mapL, rasters[1], rasters[1].i); geojsons.forEach(g => addLayerTo(mapL, g, g.i)); window.gsPending--; });
   let syncing = false;
   const follow = (src, dst) => src.on("move", () => {
     if (syncing) return; syncing = true;
@@ -1207,9 +2067,40 @@ if (COMPARE && rasters.length === 2) {
   });
   window.addEventListener("resize", () => setSplit(parseFloat(divider.style.left)));
   document.getElementById("toggles").innerHTML = '<span style="color:#555">drag the divider to compare</span>';
+} else if (__TIMELAPSE__) {
+  const map = new maplibregl.Map({ container: "map", ...MAP_OPTS });
+  window.gsMaps = [map];
+  window.gsPending = 1;
+  map.addControl(new maplibregl.NavigationControl());
+  let cur = 0, timer = null;
+  const name = document.getElementById("tl-name"), play = document.getElementById("tl-play");
+  // MapLibre fetches no tiles for a layer whose visibility is none, so hidden frames cost no bandwidth
+  const show = k => {
+    cur = (k + LAYERS.length) % LAYERS.length;
+    LAYERS.forEach((_, i) => map.setLayoutProperty("layer" + i, "visibility", i === cur ? "visible" : "none"));
+    name.textContent = LAYERS[cur].name + "  (" + (cur + 1) + "/" + LAYERS.length + ")";
+  };
+  const stop = () => { clearInterval(timer); timer = null; play.textContent = "\u25b6"; };
+  const step = k => { stop(); show(cur + k); };
+  document.getElementById("tl-prev").onclick = () => step(-1);
+  document.getElementById("tl-next").onclick = () => step(1);
+  play.onclick = () => {
+    if (timer) return stop();
+    play.textContent = "\u275a\u275a";
+    timer = setInterval(() => show(cur + 1), __INTERVAL__);
+  };
+  document.addEventListener("keydown", e => {
+    if (e.key === "ArrowLeft") step(-1); else if (e.key === "ArrowRight") step(1);
+  });
+  map.on("load", () => {
+    LAYERS.forEach((l, i) => addLayerTo(map, l, i));
+    show(0);
+    window.gsPending--;
+  });
 } else {
   const map = new maplibregl.Map({ container: "map", ...MAP_OPTS });
   window.gsMaps = [map];  // exposed for scripted screenshots and checks
+  window.gsPending = 1;  // the load handler still has to add the layers; a snapshot waits for 0
   map.addControl(new maplibregl.NavigationControl());
   map.on("load", () => {
     const toggles = document.getElementById("toggles");
@@ -1223,13 +2114,74 @@ if (COMPARE && rasters.length === 2) {
         const vis = cb.checked ? "visible" : "none";
         [id, id + "-fill", id + "-line"].forEach(x => map.getLayer(x) && map.setLayoutProperty(x, "visibility", vis));
       };
-      row.appendChild(cb); row.appendChild(document.createTextNode(" " + l.name));
+      const lab = document.createElement("span");
+      lab.id = "lbl" + id; lab.textContent = " " + l.name;
+      row.appendChild(cb); row.appendChild(lab);
       toggles.appendChild(row);
     });
+    window.gsPending--;
   });
 }
 </script></body></html>
 """
+
+
+def stac_map_link(catalog: str, collection_id: str, item_id: str) -> str:
+    """stac-map opens any STAC URL from ?href= (src/utils/href.ts)."""
+    if catalog not in CATALOGS or "stac" not in CATALOGS[catalog]:
+        return ""
+    self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
+    return "https://developmentseed.org/stac-map/?href=" + quote(self_url, safe="")
+
+
+_ITEMS: dict[str, dict[str, Any] | None] = {}
+
+
+def _item(catalog: str, collection_id: str, item_id: str) -> dict[str, Any] | None:
+    """The STAC item, fetched at most once per process; a failure is cached as None.
+
+    ponytail: a transient failure sticks until the server restarts; add a TTL
+    if a flaky catalog makes fallbacks disappear in a long-lived session
+    """
+    key = f"{catalog}:{collection_id}:{item_id}"
+    if key not in _ITEMS:
+        try:
+            _ITEMS[key] = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}")
+        except Exception:
+            _ITEMS[key] = None
+    return _ITEMS[key]
+
+
+def _asset_href(catalog: str, collection_id: str, item_id: str, asset: str) -> str | None:
+    """http(s) href of one item asset; None when absent or not publicly readable."""
+    href = ((_item(catalog, collection_id, item_id) or {}).get("assets", {}).get(asset) or {}).get("href")
+    # s3:// and friends: the public tiler cannot read them
+    return href if isinstance(href, str) and href.startswith(("http://", "https://")) else None
+
+
+def _fallback_tiles(l: dict[str, Any]) -> str | None:
+    """raster.eoapi.dev tile template for a titiler.xyz item layer, or None.
+
+    Only a single-asset layer with no expression: eoapi.dev has no /stac route,
+    so it cannot merge bands or run band math.
+    ponytail: single-asset only; a self-hosted titiler with /stac would let
+    band-merge and expression layers fall back too
+    """
+    if CATALOGS[l["catalog"]]["raster"] != "titiler-xyz" or l.get("expression"):
+        return None
+    assets = l.get("assets") or _default_assets(l["collection_id"])
+    if len(assets) != 1:
+        return None
+    # no asset_href from the caller: read it from the cached item (one GET per item, ever)
+    href = l.get("asset_href") or _asset_href(l["catalog"], l["collection_id"], l["item_id"], assets[0])
+    if not href:
+        return None
+    params = [("url", href)]
+    if l.get("rescale"):
+        params.append(("rescale", l["rescale"]))
+    if l.get("colormap_name"):
+        params.append(("colormap_name", l["colormap_name"]))
+    return f"{EOAPI}/external/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + str(httpx.QueryParams(params))
 
 
 def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
@@ -1240,13 +2192,8 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
     if item_bounds is None:
         # scene footprint bounds stop the map requesting (and the tiler
         # serving 404s for) every out-of-footprint tile in the viewport
-        try:
-            item = _get_json(
-                f"{CATALOGS[l['catalog']]['stac']}/collections/{l['collection_id']}/items/{l['item_id']}"
-            )
-            item_bounds = item.get("bbox")
-        except Exception:
-            item_bounds = None
+        item_bounds = (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("bbox")
+    fallback = _fallback_tiles(l)
     return {
         "type": "raster",
         "name": l.get("name") or l["item_id"],
@@ -1262,6 +2209,7 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
         "opacity": l.get("opacity", 1),
         **({"bounds": item_bounds} if item_bounds else {}),
         **({"pc_fallback": True} if l.get("item_id") in _PC_FALLBACKS else {}),
+        **({"fallback_tiles": fallback} if fallback else {}),
     }
 
 
@@ -1307,6 +2255,7 @@ def _layer_state(l: dict[str, Any], deferred: bool = False) -> dict[str, Any]:
         "kind": l.get("type"),
         **({"bounds": l["bounds"]} if l.get("bounds") else {}),
         **({"tiles": l["tiles"]} if l.get("tiles") else {}),
+        **({"fallback_tiles": l["fallback_tiles"]} if l.get("fallback_tiles") else {}),
         **({"opacity": l["opacity"]} if l.get("opacity") not in (None, 1) else {}),
         **({"deferred": True} if deferred else {}),
     }
@@ -1341,12 +2290,47 @@ def _footprints_overlap(resolved: list[dict[str, Any]], min_frac: float = 0.6) -
     return smaller > 0 and inter / smaller >= min_frac
 
 
+def _js(value: Any) -> str:
+    # json inside <script>: "<" as < so a "</script>" in a name cannot end the block
+    return json.dumps(value).replace("<", "\\u003c")
+
+
+def _fill(template: str, mapping: dict[str, str]) -> str:
+    # one pass over the __KEY__ tokens: a substituted value is never re-expanded,
+    # so caller text containing "__LAYERS__" stays literal
+    return re.sub(r"__([A-Z]+)__", lambda m: mapping.get(m.group(1), m.group(0)), template)
+
+
 def _artifact_path(out_path: str | None, prefix: str, title: str) -> str:
-    if out_path:
-        return out_path
+    """Resolve where an HTML artifact goes; raises ValueError for a path it will not write."""
     out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return str(out_dir / f"{prefix}-{slugify(title)}.html")
+    if not out_path:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = str(out_dir / f"{prefix}-{slugify(title)}.html")
+    dest = Path(out_path)
+    if dest.suffix.lower() != ".html":
+        raise ValueError("out_path must end in .html")
+    if dest.is_symlink():
+        raise ValueError("out_path is a symlink; refusing to write through it")
+    # GROUNDSTATION_OUT is where the console writes; the cwd tree is where the
+    # field-test scripts write (docs/img), and it counts only when cwd is a
+    # repository checkout: a server started from a home folder or / must not
+    # make the whole disk a legal destination
+    cwd = Path.cwd().resolve()
+    roots = [out_dir.resolve()] + ([cwd] if (cwd / ".git").exists() else [])
+    if not any(dest.resolve().is_relative_to(r) for r in roots):
+        raise ValueError("out_path must sit under GROUNDSTATION_OUT or a repository checkout you are working in")
+    return str(dest)
+
+
+def _write_artifact(path: str, html: str) -> None:
+    """Write through a temp file and rename, so a symlink swapped in after the
+    check cannot redirect the write (rename replaces the link, never follows it)."""
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
+    tmp.write_text(html, encoding="utf-8")
+    os.replace(tmp, dest)
 
 
 # standard card shapes (name -> height/width). A card is a deliberate
@@ -1429,7 +2413,10 @@ def _snapshot_artifact(
             # a postcard has no MapLibre map — its pixels are already embedded —
             # so requiring gsMaps to exist hangs until timeout on a page that
             # was ready immediately
-            loaded = "!window.gsMaps || window.gsMaps.every(m => m.loaded())"
+            # map.loaded() turns true before the "load" handler has added the raster
+            # layers, so a shot on it alone is the base map (field test 11, cards 18 and 19)
+            loaded = ("!window.gsMaps || (!window.gsPending && "
+                      "window.gsMaps.every(m => m.loaded() && m.areTilesLoaded()))")
             page.wait_for_function(loaded, timeout=90000)
             # re-fit to the card's bbox, keeping any pitch. Flat maps get zero
             # padding (the load-time fit pads 40px and leaks area beyond the
@@ -1493,8 +2480,6 @@ def _map_stack_facts(
 
 
 def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
-    from html import escape
-
     from groundstation.stack import STAGE_LABELS
 
     parts, last = [], None
@@ -1539,9 +2524,7 @@ def _stack_chunk_for(
     entries = _stack.stack_instances(components, _map_stack_facts(resolved, layers, extra_facts))
     if not entries:
         return None
-    from html import escape
-
-    return _STACK_CHUNK.replace("__ENTRIES__", _stack_panel_html(entries)).replace("__SUMMARY__", escape(_stack.summary(entries)))
+    return _fill(_STACK_CHUNK, {"ENTRIES": _stack_panel_html(entries), "SUMMARY": escape(_stack.summary(entries))})
 
 
 def _artifact_postcard(
@@ -1587,8 +2570,11 @@ def _artifact_postcard(
         _stack_credit_html({**facts, "snapshot": True}) if stack_layer else None,
         engine="STAC · MapLibre GL" if items else "MapLibre GL",
     )
-    card_path = postcard.get("out_path") or _artifact_path(None, "postcard", postcard["place"])
-    Path(card_path).write_text(html, encoding="utf-8")
+    try:
+        card_path = _artifact_path(postcard.get("out_path"), "postcard", postcard["place"])
+    except ValueError as e:
+        return None, f"postcard skipped: {e}"
+    _write_artifact(card_path, html)
     return card_path, None
 
 
@@ -1599,7 +2585,7 @@ def render_map(
     subtitle: str = "",
     out_path: str | None = None,
     compare: bool | None = None,
-    stack_layer: bool = False,
+    stack_layer: bool = True,
     stack_facts: dict[str, Any] | None = None,
     postcard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1627,7 +2613,7 @@ def render_map(
     only when both rasters come from the SAME collection (a comparison), overlay
     when they differ (e.g. burn severity over imagery — pass opacity ~0.75).
 
-    stack_layer: True adds a "Stack" toggle revealing the technologies behind
+    stack_layer: on by default, a "Stack" toggle revealing the technologies behind
     the map — the actual collections, tiler, formats, and buckets on screen,
     joined from docs/stack.md. Attribution to projects, never people.
     stack_facts: honest extras the panel can't see from the layers alone —
@@ -1669,30 +2655,41 @@ def render_map(
         stack_html = _stack_chunk_for(resolved, layers, stack_facts)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
+    legends = _legends_for(layers)
+    first = next((l for l in layers if l.get("type") == "item"), None)
+    stac_map_url = first and stac_map_link(first["catalog"], first["collection_id"], first["item_id"])
     html = (
-        _MAP_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
-        .replace("__TITLE__", title)
-        .replace("__SUBTITLE__", subtitle)
-        .replace("__LAYERS__", json.dumps(resolved))
-        .replace("__BBOX__", json.dumps(bbox))
-        .replace("__COMPARE__", json.dumps(compare))
-        # __STACK__ goes last: its entries carry caller-supplied strings, and
-        # replacing it earlier would let a literal "__LAYERS__" inside them be
-        # macro-expanded by the later template substitutions
-        .replace("__STACK__", stack_html)
+        _fill(_MAP_TEMPLATE, {
+            "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
+            "LAYERS": _js(resolved), "BBOX": _js(bbox), "COMPARE": _js(compare),
+            "TLBAR": "", "TIMELAPSE": "false", "INTERVAL": "0",
+            "STACMAP": f'<a id="stacmap" href="{escape(stac_map_url)}" target="_blank">Open in stac-map</a>' if stac_map_url else "",
+            "STACK": stack_html, "LEGEND": _legend_map_html(legends),
+        })
     )
-    out_path = _artifact_path(out_path, "map", title)
-    Path(out_path).write_text(html, encoding="utf-8")
+    try:
+        out_path = _artifact_path(out_path, "map", title)
+    except ValueError as e:
+        return {"error": str(e)}
+    _write_artifact(out_path, html)
     out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
     # The map's contents were previously legible only to a human opening the
     # file, so every rendering bug this repo has shipped was caught by eye and
     # not by a check. `state` is the same thing the HTML was built from, in a
     # form an eval (or an MCP Apps view) can read. The file is unchanged.
+    if legends:
+        out["legend"] = legends[0]
+        if len(legends) > 1:
+            out["legends"] = legends
     out["state"] = {
         "bbox": bbox,
         "compare": bool(compare),
         "layers": [_layer_state(l) for l in resolved],
     }
+    if any(l.get("fallback_tiles") for l in resolved):
+        out["state"]["fallback"] = "raster.eoapi.dev"
+    if stac_map_url:
+        out["stac_map_url"] = stac_map_url
     if stack_note:
         out["note"] = stack_note
     fb = [l["name"] for l in resolved if l.get("pc_fallback")]
@@ -1734,6 +2731,66 @@ def render_map(
     return out
 
 
+_TIMELAPSE_BAR = (
+    '<div id="tl"><button id="tl-prev" aria-label="previous frame">\u25c0</button>'
+    '<button id="tl-play" aria-label="play or pause">\u25b6</button>'
+    '<button id="tl-next" aria-label="next frame">\u25b6\u25b6</button><span id="tl-name"></span></div>'
+)
+TIMELAPSE_MAX_FRAMES = 12  # hard ceiling: every frame is a tile layer, and bandwidth is the cost
+
+
+def render_timelapse(
+    title: str,
+    bbox: list[float],
+    frames: list[dict[str, Any]],
+    subtitle: str = "",
+    out_path: str | None = None,
+    interval_ms: int = 1200,
+    max_frames: int = 8,
+    stack_layer: bool = True,
+    stack_facts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A few frames of one place over time, with prev / play / next controls.
+
+    frames: layers in render_map's shape (item or raster), one per date, in time
+    order; each frame's "name" is its date or label. Only the first frame loads
+    tiles up front, the rest load when shown, so keep it to a few frames: more
+    than max_frames (hard ceiling 12) is an error. Use for 3 or more dates, a
+    season or a progression; for two dates use render_map (the swipe).
+    Returns {map_path, frames, state}.
+    """
+    cap = min(max_frames, TIMELAPSE_MAX_FRAMES)
+    if len(frames) < 2:
+        return {"error": "a timelapse needs at least 2 frames; use render_map for one scene"}
+    if len(frames) > cap:
+        return {"error": f"{len(frames)} frames is over the cap of {cap}: every frame is a tile layer, "
+                         "so pick fewer, evenly spaced windows (hard ceiling 12)"}
+    if any(f.get("type") not in ("item", "raster") for f in frames):
+        return {"error": "each frame must be one item or raster layer with a name"}
+    resolved = [_resolve_layer(f) for f in frames]
+    stack_html = ""
+    if stack_layer:
+        stack_html = _stack_chunk_for(resolved, frames, stack_facts) or ""
+    html = (
+        _fill(_MAP_TEMPLATE, {
+            "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
+            "LAYERS": _js(resolved), "BBOX": _js(bbox), "COMPARE": "false",
+            "TLBAR": _TIMELAPSE_BAR, "TIMELAPSE": "true", "INTERVAL": str(int(interval_ms)),
+            "STACMAP": "", "STACK": stack_html, "LEGEND": "",
+        })
+    )
+    try:
+        out_path = _artifact_path(out_path, "timelapse", title)
+    except ValueError as e:
+        return {"error": str(e)}
+    _write_artifact(out_path, html)
+    return {
+        "map_path": out_path,
+        "frames": len(resolved),
+        "state": {"bbox": bbox, "interval_ms": int(interval_ms), "layers": [_layer_state(l) for l in resolved]},
+    }
+
+
 # ---------------------------------------------------------------- 3D artifact
 
 TERRAIN_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
@@ -1751,7 +2808,7 @@ _EXTRA_CHUNK = """<button id="loadmore">Load full coverage (__N__ more)</button>
     btn.textContent = "Loading " + EXTRAS.length + " scene" + (EXTRAS.length > 1 ? "s" : "") + "…";
     EXTRAS.forEach((e, i) => {
       const id = "extra" + i;
-      map.addSource(id, { type: "raster", tiles: [e.tiles], tileSize: 256,
+      map.addSource(id, { type: "raster", tiles: [originKey(e.tiles)], tileSize: 256,
         ...(e.bounds ? { bounds: e.bounds } : {}) });
       // beneath the main drape: gap fillers must never cover the best scene
       map.addLayer({ id, type: "raster", source: id,
@@ -1813,6 +2870,10 @@ __EXTRA__
 __STACK__
 <script>
 const STYLE = __STYLE__;
+// CloudFront on titiler.xyz caches the CORS header with the tile and does not
+// vary by origin, so the URL must differ per origin or a cached tile is refused
+const originKey = (u) => u + (u.includes("?") ? "&" : "?") + "o=" + (location.origin === "null" ? "sandbox" : location.origin.replace(/[^a-z0-9]/gi, "").slice(-16));
+STYLE.sources.imagery.tiles = STYLE.sources.imagery.tiles.map(originKey);
 const BBOX = __BBOX__;
 const CENTER = [(BBOX[0] + BBOX[2]) / 2, (BBOX[1] + BBOX[3]) / 2];
 const BOUNDS = [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]];
@@ -1861,10 +2922,11 @@ def render_map_3d(
     subtitle: str = "",
     out_path: str | None = None,
     exaggeration: float = 1.5,
-    stack_layer: bool = False,
+    stack_layer: bool = True,
     extra_layers: list[dict[str, Any]] | None = None,
     postcard: dict[str, Any] | None = None,
     stack_facts: dict[str, Any] | None = None,
+    fill_coverage: bool = True,
 ) -> dict[str, Any]:
     """Write a self-contained 3D terrain fly-through with imagery draped over it.
 
@@ -1877,7 +2939,7 @@ def render_map_3d(
     artifact carries a live slider, a fly-through orbit, and a reset button.
     Best over relief-rich areas — pick the lowest-cloud recent scene first.
 
-    stack_layer: same "Stack" toggle as render_map, and here the panel also
+    stack_layer: the same "Stack" toggle as render_map (on by default), and here the panel also
     names the Terrarium terrain actually under the imagery.
 
     extra_layers: more layers in the same shape, embedded but not requested
@@ -1886,6 +2948,11 @@ def render_map_3d(
     below ~95) — the gaps become one click away without loading tiles nobody
     asked for. They drape beneath the main scene, so it always wins.
 
+    fill_coverage: when the main item layer clips the view and no extra_layers
+    were passed, the same-day items of its collection that fill the gap drape
+    on load beneath it, named in state["layers"] and "filled_with". False turns
+    the search off and renders the main layer alone.
+
     postcard: {"place": ..., "date": ..., "caption": ...} bakes a share card
     of the actual 3D view — pitched terrain, drape, extras auto-loaded —
     via a headless-browser snapshot. Same playwright/chromium requirement
@@ -1893,6 +2960,24 @@ def render_map_3d(
     """
     # ponytail: one draped layer; add a second when a real ask needs it
     resolved = _resolve_layer(layer)
+    siblings: list[dict[str, Any]] = []
+    sibling_specs: list[dict[str, Any]] = []
+    if (fill_coverage and not extra_layers and layer.get("type") == "item"
+            and resolved.get("bounds")
+            and _union_coverage_pct(bbox, [resolved["bounds"]]) < PARTIAL_COVERAGE_PCT):
+        try:
+            cat, coll = layer["catalog"], layer["collection_id"]
+            day = ((_item(cat, coll, layer["item_id"]) or {}).get("properties", {}).get("datetime") or "")[:10]
+            found = search_imagery(cat, [coll], bbox=bbox, datetime_range=f"{day}T00:00:00Z/{day}T23:59:59Z",
+                                   limit=10) if day else {}
+            fcs = find_full_coverage_set(found.get("items") or [], bbox, threshold=PARTIAL_COVERAGE_PCT)
+            for it in (fcs or {}).get("items", []):
+                if it["id"] != layer["item_id"]:
+                    spec = {**layer, "name": it["id"], "item_id": it["id"], "bbox": it.get("bbox")}
+                    sibling_specs.append(spec)
+                    siblings.append({**_resolve_layer(spec), "reason": "same-day sibling filling the view"})
+        except Exception:
+            siblings, sibling_specs = [], []  # search failed: render the main layer alone, as before
     style = {
         "version": 8,
         "sources": {
@@ -1928,36 +3013,39 @@ def render_map_3d(
             },
         ],
     }
+    for i, sb in enumerate(siblings):
+        # beneath "imagery" so the main scene always wins
+        style["sources"][f"sibling{i}"] = {
+            "type": "raster", "tiles": [sb["tiles"]], "tileSize": 256,
+            **({"bounds": sb["bounds"]} if sb.get("bounds") else {}),
+        }
+        style["layers"].insert(-1, {"id": f"sibling{i}", "type": "raster", "source": f"sibling{i}"})
     extras = [_resolve_layer(l) for l in (extra_layers or [])]
     extra_html = ""
     if extras:
-        extra_html = _EXTRA_CHUNK.replace("__N__", str(len(extras))).replace(
-            "__EXTRAS__",
-            json.dumps([
-                {"tiles": e["tiles"], "opacity": e.get("opacity", 1),
-                 **({"bounds": e["bounds"]} if e.get("bounds") else {})}
-                for e in extras
-            ]),
-        )
+        extra_html = _fill(_EXTRA_CHUNK, {"N": str(len(extras)), "EXTRAS": _js([
+            {"tiles": e["tiles"], "opacity": e.get("opacity", 1),
+             **({"bounds": e["bounds"]} if e.get("bounds") else {})}
+            for e in extras
+        ])})
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for([resolved, *extras], [layer, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True})
+        stack_html = _stack_chunk_for([resolved, *siblings, *extras], [layer, *sibling_specs, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True})
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = (
-        _MAP3D_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
-        .replace("__TITLE__", title)
-        .replace("__SUBTITLE__", subtitle)
-        .replace("__STYLE__", json.dumps(style))
-        .replace("__BBOX__", json.dumps(bbox))
-        .replace("__EXAGGERATION__", json.dumps(round(float(exaggeration), 2)))
-        .replace("__EXTRA__", extra_html)
-        # __STACK__ last, same trust boundary as render_map: entries carry
-        # caller-supplied collection ids that must never be macro-expanded
-        .replace("__STACK__", stack_html)
+        _fill(_MAP3D_TEMPLATE, {
+            "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
+            "STYLE": _js(style), "BBOX": _js(bbox),
+            "EXAGGERATION": json.dumps(round(float(exaggeration), 2)),
+            "EXTRA": extra_html, "STACK": stack_html,
+        })
     )
-    out_path = _artifact_path(out_path, "map3d", title)
-    Path(out_path).write_text(html, encoding="utf-8")
+    try:
+        out_path = _artifact_path(out_path, "map3d", title)
+    except ValueError as e:
+        return {"error": str(e)}
+    _write_artifact(out_path, html)
     out = {"path": out_path, "title": title}
     # Same reasoning as render_map's state, with 3D's own facts: the vertical
     # stretch actually rendered (the template rounds it, so report the rounded
@@ -1967,14 +3055,19 @@ def render_map_3d(
         "bbox": bbox,
         "exaggeration": round(float(exaggeration), 2),
         "terrain": True,
-        "layers": [_layer_state(resolved), *(_layer_state(e, deferred=True) for e in extras)],
+        "layers": [_layer_state(resolved), *(_layer_state(s) for s in siblings),
+                   *(_layer_state(e, deferred=True) for e in extras)],
     }
+    if siblings:
+        out["filled_with"] = [s["name"] for s in siblings]
+        for ls, sb in zip(out["state"]["layers"][1:], siblings):
+            ls["reason"] = sb["reason"]
     # Same blind spot render_map had, but 3D differs twice: only the ONE main
     # layer drapes on load (extras wait behind the button), and an uncovered
     # area shows terrain with no imagery rather than blank. So report what the
     # viewer actually gets first, and what the button would add.
     if resolved.get("bounds"):
-        _cov = _union_coverage_pct(bbox, [resolved["bounds"]])
+        _cov = _union_coverage_pct(bbox, [resolved["bounds"], *(s["bounds"] for s in siblings if s.get("bounds"))])
         out["state"]["coverage_pct"] = _cov
         if _cov < PARTIAL_COVERAGE_PCT:
             _extra_boxes = [e["bounds"] for e in extras if e.get("bounds")]
@@ -2032,6 +3125,10 @@ __BRAND__
   .caption { margin: 0 0 16px; }
   .credit { border-top: 1px solid var(--rule); padding-top: 12px; font: 12px/1.6 "Roboto Mono", monospace; color: var(--mid); }
   .credit div { margin: 2px 0; }
+  .legend { margin: 0 0 14px; font-size: 13px; }
+  .legend b { display: block; margin-bottom: 4px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; margin: 2px 12px 2px 0; }
+  .legend i { flex: none; width: 12px; height: 12px; border: 1px solid rgba(0,0,0,.35); border-radius: 2px; }
   .stack-list { margin-top: 8px; font-size: 11px; }
   .stack-list b { color: var(--ink); font-weight: 600; }
   .stack-list b.ds { color: var(--accent); }
@@ -2042,6 +3139,7 @@ __BRAND__
     <h1>__PLACE__</h1>
     <p class="meta">__DATE__ · __COLLECTION__</p>
     __CAPTION__
+    __LEGEND__
     <div class="credit">
       <div>Development Seed labs · __ENGINE__ · __SOURCE__</div>
       __LICENSE__
@@ -2067,8 +3165,6 @@ def _stack_credit_html(facts: dict[str, Any]) -> str | None:
     map exercised. Links stay out on purpose: the card's no-live-URLs
     guarantee covers the credit block too.
     """
-    from html import escape
-
     from groundstation import stack as _stack
 
     try:
@@ -2186,21 +3282,22 @@ def _postcard_html(
     license_: str | None = None,
     stack_html: str | None = None,
     engine: str = "STAC · TiTiler",
+    dropped: list[dict[str, str]] | None = None,
+    legends: list[dict[str, Any]] | None = None,
 ) -> str:
     import base64
 
     return (
-        _POSTCARD_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
-        .replace("__ENGINE__", engine)
-        .replace("__IMAGE__", base64.b64encode(png).decode())
-        .replace("__PLACE__", place)
-        .replace("__DATE__", date)
-        .replace("__COLLECTION__", collection_id)
-        .replace("__SOURCE__", source)
-        .replace("__CAPTION__", f'<p class="caption">{caption}</p>' if caption else "")
-        .replace("__LICENSE__", f"<div>license: {license_}</div>" if license_ else "")
-        # __STACK__ last: its lines carry the caller-supplied collection id
-        .replace("__STACK__", stack_html or "")
+        _fill(_POSTCARD_TEMPLATE, {
+            "BRAND": _BRAND_CSS, "ENGINE": escape(engine),
+            "IMAGE": base64.b64encode(png).decode(),
+            "PLACE": escape(place), "DATE": escape(date),
+            "COLLECTION": escape(collection_id), "SOURCE": escape(source),
+            "CAPTION": f'<p class="caption">{escape(caption)}</p>' if caption else "",
+            "LICENSE": (f"<div>license: {escape(license_)}</div>" if license_ else "")
+            + (f"<div>not applied: {escape('; '.join(d['param'] + ' (' + d['why'] + ')' for d in dropped))}</div>" if dropped else ""),
+            "STACK": stack_html or "", "LEGEND": _legend_card_html(legends or []),
+        })
     )
 
 
@@ -2216,7 +3313,7 @@ def render_postcard(
     expression: str | None = None,
     caption: str = "",
     out_path: str | None = None,
-    stack_layer: bool = False,
+    stack_layer: bool = True,
     bbox: list[float] | None = None,
     fill_item_ids: list[str] | None = None,
     aspect: str | None = None,
@@ -2232,7 +3329,7 @@ def render_postcard(
     assets/rescale/colormap_name/expression take the same shapes as
     tile_url_template, so an NDVI card is expression + colormap_name.
 
-    stack_layer: True prints a compact stack listing in the credit block —
+    stack_layer: on by default, prints a compact stack listing in the credit block —
     the static back-of-postcard form of the map artifacts' Stack panel, with
     no links, so the card stays free of live URLs.
 
@@ -2247,7 +3344,7 @@ def render_postcard(
     pass the REST of a same-day full_coverage_set — the card bakes as a
     rio-tiler mosaic read straight from the COGs, main scene winning where
     scenes overlap. Same-day fills keep the seam invisible. Needs bbox;
-    earth-search-style catalogs only (PC/VEDA fall back to single scene).
+    earth-search-style catalogs only (PC/VEDA fall back to single scene, named in `dropped`).
     """
     if bbox is not None:
         # clamp to the scenes' union bbox so an AOI hanging off the data
@@ -2270,12 +3367,14 @@ def render_postcard(
         # then shape it: nearest standard card ratio (or the caller's pick),
         # trimmed centrally — inside the clamp, so still all data
         _, bbox = _snap_aspect(bbox, "imagery", aspect)
-    png, mosaic_scenes, mosaic_note = None, 0, None
+    png, mosaic_scenes, mosaic_note, dropped = None, 0, None, []
     if fill_item_ids:
         if bbox is None:
             mosaic_note = "fill_item_ids ignored: a mosaic card needs bbox"
+            dropped.append({"param": "fill_item_ids", "why": "a mosaic card needs bbox"})
         elif CATALOGS[catalog]["raster"] != "titiler-xyz":
             mosaic_note = f"mosaic cards need direct COG access; {catalog} fell back to the single scene"
+            dropped.append({"param": "fill_item_ids", "why": f"mosaic cards need direct COG access, which {catalog} does not offer"})
         else:
             try:
                 png, mosaic_scenes = _mosaic_png(
@@ -2293,8 +3392,11 @@ def render_postcard(
         )
         if "preview_url" not in p:
             return p
+        dropped += p.get("dropped", [])
         r = _client.get(p["preview_url"], timeout=90)
-        r.raise_for_status()
+        if r.status_code >= 400:
+            # never write a card around a broken image
+            return {"error": f"image request failed: HTTP {r.status_code}", "url": p["preview_url"]}
         png = r.content
         from urllib.parse import urlsplit
 
@@ -2310,17 +3412,24 @@ def render_postcard(
         stack_html = _stack_credit_for(catalog, collection_id, tiler_host, mosaic_scenes)
         if stack_html is None:
             stack_note = "stack listing skipped: docs/stack.md missing, malformed, or nothing to attribute"
+    legends = _legends_for([], colormap_name)
     html = _postcard_html(
         png, place, date, collection_id,
         _catalog_source(catalog, collection_id), caption, license_, stack_html,
         engine="STAC · rio-tiler" if mosaic_scenes else "STAC · TiTiler",
+        dropped=dropped,
+        legends=legends,
     )
-    if out_path is None:
-        out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = str(out_dir / f"postcard-{slugify(place)}-{slugify(date)}.html")
-    Path(out_path).write_text(html, encoding="utf-8")
+    try:
+        out_path = _artifact_path(out_path, "postcard", f"{place}-{date}")
+    except ValueError as e:
+        return {"error": str(e)}
+    _write_artifact(out_path, html)
     out = {"path": out_path}
+    if dropped:
+        out["dropped"] = dropped
+    if legends:
+        out["legend"] = legends[0]
     if mosaic_scenes:
         out["mosaic_scenes"] = mosaic_scenes
     notes = "; ".join(n for n in (mosaic_note, stack_note) if n)
@@ -2371,7 +3480,8 @@ def compare_dates(
     expression: str = "(nir-red)/(nir+red)",
     max_cloud_cover: float = 40,
     label: str | None = None,
-    stack_layer: bool = False,
+    stack_layer: bool = True,
+    stack_facts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare two time windows over a place: matched scenes, index delta, swipe map.
 
@@ -2381,7 +3491,7 @@ def compare_dates(
     earlier. Picks Sentinel-2 scenes from the SAME MGRS tile (best AOI coverage,
     lowest cloud), computes the expression's stats for both dates, and writes a
     side-by-side swipe map. Returns scenes, means, delta, and map_path.
-    stack_layer passes through to the swipe map, and since this tool geocodes
+    stack_layer and stack_facts pass through to the swipe map, and since this tool geocodes
     the place itself, the panel truthfully claims Gazet/Nominatim.
 
     A caveat list comes back when the delta shouldn't be read at face value —
@@ -2393,6 +3503,8 @@ def compare_dates(
         g = geocode(place)
         if "error" in g:
             return g
+        if g.get("ambiguous"):
+            return _ambiguous_error(place, g)
         bbox, geocoded = g["bbox"], g["source"]  # the panel credits the geocoder that answered
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
@@ -2427,9 +3539,13 @@ def compare_dates(
 
     a, b = pick(after_items), pick(before_items)
 
+    scope: dict[str, Any] = {}
+
     def _mean(it: dict[str, Any]) -> float | None:
         try:
-            s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression)
+            # without the bbox the mean is the whole Sentinel-2 tile, not the place asked about
+            s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox)
+            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_note") if k in s})
             return round(next(iter(s.values()))["mean"], 4)
         except Exception:
             return None
@@ -2444,11 +3560,11 @@ def compare_dates(
         }
     m = render_map(
         title=f"{label or place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}",
-        subtitle=f"{expression} · drag the divider · tile {best_tile}",
+        subtitle=f"{expression} · means over the area · drag the divider · tile {best_tile}",
         bbox=bbox,
         layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
         stack_layer=stack_layer,
-        stack_facts={"geocoded": geocoded},
+        stack_facts={"geocoded": geocoded, **(stack_facts or {})},
     )
     delta = round(mean_after - mean_before, 4) if mean_after is not None and mean_before is not None else None
     out = {
@@ -2459,6 +3575,7 @@ def compare_dates(
         "delta_pct": round(delta / abs(mean_before) * 100, 1) if delta is not None and mean_before else None,
         "expression": expression,
         "map_path": m["map_path"],
+        **scope,
     }
     caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"))
     if caveats:
@@ -2542,7 +3659,135 @@ def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 
         out["gdacs_note"] = f"GDACS current-events feed listed {listed}; {len(out['gdacs'])} active within {days} days" + (" inside the bbox" if bbox else "")
     except Exception as e:
         out["gdacs_error"] = str(e)
+    # Field tests 11 (Bend) and 12 (Asheville, Harris County): GDACS timed out, the
+    # empty list read as calm and the brief headlined CALM. Empty is only all-clear if every source answered
+    out["sources"] = {
+        "eonet": {"ok": "eonet_error" not in out, "listed": len(out["eonet"]) if "eonet_error" not in out else None, "error": out.get("eonet_error")},
+        "gdacs": {"ok": "gdacs_error" not in out, "listed": len(out["gdacs"]) if "gdacs_error" not in out else None, "error": out.get("gdacs_error")},
+    }
+    down = [n.upper() for n, v in out["sources"].items() if not v["ok"]]
+    found = [f"{len(out[n])} {n.upper()} events in the box" for n in ("eonet", "gdacs") if out[n]]
+    out["all_clear"] = not down and not found
+    out["all_clear_note"] = (
+        f"{' and '.join(down)} did not answer, so an empty list is not all-clear" if down
+        else ", ".join(found) if found else "EONET and GDACS both answered with no events")
     return out
+
+
+# HRRR smoke: NOAA's 3 km CONUS model on the open-data bucket, read as a
+# GDAL vrt:// through eoAPI. Bounds from smokehrrr's metadata.ts
+HRRR_BBOX = [-134.12, 21.12, -60.9, 52.62]
+HRRR_BUCKET = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com"
+HRRR_MAX_HOURS = 48  # only the 00/06/12/18z runs reach it; plain hours stop at 18
+# MASSDEN kg/m3 -> ug/m3, then transparent below 1 so clear air shows the basemap
+HRRR_EXPR = "b1*1000000000"
+HRRR_COLORMAP = json.dumps([
+    [[0, 1], [0, 0, 0, 0]], [[1, 5], [255, 224, 102, 70]], [[5, 35], [255, 153, 0, 150]],
+    [[35, 150], [214, 40, 0, 205]], [[150, 1000000], [110, 0, 20, 235]],
+])
+# approximate reading scale, NOT the AQI: the bounds are a judgment call, tune them
+SMOKE_SOURCE = {"model": "NOAA HRRR", "band": "MASSDEN (76)", "tiler": EOAPI, "recipe": "https://github.com/hrodmn/smokehrrr"}
+SMOKE_SCALE = "under 5 clear, 5 to 35 light, 35 to 150 moderate, above 150 heavy"
+
+
+def _hrrr_grib_url(date: dt.date, hour: int, fhour: int) -> str:
+    return f"{HRRR_BUCKET}/hrrr.{date:%Y%m%d}/conus/hrrr.t{hour:02d}z.wrfsfcf{fhour:02d}.grib2"
+
+
+def _hrrr_vrt(grib_url: str) -> str:
+    return f"vrt://{grib_url}?bands=76"  # band 76 is MASSDEN, and the option belongs inside the vrt value
+
+
+def _hrrr_tile_template(grib_url: str) -> str:
+    q = str(httpx.QueryParams([("url", _hrrr_vrt(grib_url)), ("expression", HRRR_EXPR), ("colormap", HRRR_COLORMAP)]))
+    return f"{EOAPI}/external/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + q
+
+
+def smoke_word(ugm3: float | None) -> str:
+    return "no data" if ugm3 is None else "clear" if ugm3 < 5 else "light" if ugm3 < 35 else "moderate" if ugm3 < 150 else "heavy"
+
+
+def _utcnow() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def smoke_forecast(lat: float, lon: float, hours_ahead: int = 24) -> dict[str, Any]:
+    """Smoke near the ground now and hours_ahead from now, at a point in the contiguous US.
+
+    NOAA HRRR near-surface smoke mass density (MASSDEN, GRIB band 76) through
+    raster.eoapi.dev's vrt:// GRIB reader, the smokehrrr recipe
+    (https://github.com/hrodmn/smokehrrr). CONUS only. Forecast frames are
+    model guidance, not observation, and new runs can lag in NOAA's bucket.
+
+    Returns now_ugm3 (the frame nearest the current time, stamped
+    now_valid_time) and forecast_ugm3 (µg/m³), a tiles XYZ template for the
+    forecast frame (clear air is transparent, so it drapes on a map), and
+    a caveat list to read before quoting the numbers.
+    """
+    w, s, e, n = HRRR_BBOX
+    if not (w <= lon <= e and s <= lat <= n):
+        return {"error": "HRRR smoke covers the contiguous US only", "coverage_bbox": HRRR_BBOX}
+    now = _utcnow()
+    hour = dt.timedelta(hours=1)
+    try:
+        run = None
+        for back in range(37):  # smokehrrr probes back 36 h too, but only the long runs are worth a HEAD
+            t = (now - back * hour).replace(minute=0, second=0, microsecond=0)
+            if t.hour % 6 == 0 and _client.head(_hrrr_grib_url(t.date(), t.hour, 0)).status_code == 200:
+                run = t
+                break
+        if run is None:
+            return {"error": "no HRRR run found in NOAA's bucket for the last 36 hours", "source": SMOKE_SOURCE}
+
+        def have(f: int) -> bool:
+            return _client.head(_hrrr_grib_url(run.date(), run.hour, f)).status_code == 200
+
+        def read(f: int) -> float | None:
+            d = _get_json(
+                f"{EOAPI}/external/point/{lon},{lat}",
+                params={"url": _hrrr_vrt(_hrrr_grib_url(run.date(), run.hour, f)), "expression": HRRR_EXPR},
+                timeout=60,
+            )
+            v = d["values"][0]
+            return None if v is None else round(v, 1)
+
+        want = max(1, min(HRRR_MAX_HOURS, round((now + hours_ahead * hour - run) / hour)))
+        # ponytail: tries at most 5 hours at or below the wanted one, not the whole run;
+        # a bucket listing would find the true latest hour in one call
+        fh = next((f for f in dict.fromkeys((want, want - 1, want - 3, want - 6, want - 12)) if f >= 1 and have(f)), None)
+        if fh is None:
+            return {"error": f"HRRR run {run:%Y-%m-%dT%H:%MZ} has no forecast frames in NOAA's bucket yet", "source": SMOKE_SOURCE}
+        # runs are 6-hourly here, so f00 can be hours old: read the frame nearest the clock
+        fh_now = max(0, min(HRRR_MAX_HOURS, round((now - run) / hour)))
+        if fh_now and not have(fh_now):
+            fh_now = 0
+        now_ugm3, forecast_ugm3 = read(fh_now), read(fh)
+    except Exception as ex:
+        return {"error": f"HRRR smoke lookup failed: {type(ex).__name__}: {ex}", "source": SMOKE_SOURCE}
+    valid = run + fh * hour
+    caveat = [
+        "this is model guidance from NOAA HRRR, not a measurement; a smoke plume's timing and edges can be off by hours and miles",
+        "the model grid is 3 km, so a valley or a ridge can read differently from the cell value",
+        "HRRR covers the contiguous US only",
+        f"approximate reading scale in µg/m³, not the AQI: {SMOKE_SCALE}",
+    ]
+    if valid < now + hours_ahead * hour - hour:
+        caveat.insert(0, f"the frame for {hours_ahead} h ahead is not in NOAA's bucket (the run is old or the newer frames have not landed), so this uses the frame valid {valid:%Y-%m-%dT%H:%MZ}, which is earlier than asked")
+    if now_ugm3 is None or forecast_ugm3 is None:
+        caveat.append("a reading came back empty (no data at this point), so that number is null")
+    return {
+        "run": f"{run:%Y-%m-%dT%H:%MZ}",
+        "forecast_hour": fh,
+        "valid_time": f"{valid:%Y-%m-%dT%H:%MZ}",
+        "now_valid_time": f"{run + fh_now * hour:%Y-%m-%dT%H:%MZ}",
+        "now_ugm3": now_ugm3,
+        "forecast_ugm3": forecast_ugm3,
+        "units": "µg/m³ near-surface smoke mass density",
+        "tiles": _hrrr_tile_template(_hrrr_grib_url(run.date(), run.hour, fh)),
+        "bounds": HRRR_BBOX,
+        "source": SMOKE_SOURCE,
+        "caveat": caveat,
+    }
 
 
 def weather_summary(lat: float, lon: float, past_days: int = 7) -> dict[str, Any]:
@@ -2584,8 +3829,8 @@ def weather_summary(lat: float, lon: float, past_days: int = 7) -> dict[str, Any
 
 # ---------------------------------------------------------------- next pass
 
-# constellation constants vendored from developmentseed/eo-predictor
-# (scripts/satellites/*.json is the maintained source of truth — sync there)
+# offline fallback for the live developmentseed/eo-predictor catalog
+# (scripts/satellites/*.json is the maintained source of truth)
 _CONSTELLATIONS = {
     "sentinel-2": {"norad_ids": [40697, 42063, 60989], "swath_km": 290, "optical": True},
     "sentinel-1": {"norad_ids": [39634, 62261], "swath_km": 410, "optical": False},
@@ -2595,11 +3840,27 @@ _TLE_CACHE = Path(os.environ.get(
     "GROUNDSTATION_TLE_CACHE", Path.home() / ".cache" / "groundstation" / "tle.txt"
 ))
 _TLE_MAX_AGE_S = 24 * 3600  # TLEs drift slowly; a day-old set is fine for swath math
+_CATALOG_CACHE = _TLE_CACHE.with_name("eo-predictor.json")
+_EO_PREDICTOR_API = "https://api.github.com/repos/developmentseed/eo-predictor/contents/scripts/satellites"
+EO_PREDICTOR_URL = "https://developmentseed.org/eo-predictor"
 
 
-def _local_solar_hour(utc_hour: float, lon: float) -> float:
-    """Approximate local solar time — daylight check without an ephemeris file."""
-    return (utc_hour + lon / 15.0) % 24.0
+def _sun_elevation_deg(when: dt.datetime, lat: float, lon: float) -> float:
+    """Sun elevation above the horizon in degrees, from the NOAA approximation.
+
+    Accurate to about 1 degree, which is plenty for "is it daylight"; no
+    ephemeris file needed. `when` is UTC.
+    """
+    import math
+
+    n = when.timetuple().tm_yday
+    b = math.radians(360.0 / 365.0 * (n - 81))
+    decl = math.radians(23.44 * math.sin(b))
+    eot_min = 9.87 * math.sin(2 * b) - 7.53 * math.cos(b) - 1.5 * math.sin(b)
+    solar_h = when.hour + when.minute / 60.0 + when.second / 3600.0 + lon / 15.0 + eot_min / 60.0
+    ha = math.radians(15.0 * (solar_h - 12.0))
+    phi = math.radians(lat)
+    return math.degrees(math.asin(math.sin(phi) * math.sin(decl) + math.cos(phi) * math.cos(decl) * math.cos(ha)))
 
 
 def _pass_minima(dists_km: list[float], within_km: float) -> list[int]:
@@ -2614,23 +3875,78 @@ def _pass_minima(dists_km: list[float], within_km: float) -> list[int]:
     return hits
 
 
-def _fetch_tles() -> str:
-    if _TLE_CACHE.exists() and time.time() - _TLE_CACHE.stat().st_mtime < _TLE_MAX_AGE_S:
-        return _TLE_CACHE.read_text(encoding="utf-8")
-    chunks = []
-    for c in _CONSTELLATIONS.values():
-        for nid in c["norad_ids"]:
+def _eo_predictor_cfgs(files: dict[str, dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Map eo-predictor satellite JSON (keyed by file stem) to next_pass cfgs."""
+    import math
+
+    cfgs, skipped = {}, []
+    for name, d in files.items():
+        if not d.get("norad_ids") or not d.get("swath_km"):
+            skipped.append(name)
+            continue
+        # only a tasked sensor points; Sentinel-1 and NISAR have a fixed look angle inside their swath
+        reach = d["swath_km"] / 2
+        if d.get("tasking"):
+            reach += (d.get("altitude_km") or 0) * math.tan(math.radians(d.get("off_nadir_deg") or 0))
+        cfgs[name] = {
+            "norad_ids": d["norad_ids"],
+            "swath_km": d["swath_km"],
+            "optical": d.get("sensor_type") != "SAR",
+            "reach_km": reach,
+            "access": d.get("data_access", "unknown"),
+        }
+    return cfgs, skipped
+
+
+def _load_constellations() -> tuple[dict[str, dict[str, Any]], str, list[str]]:
+    """eo-predictor's catalog (24 h disk cache), else the built-in list."""
+    try:
+        if _CATALOG_CACHE.exists() and time.time() - _CATALOG_CACHE.stat().st_mtime < _TLE_MAX_AGE_S:
+            files = json.loads(_CATALOG_CACHE.read_text(encoding="utf-8"))
+        else:
+            listing = _client.get(_EO_PREDICTOR_API)
+            listing.raise_for_status()
+            entries = [e for e in listing.json() if e["name"].endswith(".json")]
+
+            def one(e):
+                r = _client.get(e["download_url"])
+                r.raise_for_status()
+                return e["name"][:-5], r.json()
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                files = dict(pool.map(one, entries))
+            _CATALOG_CACHE.parent.mkdir(parents=True, exist_ok=True)
+            _CATALOG_CACHE.write_text(json.dumps(files), encoding="utf-8")
+        cfgs, skipped = _eo_predictor_cfgs(files)
+        if cfgs:
+            return cfgs, "developmentseed/eo-predictor", skipped
+    except Exception:
+        _CATALOG_CACHE.unlink(missing_ok=True)  # a corrupt file must not pin the fallback for 24 h
+    return _CONSTELLATIONS, "built-in list (eo-predictor catalog unreachable)", []
+
+
+def _fetch_tles(cfgs: dict[str, dict[str, Any]], path: Path) -> list[str]:
+    """Write TLEs for every id in cfgs to path (24 h cache); return ids with no data."""
+    if path.exists() and time.time() - path.stat().st_mtime < _TLE_MAX_AGE_S:
+        return []
+
+    def one(nid: int) -> str:
+        # a decayed satellite 404s and a throttled request is not worth failing the call for
+        try:
             r = _client.get(
                 "https://celestrak.org/NORAD/elements/gp.php",
                 params={"CATNR": nid, "FORMAT": "tle"},
             )
-            r.raise_for_status()
-            if "No GP data found" not in r.text:
-                chunks.append(r.text.strip())
-    text = "\n".join(chunks) + "\n"
-    _TLE_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    _TLE_CACHE.write_text(text, encoding="utf-8")
-    return text
+        except httpx.HTTPError:
+            return ""
+        return r.text.strip() if r.status_code == 200 and "No GP data found" not in r.text else ""
+
+    ids = sorted({n for c in cfgs.values() for n in c["norad_ids"]})
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        texts = list(pool.map(one, ids))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(t for t in texts if t) + "\n", encoding="utf-8")
+    return [f"norad-{n}" for n, t in zip(ids, texts) if not t]
 
 
 def next_pass(
@@ -2639,12 +3955,15 @@ def next_pass(
     days: int = 3,
     constellations: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Predict upcoming satellite passes over a point (Sentinel-2, Sentinel-1, Landsat).
+    """Predict upcoming satellite passes over a point, for the constellations EO Predictor shows.
 
     Answers "when could we next get imagery of this place." Propagates live
     Celestrak TLEs with Skyfield and reports each time a satellite's swath
-    band sweeps the point in the next `days` (max 7). Optical passes are
-    filtered to local daytime; radar (Sentinel-1) images day and night.
+    band sweeps the point in the next `days` (max 7). Every pass carries
+    `sun_elevation_deg` and `daylight` (sun above the horizon at the point at
+    pass time). Optical passes with the sun down are dropped, since optical
+    sensors do not acquire at night, and counted in `optical_passes_at_night`;
+    radar (Sentinel-1) is kept day or night and carries the flag too.
 
     Honest limits, and say them when it matters: this is swath geometry, not
     the acquisition plan — a pass is a POSSIBLE capture, not a promised one
@@ -2652,16 +3971,26 @@ def next_pass(
     Sentinel-1 follows an observation scenario). Cloud cover is its own
     gamble, and imagery lands in the public catalogs hours to a day later.
 
-    The prediction pattern follows developmentseed/eo-predictor, which does
-    this for many more constellations with an interactive map.
+    The constellation catalog (swath, altitude, off-nadir pointing, NORAD ids)
+    is read from developmentseed/eo-predictor; if it is unreachable a built-in
+    list of Sentinel-2, Sentinel-1 and Landsat is used and
+    `constellations_source` says so. The default is open-data constellations
+    only; every loaded one, commercial ones included, is available by name and
+    listed in `constellations_available`. Commercial sensors (`access` other
+    than "open") only image on order, and a tasked one is counted as a pass
+    whenever the target is inside its off-nadir reach. The result links EO
+    Predictor (`eo_predictor_url`), the richer interactive view.
     """
     import numpy as np
     from skyfield.api import load, wgs84
 
     days = min(days, 7)
-    wanted = constellations or list(_CONSTELLATIONS)
-    _fetch_tles()  # ensures the cache file exists and is fresh
-    sats = load.tle_file(str(_TLE_CACHE))
+    cfgs, source, skipped = _load_constellations()
+    wanted = constellations or [k for k, c in cfgs.items() if c.get("access", "open") == "open"]
+    # one TLE file per catalog source: a fallback-run file must not serve a catalog run
+    tle_path = _TLE_CACHE.with_name(f"{_TLE_CACHE.stem}-{'eo-predictor' if cfgs is not _CONSTELLATIONS else 'builtin'}.txt")
+    skipped = skipped + _fetch_tles({k: cfgs[k] for k in wanted if k in cfgs}, tle_path)
+    sats = load.tle_file(str(tle_path))
     by_id = {s.model.satnum: s for s in sats}
 
     ts = load.timescale()
@@ -2672,8 +4001,9 @@ def next_pass(
     target = wgs84.latlon(lat, lon)
 
     passes = []
+    at_night = 0
     for cname in wanted:
-        cfg = _CONSTELLATIONS.get(cname)
+        cfg = cfgs.get(cname)
         if not cfg:
             continue
         for nid in cfg["norad_ids"]:
@@ -2690,20 +4020,23 @@ def next_pass(
                     -1, 1,
                 )
             )
-            for i in _pass_minima(d.tolist(), cfg["swath_km"] / 2):
+            for i in _pass_minima(d.tolist(), cfg.get("reach_km", cfg["swath_km"] / 2)):
                 t = times[i]
                 utc = t.utc_datetime()
-                if cfg["optical"]:
-                    solar = _local_solar_hour(utc.hour + utc.minute / 60.0, lon)
-                    if not (6.0 <= solar <= 18.0):
-                        continue  # optical only acquires in daylight
+                sun = _sun_elevation_deg(utc, lat, lon)
+                if cfg["optical"] and sun <= 0:
+                    at_night += 1
+                    continue  # optical only acquires in daylight
                 passes.append(
                     {
                         "constellation": cname,
                         "satellite": sat.name,
                         "time_utc": utc.strftime("%Y-%m-%d %H:%M"),
+                        "sun_elevation_deg": round(sun, 1),
+                        "daylight": sun > 0,
                         "track_distance_km": round(float(d[i]), 1),
                         "kind": "optical" if cfg["optical"] else "radar (day or night, sees through cloud)",
+                        "access": cfg.get("access", "open"),
                     }
                 )
     passes.sort(key=lambda p: p["time_utc"])
@@ -2711,10 +4044,17 @@ def next_pass(
         "point": {"lat": lat, "lon": lon},
         "window_days": days,
         "passes": passes,
+        "optical_passes_at_night": at_night,
+        "constellations_source": source,
+        "constellations_available": list(cfgs),
+        "skipped": skipped,
+        "eo_predictor_url": EO_PREDICTOR_URL,
         "note": (
             "swath geometry from live TLEs, not the acquisition plan — a pass is a "
             "possible capture, and imagery reaches public catalogs hours to a day later. "
-            "Pattern: developmentseed/eo-predictor"
+            "Optical passes are kept only when the sun is above the horizon at the point; "
+            "a low sun (under about 10 degrees) gives a dim image. "
+            f"Commercial sensors only image if tasked. Richer view: {EO_PREDICTOR_URL}"
         ),
     }
 
@@ -2818,7 +4158,11 @@ def _conditions_signals(dryness: dict[str, Any], wind: dict[str, Any], events: d
         if event_signals:
             signals.extend(event_signals)
         else:
-            signals.append("no active events within ~150 km")
+            down = [n.upper() for n, v in (events.get("sources") or {}).items() if not v.get("ok")]
+            if down:
+                signals.append(f"no events from {' or '.join(n for n in ('EONET', 'GDACS') if n not in down)}; {' and '.join(down)} did not answer")
+            else:
+                signals.append("no active events within ~150 km")
 
     return signals
 
@@ -2916,6 +4260,9 @@ def conditions_brief(
     try:
         events_data = active_events(bbox=bbox, pad=1.5)
         brief["events"] = events_data
+        for k in ("sources", "all_clear", "all_clear_note"):
+            if k in events_data:
+                brief[k] = events_data[k]
     except Exception as e:
         brief["events_error"] = str(e)
 
@@ -2959,8 +4306,11 @@ def conditions_brief(
                 "constellation": p.get("constellation"),
                 "satellite": p.get("satellite"),
                 "time_utc": p.get("time_utc"),
+                "daylight": p.get("daylight"),
+                "sun_elevation_deg": p.get("sun_elevation_deg"),
                 "track_distance_km": p.get("track_distance_km"),
                 "kind": p.get("kind"),
+                "access": p.get("access"),
             })
         brief["next_looks"] = next_looks
     except Exception as e:
@@ -2981,6 +4331,6 @@ def conditions_brief(
     brief["summary"] = ". ".join(summary_parts) + "." if summary_parts else ""
 
     # Honesty framing note
-    brief["note"] = "current conditions from live sources — not a risk model, not a prediction"
+    brief["note"] = "current conditions from live sources — not a risk model, not a prediction; a source that did not answer is named in sources and an empty list is all-clear only when all_clear is true"
 
     return brief

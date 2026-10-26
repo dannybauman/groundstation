@@ -72,6 +72,34 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - link: https://eoapi.dev
 - when: catalog=veda
 
+## eoAPI raster
+- stage: pixels
+- what: Development Seed's public eoAPI instance, raster.eoapi.dev — it reads HRRR GRIB through GDAL's vrt:// and is the fallback tiler when titiler.xyz rate-limits
+- ds-role: created
+- island: cng
+- integration: the HRRR smoke frames on a brief's map, and the tiles a map swaps to on a titiler.xyz 429
+- speaks-to: eoAPI, TiTiler, NOAA HRRR
+- link: https://github.com/developmentseed/eoAPI
+- when: tiler_hosts=raster.eoapi.dev
+
+## NOAA HRRR
+- stage: data
+- what: NOAA's 3 km hourly CONUS weather model — the near-surface smoke mass density band
+- ds-role: uses
+- integration: tomorrow's smoke over the area, as a map frame and two numbers
+- speaks-to: eoAPI raster
+- link: https://registry.opendata.aws/noaa-hrrr-pds/
+- when: tiler_hosts=raster.eoapi.dev
+
+## smokehrrr
+- stage: pixels
+- what: the recipe for tiling NOAA HRRR smoke GRIBs through eoAPI vrt://
+- ds-role: uses
+- integration: the vrt:// URL construction and colormap that turns HRRR MASSDEN GRIBs into transparent smoke tiles
+- speaks-to: NOAA HRRR, eoAPI raster
+- link: https://github.com/hrodmn/smokehrrr
+- when: tiler_hosts=raster.eoapi.dev
+
 ## stac-fastapi
 - stage: catalog
 - what: the STAC API server — the one NASA VEDA and Planetary Computer both answer searches with
@@ -80,6 +108,16 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - integration: the search endpoint behind every VEDA and Planetary Computer query here
 - speaks-to: pgstac, STAC, eoAPI
 - link: https://github.com/stac-utils/stac-fastapi
+- when: catalog=veda,planetary-computer
+
+## stac-fastapi-collection-discovery
+- stage: catalog
+- what: Development Seed's STAC API extension for federated collection discovery across catalogs
+- ds-role: created
+- island: cng
+- integration: search_datasets queries multiple catalogs concurrently and filters collections in-process by place and resolution following this pattern
+- speaks-to: STAC, stac-fastapi
+- link: https://github.com/developmentseed/stac-fastapi-collection-discovery
 - when: catalog=veda,planetary-computer
 
 ## pgstac
@@ -91,6 +129,28 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - speaks-to: stac-fastapi, titiler-pgstac
 - link: https://github.com/stac-utils/pgstac
 - when: catalog=veda,planetary-computer
+
+## rustac
+- stage: catalog
+- what: the Rust STAC library with Python bindings; reads, searches and writes stac-geoparquet
+- ds-role: contributes
+- island: cng
+- integration: searches a cached stac-geoparquet archive like a catalog, and writes the archive from a live search, so the search step runs with the network off
+- speaks-to: STAC, Earth Search
+- link: https://github.com/stac-utils/rustac-py
+- when: catalog=geoparquet
+<!-- archive layers carry no catalog fact yet: this never fires until stack_facts names one -->
+
+## stac-geoparquet
+- stage: catalog
+- what: the open specification for storing STAC collections and item records in GeoParquet
+- ds-role: contributes
+- island: cng
+- integration: the file format write_archive writes and search_imagery searches like a catalog
+- speaks-to: STAC, rustac
+- link: https://github.com/stac-utils/stac-geoparquet
+- when: catalog=geoparquet
+<!-- archive layers carry no catalog fact yet: this never fires until stack_facts names one -->
 
 ## stac-server
 - stage: catalog
@@ -304,3 +364,78 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - speaks-to: eo-predictor
 - link: https://celestrak.org
 - when: passes
+
+## Zarr
+- stage: data
+- what: chunked, cloud-native N-dimensional arrays — the format of forecast and reanalysis grids that STAC and COGs do not carry
+- ds-role: contributes
+- island: cng
+- integration: the curated stores (GFS, HRRR, ERA5, MUR) read by `compute_statistics` and drawn by titiler.xyz `/zarr/tiles`. New dep `zarr`: it opens the stores; the format has no lighter reader
+- speaks-to: xarray, obstore, TiTiler
+- link: https://zarr.dev
+- when: collection=noaa-gfs-forecast,noaa-hrrr-forecast,nasa-mur-sst,weatherbench2-era5
+
+## xarray
+- stage: data
+- what: labelled N-dimensional arrays — selects a variable, a time and a bbox out of a Zarr store
+- ds-role: uses
+- integration: the nearest-time `sel` and the clip-and-reduce behind a Zarr statistic. New dep `xarray`: titiler.xarray reads stores through it, so the statistics and the tiles agree on what a selection means
+- speaks-to: Zarr, obstore
+- link: https://xarray.dev
+- when: collection=noaa-gfs-forecast,noaa-hrrr-forecast,nasa-mur-sst,weatherbench2-era5
+
+## obstore
+- stage: data
+- what: Development Seed's fast object-store client for Python (Rust-backed), with a Zarr store adapter
+- ds-role: created
+- island: cng
+- integration: reads the S3 Zarr stores (HRRR, MUR) anonymously. New dep `obstore`: it is our own tool and the one zarr's `ObjectStore` wraps. The https stores go through httpx instead, because Cloudflare-fronted hosts send compressed metadata with no Content-Length, which obstore's HTTP store rejects
+- speaks-to: Zarr, Cloud object storage
+- link: https://github.com/developmentseed/obstore
+- when: collection=noaa-hrrr-forecast,nasa-mur-sst
+
+## titiler.xarray
+- stage: pixels
+- what: TiTiler's xarray extension — web map tiles, point and statistics routes over Zarr variables, selected by `variable` and `sel`
+- ds-role: created
+- island: cng
+- integration: titiler.xyz `/zarr/tiles` draws the stores that open there (ERA5 today); GFS, HRRR and MUR do not and say why in `tiles_note`
+- speaks-to: TiTiler, Zarr, xarray
+- link: https://github.com/developmentseed/titiler
+- when: collection=weatherbench2-era5
+
+## NOAA HRRR Zarr (University of Utah)
+- stage: data
+- what: University of Utah's hourly HRRR Zarr archive on AWS Open Data
+- ds-role: uses
+- integration: the hourly CONUS temperature forecast grid behind compute_statistics on noaa-hrrr-forecast
+- speaks-to: Zarr, xarray, obstore
+- link: https://registry.opendata.aws/noaa-hrrr-zarr/
+- when: collection=noaa-hrrr-forecast
+
+## GFS Zarr (Dynamical.org)
+- stage: data
+- what: NOAA Global Forecast System weather model archived in Zarr format by Dynamical.org
+- ds-role: uses
+- integration: the global GFS forecast grid (deprecated plain Zarr copy; Icechunk is the upgrade path)
+- speaks-to: Zarr, xarray
+- link: https://data.dynamical.org
+- when: collection=noaa-gfs-forecast
+
+## NASA MUR SST
+- stage: data
+- what: NASA Multi-scale Ultra-high Resolution (MUR) Sea Surface Temperature on AWS Open Data
+- ds-role: uses
+- integration: 1 km daily global sea surface temperature analysis in Zarr format
+- speaks-to: Zarr, obstore
+- link: https://registry.opendata.aws/mur/
+- when: collection=nasa-mur-sst
+
+## WeatherBench 2 ERA5
+- stage: data
+- what: Google Research benchmark dataset — ECMWF ERA5 reanalysis regridded to Zarr on Google Cloud
+- ds-role: uses
+- integration: global 1.5 degree atmospheric reanalysis drawn by titiler.xyz and computed by compute_statistics
+- speaks-to: Zarr, xarray, TiTiler
+- link: https://weatherbench2.readthedocs.io
+- when: collection=weatherbench2-era5

@@ -43,7 +43,7 @@
     btn.textContent = "Loading " + EXTRAS.length + " scene" + (EXTRAS.length > 1 ? "s" : "") + "…";
     EXTRAS.forEach((e, i) => {
       const id = "extra" + i;
-      map.addSource(id, { type: "raster", tiles: [e.tiles], tileSize: 256,
+      map.addSource(id, { type: "raster", tiles: [originKey(e.tiles)], tileSize: 256,
         ...(e.bounds ? { bounds: e.bounds } : {}) });
       // beneath the main drape: gap fillers must never cover the best scene
       map.addLayer({ id, type: "raster", source: id,
@@ -122,6 +122,10 @@
 
 <script>
 const STYLE = {"version": 8, "sources": {"basemap": {"type": "raster", "tiles": ["https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png"], "tileSize": 256, "attribution": "&copy; OpenStreetMap &copy; CARTO"}, "imagery": {"type": "raster", "tiles": ["https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2B_15PYS_20260801_0_L2A&assets=visual"], "tileSize": 256, "bounds": [-91.145572, 14.366984, -90.114913, 15.369339]}, "dem": {"type": "raster-dem", "tiles": ["https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"], "tileSize": 256, "encoding": "terrarium", "maxzoom": 15}}, "layers": [{"id": "basemap", "type": "raster", "source": "basemap"}, {"id": "imagery", "type": "raster", "source": "imagery", "paint": {"raster-opacity": 1}}]};
+// CloudFront on titiler.xyz caches the CORS header with the tile and does not
+// vary by origin, so the URL must differ per origin or a cached tile is refused
+const originKey = (u) => u + (u.includes("?") ? "&" : "?") + "o=" + (location.origin === "null" ? "sandbox" : location.origin.replace(/[^a-z0-9]/gi, "").slice(-16));
+STYLE.sources.imagery.tiles = STYLE.sources.imagery.tiles.map(originKey);
 const BBOX = [-91.05, 14.35, -90.72, 14.62];
 const CENTER = [(BBOX[0] + BBOX[2]) / 2, (BBOX[1] + BBOX[3]) / 2];
 const BOUNDS = [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]];

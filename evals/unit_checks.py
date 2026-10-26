@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import sys
 import tempfile
@@ -20,6 +21,19 @@ from groundstation import tools  # noqa: E402
 from groundstation.tools import _bbox_coverage_pct, _expression_to_bands  # noqa: E402
 import brief  # noqa: E402
 import brief_checks  # noqa: E402
+
+# artifacts may only land under GROUNDSTATION_OUT or the cwd tree; the suite's
+# tempdirs are neither, so the suite's out root is the system tempdir
+os.environ["GROUNDSTATION_OUT"] = tempfile.gettempdir()
+
+
+def _offline(*a, **k):
+    raise RuntimeError("offline suite: no network")
+
+
+# a layer without asset_href reads its item for the 429 fallback; offline that is a
+# cached None, loud if anything expected a real answer
+tools._get_json = _offline
 
 FAILED = []
 
@@ -197,9 +211,13 @@ def t_next_pass_pure_helpers():
     assert tools._pass_minima([300, 200, 300], 145) == []
     # plateau at the minimum still counts once (<= left, < right)
     assert tools._pass_minima([300, 50, 50, 300], 145) == [2]
-    # local solar time: UTC 19:00 at 120W is 11:00 — a daytime optical pass
-    assert abs(tools._local_solar_hour(19.0, -120) - 11.0) < 0.01
-    assert abs(tools._local_solar_hour(2.0, 140) - 11.33) < 0.34
+    # sun elevation (NOAA approximation, about 1 degree)
+    U = dt.timezone.utc
+    sun = tools._sun_elevation_deg
+    assert sun(dt.datetime(2026, 3, 20, 12, 0, tzinfo=U), 0, 0) > 85
+    assert abs(sun(dt.datetime(2026, 6, 21, 12, 0, tzinfo=U), 0, 0) - 66.5) < 1.5
+    assert sun(dt.datetime(2026, 10, 26, 12, 29, tzinfo=U), 78.22, 15.65) < 0  # Longyearbyen, polar night
+    assert 30 < sun(dt.datetime(2026, 10, 28, 19, 13, tzinfo=U), 38.82, -123.19) < 40
 
 
 def t_coverage_note_names_the_hole():
@@ -293,6 +311,32 @@ def t_3d_state_marks_what_does_not_draw_on_load():
         assert "coverage_pct_loaded" not in r["state"]
 
 
+def t_3d_fills_short_coverage_with_same_day_siblings():
+    main = {"type": "item", "catalog": "earth-search", "collection_id": "c", "item_id": "A_1",
+            "assets": ["visual"], "bbox": [0, 0, 6, 10]}
+    sib = {"id": "A_2", "collection": "c", "datetime": "2026-10-23T19:00:00Z", "bbox": [5, 0, 10, 10]}
+    main_it = {**sib, "id": "A_1", "bbox": [0, 0, 6, 10]}
+    o_img, o_item, o_tile = tools.search_imagery, tools._item, tools.tile_url_template
+    tools.search_imagery = lambda *a, **kw: {"items": [main_it, sib]}
+    tools._item = lambda cat, coll, iid: {"properties": {"datetime": "2026-10-23T19:00:00Z"}}
+    tools.tile_url_template = lambda cat, coll, iid, *a: f"https://x/{iid}/{{z}}/{{x}}/{{y}}.png"
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            r = tools.render_map_3d("t", [0, 0, 10, 10], main, out_path=str(Path(d) / "a.html"))
+            s = r["state"]
+            assert r["filled_with"] == ["A_2"] and s["coverage_pct"] == 100.0
+            assert [l["name"] for l in s["layers"]] == ["A_1", "A_2"]
+            assert not s["layers"][1].get("deferred") and "sibling" in s["layers"][1]["reason"]
+            assert "coverage_note" not in r
+            html = Path(r["path"]).read_text()
+            assert "https://x/A_2/" in html and "sibling0" in html
+            r = tools.render_map_3d("t", [0, 0, 10, 10], main, fill_coverage=False, out_path=str(Path(d) / "b.html"))
+            assert r["state"]["coverage_pct"] == 60.0 and "filled_with" not in r
+            assert len(r["state"]["layers"]) == 1
+    finally:
+        tools.search_imagery, tools._item, tools.tile_url_template = o_img, o_item, o_tile
+
+
 def t_field_test_etime_parser():
     # the field-test preflight compares MCP server start time against source
     # mtime; getting ps -o etime parsing wrong makes the warning silently never
@@ -307,6 +351,19 @@ def t_field_test_etime_parser():
     assert ft._etime_seconds("2-03:00:00") == 2 * 86400 + 3 * 3600
     assert ft._etime_seconds("") is None
     assert ft._etime_seconds("not-a-time") is None
+
+
+def t_map_draws_legend_for_worldcover():
+    with tempfile.TemporaryDirectory() as d:
+        def lay(cm):
+            return [{"type": "raster", "name": "r", "tiles": "https://x/{z}/{x}/{y}.png", "colormap_name": cm}]
+        out = str(Path(d) / "a.html")
+        r = tools.render_map("t", [0, 0, 1, 1], lay("esa-worldcover"), out_path=out)
+        html = Path(r["map_path"]).read_text()
+        assert "ESA WorldCover 2021" in html and "Cropland" in html and "Built-up" in html
+        assert len(r["legend"]["classes"]) == 11 and r["legend"]["classes"][3]["name"] == "Cropland"
+        r = tools.render_map("t", [0, 0, 1, 1], lay("viridis"), out_path=str(Path(d) / "b.html"))
+        assert "legend" not in r and 'id="legends"' not in Path(r["map_path"]).read_text()
 
 
 def t_map_with_no_imagery_says_so():
@@ -340,6 +397,15 @@ def t_state_never_changes_the_file():
         assert Path(one).read_bytes() == Path(two).read_bytes()
         assert r1["state"] == r2["state"]
         assert r1["map_path"] != r2["map_path"]  # only the path differs
+
+
+def t_render_map_tiles_carry_origin_key():
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        tools.render_map("t", [0, 0, 1, 1], [{"type": "raster", "name": "A", "tiles": "https://x/{z}/{x}/{y}.png"}], out_path=out)
+        html = Path(out).read_text(encoding="utf-8")
+        assert "const originKey = (u) =>" in html
+        assert "tiles: [originKey(l.tiles)]" in html and "setTiles([originKey(l.fallback_tiles)])" in html
 
 
 def t_render_map_compare_mode():
@@ -520,6 +586,35 @@ def t_conditions_weather_partitioning():
         tools.next_pass = orig_next
 
 
+def t_compare_dates_clips_means_to_bbox():
+    # Field tests 4, 8, 10, 11: the delta was a whole-tile number for the place asked about
+    saved = (tools.search_imagery, tools.compute_statistics, tools.render_map)
+    box = [-121.5, 39.4, -121.4, 39.5]
+    seen = []
+
+    def item(i, d):
+        return {"id": i, "collection": "sentinel-2-l2a", "datetime": d + "T18:00:00Z",
+                "cloud_cover": 1, "bbox": [-122, 39, -121, 40]}
+
+    tools.search_imagery = lambda *a, **kw: {"items": [item("S2A_10TFK_20260601_0_L2A", "2026-06-01"),
+                                                       item("S2A_10TFK_20260501_0_L2A", "2026-05-01")]}
+
+    def fake_stats(cat, coll, iid, **kw):
+        seen.append(kw.get("bbox"))
+        return {"nd": {"mean": 0.5}, "clipped_to": kw.get("bbox")}
+
+    tools.compute_statistics = fake_stats
+    maps = []
+    tools.render_map = lambda **kw: maps.append(kw) or {"map_path": "x.html"}
+    try:
+        out = tools.compare_dates(bbox=box, window_before="a/b", window_after="c/d", stack_facts={"terrain": True})
+        assert maps[0]["stack_facts"] == {"geocoded": False, "terrain": True}, maps[0]["stack_facts"]
+        assert seen == [box, box], seen
+        assert out["clipped_to"] == box and "extent_note" not in out
+    finally:
+        tools.search_imagery, tools.compute_statistics, tools.render_map = saved
+
+
 # smallest valid PNG (1x1) — the card only has to embed bytes, not decode them
 CANNED_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -548,6 +643,12 @@ def t_postcard_attribution_block():
     assert "license:" not in _postcard()  # omitted, not left blank
 
 
+def t_postcard_legend_row():
+    html = _postcard(legends=tools._legends_for([], "esa-worldcover"))
+    assert "ESA WorldCover 2021" in html and "Mangroves" in html and "<script" not in html
+    assert 'class="legend"' not in _postcard()
+
+
 def t_postcard_license_placeholder_omitted():
     # STAC's "proprietary" is a missing-SPDX-id marker, not a terms claim
     assert tools._shareable_license("proprietary") is None
@@ -572,6 +673,64 @@ def t_postcard_no_local_paths_and_small():
         assert "/Users/" not in html and "file://" not in html
         assert "First light after the storm." in html
         assert out.stat().st_size < 5 * 1024 * 1024
+
+
+class _ImgResp:
+    def __init__(self, status):
+        self.status_code, self.content = status, CANNED_PNG
+
+
+def _postcard_call(status=200, **kw):
+    seen = []
+    saved = tools._client.get, tools._get_json
+    tools._client.get = lambda url, **k: (seen.append(url), _ImgResp(status))[1]
+    tools._get_json = lambda url, **k: {"bbox": [-113, 33, -111, 34], "license": "x"}
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            out = tools.render_postcard(
+                "planetary-computer", "landsat-c2-l2", "I", "P", "2026-08-17",
+                out_path=str(Path(d) / "c.html"), **kw,
+            )
+            html = Path(out["path"]).read_text(encoding="utf-8") if "path" in out else ""
+    finally:
+        tools._client.get, tools._get_json = saved
+    return out, seen, html
+
+
+def t_postcard_pc_honors_assets_rescale_colormap_bbox():
+    out, seen, html = _postcard_call(
+        assets=["lwir11"], rescale="48000,57000", colormap_name="inferno",
+        bbox=[-112.25, 33.35, -111.95, 33.60],
+    )
+    u = seen[0]
+    assert "/api/data/v1/item/bbox/" in u and "assets=lwir11" in u
+    assert "rescale=48000%2C57000" in u and "colormap_name=inferno" in u
+    assert "dropped" not in out and "not applied" not in html
+
+
+def t_postcard_pc_no_params_keeps_prerendered_preview():
+    saved = tools._get_json
+    seen = []
+    try:
+        tools._get_json = lambda url, **k: {"assets": {"rendered_preview": {"href": "https://pc/pre.png"}}, "license": "x"}
+        saved_get = tools._client.get
+        tools._client.get = lambda url, **k: (seen.append(url), _ImgResp(200))[1]
+        with tempfile.TemporaryDirectory() as d:
+            tools.render_postcard("planetary-computer", "landsat-c2-l2", "I", "P", "d", out_path=str(Path(d) / "c.html"))
+    finally:
+        tools._get_json, tools._client.get = saved, saved_get
+    assert seen == ["https://pc/pre.png"]
+
+
+def t_postcard_failed_image_is_an_error_not_a_card():
+    out, seen, _ = _postcard_call(status=500, assets=["red"])
+    assert "path" not in out and "HTTP 500" in out["error"] and out["url"] == seen[0]
+
+
+def t_postcard_names_what_it_dropped():
+    out, _, html = _postcard_call(bbox=[-112.25, 33.35, -111.95, 33.60], fill_item_ids=["J"])
+    assert {d["param"] for d in out["dropped"]} == {"fill_item_ids"}
+    assert "not applied: fill_item_ids" in html
 
 
 def _render_3d(**kw) -> str:
@@ -789,8 +948,9 @@ def t_stack_layer_toggle_present_when_on():
     assert "sentinel-2-l2a" in html and "prefers-reduced-motion" in html
 
 
-def t_stack_layer_absent_by_default():
-    html, r = _render_stack_map()
+def t_stack_layer_absent_when_off():
+    # on by default since 0.23.0 (field tests 10 and 11 shipped 19 of 20 without it); off is the opt-out
+    html, r = _render_stack_map(stack_layer=False)
     assert 'id="stack-toggle"' not in html and 'class="stack-entry"' not in html
     assert "note" not in r
 
@@ -826,7 +986,7 @@ def t_stack_3d_claims_terrain():
     html = _render_3d(stack_layer=True)
     assert 'id="stack-toggle"' in html and 'id="stack"' in html
     assert "AWS Terrarium terrain" in html and "sentinel-2-l2a" in html
-    assert 'id="stack-toggle"' not in _render_3d()  # off by default, bytes unchanged
+    assert 'id="stack-toggle"' not in _render_3d(stack_layer=False)  # off on request, bytes unchanged
 
 
 def t_stack_postcard_listing_static_and_honest():
@@ -899,6 +1059,9 @@ def t_snapshot_card_templates_and_facts():
     for html in (map_html, _render_3d()):
         assert "window.gsMaps" in html and 'location.hash === "#clean"' in html
         assert ".clean #panel" in html
+    # the flat map counts its load handlers down, so a snapshot cannot fire
+    # between map.loaded() and the raster layers being added (field test 11)
+    assert "window.gsPending = 1;" in map_html and "window.gsPending--;" in map_html
     # a snapshot card inherits the map's facts: MapLibre + events claimed
     # only because the view exercised them; imagery cards still claim neither
     facts = tools._map_stack_facts([], [{"type": "geojson", "name": "ev"}], {"events": True})
@@ -1001,6 +1164,36 @@ Quiet day, alert level CALM as of 2026-07-09.
 ## Suggested next steps
 1. nothing
 """
+
+
+def t_events_empty_is_all_clear_only_if_every_source_answered():
+    saved = tools._get_json
+    try:
+        def gdacs_down(url, **kw):
+            if "gdacs" in url:
+                raise TimeoutError("timed out")
+            return {"events": []}
+        tools._get_json = gdacs_down
+        ev = tools.active_events(bbox=[-95.9, 29.5, -94.9, 30.2])
+        assert ev["all_clear"] is False and ev["sources"]["gdacs"]["ok"] is False, ev
+        assert ev["sources"]["eonet"]["ok"] is True and ev["sources"]["eonet"]["listed"] == 0
+        assert "GDACS did not answer" in ev["all_clear_note"], ev["all_clear_note"]
+        sig = tools._conditions_signals({}, {}, ev)
+        assert "no events from EONET; GDACS did not answer" in sig, sig
+        tools._get_json = lambda url, **kw: {"events": [], "features": []}
+        ev = tools.active_events(bbox=[-95.9, 29.5, -94.9, 30.2])
+        assert ev["all_clear"] is True and ev["sources"]["gdacs"]["listed"] == 0, ev
+    finally:
+        tools._get_json = saved
+
+
+def t_brief_calm_over_failed_source_becomes_watch():
+    md = "## TL;DR\nCALM. Nothing to report.\n\n## What changed\nNone."
+    down = {"events": {"sources": {"eonet": {"ok": True}, "gdacs": {"ok": False}}}}
+    out = brief._ensure_source_honesty(md, down)
+    assert "WATCH — GDACS did not answer; CALM is unconfirmed" in out and "Nothing to report." in out, out
+    assert brief._ensure_source_honesty(md, {"events": {"sources": {"gdacs": {"ok": True}}}}) == md
+    assert brief._ensure_source_honesty(md, {"weather_error": "x"}).count("WATCH") == 1
 
 
 def t_brief_checks_pass():
@@ -1249,16 +1442,86 @@ def t_empty_dataset_search_says_what_it_searched():
     ]
     try:
         out = tools.search_datasets("himawari")
-        assert len(out) == 1 and out[0]["searched"] == list(tools.CATALOGS), out
+        assert len(out) == 1 and out[0]["searched"] == [*tools.CATALOGS, "zarr"], out
         assert "does not mean the data does not exist" in out[0]["note"], out
         one = tools.search_datasets("himawari", catalog="veda")
         assert one[0]["searched"] == ["veda"], one
         hit = tools.search_datasets("sentinel")
-        assert hit == [{"catalog": c, "id": "sentinel-2-l2a", "title": "Sentinel-2", "summary": ""}
+        assert hit == [{"catalog": c, "id": "sentinel-2-l2a", "title": "Sentinel-2", "summary": "", "gsd": None}
                        for c in tools.CATALOGS], hit
         assert not any("note" in h for h in hit)
     finally:
         tools._collections = saved
+
+
+def t_search_datasets_spatial_and_resolution_filters():
+    efate = [168.0, -18.0, 168.6, -17.4]
+    cols = [
+        {"id": "inside", "extent": {"spatial": {"bbox": [[160, -25, 175, -10]]}},
+         "summaries": {"gsd": [10, 20]}},
+        {"id": "outside", "extent": {"spatial": {"bbox": [[-10, 40, 10, 60]]}},
+         "summaries": {"gsd": [10]}},
+        {"id": "blank"},
+        {"id": "nulls", "extent": {"spatial": {"bbox": [[None, None, None, None]]}}},
+        {"id": "short", "extent": {"spatial": {"bbox": [[1, 2]]}}},
+        {"id": "coarse", "extent": {"spatial": {"bbox": [[160, -25, 175, -10]]}},
+         "item_assets": {"b": {"gsd": 30}}},
+    ]
+    saved = tools._collections
+    tools._collections = lambda cat: cols
+    try:
+        out = tools.search_datasets("", catalog="veda", bbox=efate, max_gsd=10)
+        assert [h["id"] for h in out] == ["inside", "blank", "nulls", "short"], out
+        assert out[0]["gsd"] == 10.0 and out[0]["covers_aoi"] is True
+        assert out[1]["gsd"] is None and out[1]["covers_aoi"] == "unknown"
+        assert "no gsd" in out[1]["note"] and "no spatial extent" in out[1]["note"]
+        assert [h["id"] for h in tools.search_datasets("", catalog="veda", bbox=efate)] == ["inside", "blank", "nulls", "short", "coarse"]
+        assert "covers_aoi" not in tools.search_datasets("", catalog="veda")[0]
+        # Antimeridian: bbox crossing 180 matches collections covering that longitude
+        fiji = [177.0, -19.0, -179.0, -16.0]
+        fiji_col = {"id": "fiji-cross", "extent": {"spatial": {"bbox": [[175, -20, 180, -15]]}}, "summaries": {"gsd": [10]}}
+        tools._collections = lambda cat: [fiji_col, {"id": "other", "extent": {"spatial": {"bbox": [[0, 0, 10, 10]]}}, "summaries": {"gsd": [10]}}]
+        fiji_out = tools.search_datasets("", catalog="veda", bbox=fiji, max_gsd=10)
+        assert [h["id"] for h in fiji_out] == ["fiji-cross"]
+        assert fiji_out[0]["covers_aoi"] is True
+    finally:
+        tools._collections = saved
+
+
+def t_eo_predictor_mapping_and_fallback():
+    fixture = json.loads("""{"constellation": "WorldView-3", "sensor_type": "optical",
+      "swath_km": 13, "altitude_km": 617, "off_nadir_deg": 30, "data_access": "commercial",
+      "tasking": true, "norad_ids": [40115]}""")
+    sar = {"sensor_type": "SAR", "swath_km": 410, "altitude_km": 693, "off_nadir_deg": 33,
+           "data_access": "open", "tasking": False, "norad_ids": [39634, 62261]}
+    cfgs, skipped = tools._eo_predictor_cfgs(
+        {"worldview-3": fixture, "sentinel-1": sar, "bad": {"swath_km": 5}}
+    )
+    assert skipped == ["bad"] and cfgs["sentinel-1"]["optical"] is False
+    assert cfgs["sentinel-1"]["reach_km"] == 205 and cfgs["worldview-3"]["access"] == "commercial"
+    assert abs(cfgs["worldview-3"]["reach_km"] - (6.5 + 617 * 0.57735)) < 0.1
+    saved = (tools._client, tools._CATALOG_CACHE, tools._fetch_tles, tools._TLE_CACHE)
+    try:
+        class Dead:
+            def get(self, *a, **k):
+                raise RuntimeError("offline")
+        with tempfile.TemporaryDirectory() as d:
+            tools._client = Dead()
+            tools._CATALOG_CACHE = Path(d) / "eo-predictor.json"
+            tools._TLE_CACHE = Path(d) / "tle.txt"
+            (Path(d) / "tle-builtin.txt").write_text("")
+            tools._fetch_tles = lambda cfgs, path: []
+            tools._CATALOG_CACHE.write_text("{not json")
+            c, src, sk = tools._load_constellations()
+            assert "built-in list" in src and not tools._CATALOG_CACHE.exists()
+            c, src, sk = tools._load_constellations()
+            assert c is tools._CONSTELLATIONS and "built-in list" in src
+            out = tools.next_pass(-17.7, 168.3, days=1, constellations=["sentinel-2"])
+            assert "built-in list" in out["constellations_source"], out
+            assert out["constellations_available"] == list(tools._CONSTELLATIONS)
+            assert out["eo_predictor_url"] == "https://developmentseed.org/eo-predictor"
+    finally:
+        tools._client, tools._CATALOG_CACHE, tools._fetch_tles, tools._TLE_CACHE = saved
 
 
 def t_recommended_is_the_covering_scene_not_the_clearest():
@@ -1541,7 +1804,25 @@ def t_statistics_have_one_shape_clipped_or_not():
         tools._client.post, tools._get_json = saved_post, saved_json
     assert out["vv"]["percentile_98"] == 400.0 and "histogram" not in out["vv"], out
     assert out["clipped_to"] == [0.2, 0.2, 0.8, 0.8] and "extent_note" not in out, out
-    assert out["band_scaling"] == [{"scale": 1.0, "unit": "DN"}], "scaling travels on the clipped path too"
+    assert out["band_scaling"] == [{"scale": 1.0, "unit": "DN", "bands": ["vv"]}], "scaling travels on the clipped path too"
+    assert "scaling_note" not in out, "scale 1 offset 0 is not a caveat"
+
+
+def t_statistics_say_when_scale_and_offset_are_unapplied():
+    # Field test No.12: Sentinel-2 stats were raw DN and nothing said so in words.
+    feature = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
+               "properties": {"statistics": {"b1": {"min": 1.0, "max": 9.0, "mean": 5.0, "percentile_2": 2.0, "percentile_98": 8.0, "histogram": [1, 2]}}}}
+    band = [{"scale": 0.0001, "offset": -0.1}]
+    item = {"bbox": [0, 0, 1, 1], "assets": {k: {"raster:bands": band} for k in ("green", "swir16", "nir")}}
+    saved_post, saved_json = tools._client.post, tools._get_json
+    tools._client.post = lambda url, **kw: _FakeResp(feature)
+    tools._get_json = lambda url, **kw: item
+    try:
+        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "S2X", assets=["green"], bbox=[0.2, 0.2, 0.8, 0.8])
+    finally:
+        tools._client.post, tools._get_json = saved_post, saved_json
+    assert len(out["band_scaling"]) == 1 and len(out["band_scaling"][0]["bands"]) == 3, out["band_scaling"]
+    assert "0.0001" in out["scaling_note"] and "-0.1" in out["scaling_note"] and "3 bands" in out["scaling_note"], out
 
 
 def t_nominatim_fallback_says_what_it_matched():
@@ -1564,6 +1845,79 @@ def t_nominatim_fallback_says_what_it_matched():
     note = out["geocode_note"]
     assert "matched 'Ashburn' after simplifying 'the Ashburn data center corridor'" in note, note
     assert note.count("Ashburn, Virginia, United States") == 1, ("the same place twice is not two other places", note)
+
+
+def _nom(name, kind, box, imp=0.5):
+    return {"boundingbox": [str(box[1]), str(box[3]), str(box[0]), str(box[2])], "lat": "0", "lon": "0",
+            "display_name": name, "addresstype": kind, "importance": imp}
+
+
+def t_geocode_candidates_carry_kind_and_feature_word_picks():
+    # Field test No.12: "Shasta Lake" landed on the town, and Kilauea's candidates
+    # said nothing about which was the volcano
+    town = _nom("Shasta Lake, Shasta County, California, United States", "town", [-122.4, 40.5, -122.3, 40.6], 0.6)
+    res = _nom("Shasta Lake, Shasta County, California, United States", "reservoir", [-122.5, 40.6, -122.1, 40.9], 0.5)
+    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta Lake, California"))
+    assert out["candidates"][0]["kind"] == "reservoir" and out["bbox"][2] - out["bbox"][0] > 0.3, out
+    assert [c["kind"] for c in out["candidates"]] == ["reservoir", "town"] and not out.get("ambiguous"), out
+    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta, California"))
+    assert out["candidates"][0]["kind"] == "town", "no feature word: the source's order stands"
+    kau = _nom("Kilauea, Kauai County, Hawaii, United States", "locality", [-159.4, 22.2, -159.3, 22.3], 0.5)
+    vol = _nom("Kilauea, Hawaii County, Hawaii, United States", "volcano", [-155.4, 19.3, -155.2, 19.5], 0.5)
+    out, _ = _with_geocoders({"ids": []}, [kau, vol], lambda: tools.geocode("Kilauea, Hawaii"))
+    assert out["ambiguous"] and [c["kind"] for c in out["candidates"]] == ["locality", "volcano"], out
+    err = tools._ambiguous_error("Kilauea, Hawaii", out)["error"]
+    assert "locality (Kauai County, Hawaii, United States) or volcano (Hawaii County, Hawaii, United States)?" in err, err
+    out, _ = _with_geocoders({"ids": []}, [kau, vol], lambda: tools.geocode("Kilauea volcano, Hawaii"))
+    assert out["candidates"][0]["kind"] == "volcano" and not out["ambiguous"], out
+
+
+def t_geocode_feature_word_yields_to_a_place_named_for_it():
+    # Field test No.13: "Lake Charles, Louisiana" took the lake over the city.
+    # Importances are the live ones: city 0.55 over lake 0.18, town 0.44 over reservoir 0.34
+    city = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "city", [-93.3, 30.1, -93.1, 30.3], 0.547)
+    lake = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "lake", [-93.24, 30.21, -93.22, 30.24], 0.182)
+    out, _ = _with_geocoders({"ids": []}, [city, lake], lambda: tools.geocode("Lake Charles, Louisiana"))
+    assert [c["kind"] for c in out["candidates"]] == ["city", "lake"] and not out.get("ambiguous"), out
+    assert "'lake' is part of the city's own name" in out["geocode_note"], out
+    town = _nom("Shasta Lake, Shasta County, California, United States", "town", [-122.4, 40.5, -122.3, 40.6], 0.441)
+    res = _nom("Shasta Lake, Shasta County, California, United States", "reservoir", [-122.5, 40.6, -122.1, 40.9], 0.342)
+    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta Lake, California"))
+    assert out["candidates"][0]["kind"] == "reservoir" and not out.get("ambiguous"), "a close town does not outrank the feature"
+
+
+def t_geocode_water_and_lake_are_one_kind():
+    # Field test No.13: Nominatim tags the Berkeley Pit "water", so the word lake found nothing
+    butte = _nom("Butte, Silver Bow County, Montana, United States", "city", [-112.6, 45.9, -112.4, 46.1], 0.5)
+    pit = _nom("Berkeley Pit, Butte, Silver Bow County, Montana, United States", "water", [-112.52, 46.01, -112.50, 46.02], 0.3)
+    out, _ = _with_geocoders({"ids": []}, [butte, pit], lambda: tools.geocode("Berkeley Pit lake, Butte, Montana"))
+    assert out["candidates"][0]["kind"] == "water", out
+    gz = {"ids": [
+        {"source": "divisions_area", "id": "au", "name": "Lake Powell", "country": "AU", "subtype": "locality",
+         "bbox": [142.87, -34.78, 143.02, -34.65], "similarity": 1.0},
+        {"source": "natural_earth", "id": "ne", "name": "Powell", "country": None, "subtype": "reservoir",
+         "bbox": [-111.56, 36.93, -110.36, 37.91], "similarity": 1.0},
+    ]}
+    out, _ = _with_geocoders(gz, [], lambda: tools.geocode("Lake Powell"))
+    assert out["name"] == "Powell (reservoir)" and not out.get("ambiguous"), "the word picks among Gazet's ties too"
+
+
+def t_geocode_refusal_names_state_or_country():
+    # Field test No.13: the Portland refusal named no states
+    ore = _nom("Portland, Multnomah County, Oregon, United States", "city", [-122.8, 45.4, -122.5, 45.7], 0.71)
+    me = _nom("Portland, Cumberland County, Maine, 04101, United States", "city", [-70.35, 43.54, -70.2, 43.7], 0.604)
+    out, _ = _with_geocoders({"ids": []}, [ore, me], lambda: tools.geocode("Portland"))
+    err = tools._ambiguous_error("Portland", out)["error"]
+    assert "city (Multnomah County, Oregon, United States) or city (Cumberland County, Maine, United States)?" in err, err
+    gz = {"ids": [
+        {"source": "divisions_area", "id": "or", "name": "Portland", "country": "US", "subtype": "locality",
+         "bbox": [-122.84, 45.43, -122.47, 45.65], "similarity": 1.0},
+        {"source": "divisions_area", "id": "me", "name": "Portland", "country": "US", "subtype": "locality",
+         "bbox": [-70.35, 43.54, -69.98, 43.73], "similarity": 1.0},
+    ]}
+    out, _ = _with_geocoders(gz, [], lambda: tools.geocode("Portland"))
+    err = tools._ambiguous_error("Portland", out)["error"]
+    assert "locality (US, at 45.5N 122.7W) or locality (US, at 43.6N 70.2W)?" in err, err
 
 
 def t_gdacs_feed_is_windowed_and_counted():
@@ -1620,6 +1974,540 @@ def t_no_artifact_rides_the_watermarked_basemap():
         m3 = tools.render_map_3d("t", [0, 0, 10, 10], {"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}, out_path=str(Path(d) / "m3.html"))
         html3 = Path(m3["path"]).read_text()
         assert "cartocdn" not in html3 and "tile.openstreetmap.org" in html3
+
+
+def t_hrrr_url_builders():
+    import datetime as dt
+    g = tools._hrrr_grib_url(dt.date(2026, 10, 25), 6, 24)
+    assert g == "https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.20261025/conus/hrrr.t06z.wrfsfcf24.grib2"
+    t = tools._hrrr_tile_template(g)
+    assert t.startswith(tools.EOAPI + "/external/tiles/WebMercatorQuad/{z}/{x}/{y}.png?")
+    # bands=76 rides INSIDE the vrt value (encoded), the expression and colormap outside it
+    assert "url=vrt%3A%2F%2F" in t and "bands%3D76" in t and "&expression=b1%2A1000000000" in t and "&colormap=" in t
+
+
+def t_smoke_forecast_outside_conus_makes_no_network_call():
+    real = tools._client
+    class Boom:
+        def __getattr__(self, k):
+            raise AssertionError("network touched")
+    tools._client = Boom()
+    try:
+        r = tools.smoke_forecast(51.5, -0.1)
+    finally:
+        tools._client = real
+    assert r["error"].startswith("HRRR smoke covers") and r["coverage_bbox"] == tools.HRRR_BBOX
+
+
+def _fallback_map(**extra):
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        layer = {"type": "item", "name": "s2", "catalog": "earth-search", "collection_id": "sentinel-2-l2a",
+                 "item_id": "X", "bbox": [0, 0, 1, 1], **extra}
+        r = tools.render_map("t", [0, 0, 1, 1], [layer], out_path=out)
+        return Path(out).read_text(encoding="utf-8"), r
+
+
+def t_render_map_429_fallback_tiles():
+    html, r = _fallback_map(asset_href="https://example.com/visual.tif")
+    fb = r["state"]["layers"][0]["fallback_tiles"]
+    assert fb.startswith(tools.EOAPI + "/external/tiles/") and "visual.tif" in fb
+    assert r["state"]["fallback"] == "raster.eoapi.dev" and fb in html and "setTiles" in html
+    # an expression layer cannot fall back (eoapi.dev has no /stac), and carries no key
+    _, r2 = _fallback_map(expression="(nir-red)/(nir+red)", asset_href="https://example.com/visual.tif")
+    assert "fallback" not in r2["state"] and "fallback_tiles" not in r2["state"]["layers"][0]
+
+
+def t_stac_map_link_only_with_an_item_layer():
+    html, r = _fallback_map(asset_href="https://example.com/visual.tif")
+    assert 'id="stacmap"' in html and r["stac_map_url"].startswith("https://developmentseed.org/stac-map/?href=https%3A%2F%2F")
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        r = tools.render_map("t", [0, 0, 1, 1], [{"type": "raster", "name": "r", "tiles": "https://x/{z}/{x}/{y}"}], out_path=out)
+        assert 'id="stacmap"' not in Path(out).read_text(encoding="utf-8") and "stac_map_url" not in r
+
+
+def t_llms_txt_present():
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "llms.txt").read_text(encoding="utf-8").startswith("# groundstation")
+
+
+class _Resp:
+    def __init__(self, status=200, body=None):
+        self.status_code, self._body = status, body
+
+    def json(self):
+        return self._body
+
+    def raise_for_status(self):
+        assert self.status_code < 400
+
+
+def _fake_smoke(now, available, get_json=None):
+    """Run smoke_forecast with a fake clock, fake NOAA bucket (available(url) -> bool) and point reads."""
+    saved = tools._client, tools._get_json, tools._utcnow
+    class C:
+        def head(self, url):
+            return _Resp(200 if available(url) else 404)
+    tools._client, tools._utcnow = C(), lambda: now
+    tools._get_json = get_json or (lambda url, **kw: {"values": [1.234]})
+    try:
+        return tools.smoke_forecast(47.8, -120.3)
+    finally:
+        tools._client, tools._get_json, tools._utcnow = saved
+
+
+def t_smoke_forecast_run_selection():
+    import datetime as dt
+    utc = dt.timezone.utc
+    # day boundary: 02z now, the newest run is 18z yesterday, 8 h old
+    r = _fake_smoke(dt.datetime(2026, 10, 25, 2, 30, tzinfo=utc), lambda u: "hrrr.20261024/conus/hrrr.t18z" in u)
+    assert r["run"] == "2026-10-24T18:00Z" and r["forecast_hour"] == 32 and r["valid_time"] == "2026-10-26T02:00Z"
+    assert r["now_valid_time"] == "2026-10-25T02:00Z" and r["now_ugm3"] == 1.2
+    assert not any("earlier than asked" in c for c in r["caveat"])
+    # the wanted frame is missing: step down to one that exists, and say so
+    def upto29(u):
+        return "hrrr.20261024/conus/hrrr.t18z" in u and int(u.split("wrfsfcf")[1][:2]) <= 29
+    r = _fake_smoke(dt.datetime(2026, 10, 25, 2, 30, tzinfo=utc), upto29)
+    assert r["forecast_hour"] == 29 and any("earlier than asked" in c for c in r["caveat"])
+    # a run older than 24 h clamps to 48 and must still say the frame is earlier than asked
+    r = _fake_smoke(dt.datetime(2026, 10, 26, 8, 0, tzinfo=utc), lambda u: "hrrr.20261025/conus/hrrr.t00z" in u)
+    assert r["forecast_hour"] == 48 and any("earlier than asked" in c for c in r["caveat"])
+    # nothing within 36 h: an error dict, not a raise
+    r = _fake_smoke(dt.datetime(2026, 10, 26, 8, 0, tzinfo=utc), lambda u: False)
+    assert "error" in r and r["source"]["model"] == "NOAA HRRR"
+
+
+def t_smoke_forecast_failures_are_data():
+    import datetime as dt
+    now = dt.datetime(2026, 10, 25, 12, 30, tzinfo=dt.timezone.utc)
+    def boom(url, **kw):
+        raise RuntimeError("429 from the point route")
+    r = _fake_smoke(now, lambda u: True, boom)
+    assert r["error"].startswith("HRRR smoke lookup failed") and "source" in r
+    r = _fake_smoke(now, lambda u: True, lambda url, **kw: {"values": [None]})
+    assert r["now_ugm3"] is None and r["forecast_ugm3"] is None and any("empty" in c for c in r["caveat"])
+
+
+def t_asset_href_cache_and_scheme():
+    calls = []
+    saved = tools._get_json
+    item = {"assets": {"visual": {"href": "https://x/v.tif"}, "raw": {"href": "s3://bucket/raw.tif"}}}
+    def fake(url, **kw):
+        calls.append(url)
+        if "dead" in url:
+            raise RuntimeError("404")
+        return item
+    tools._get_json = fake
+    tools._ITEMS.clear()
+    try:
+        assert tools._asset_href("earth-search", "c", "ok", "visual") == "https://x/v.tif"
+        assert tools._asset_href("earth-search", "c", "ok", "raw") is None  # s3:// never goes to the public tiler
+        assert len(calls) == 1  # one GET per item
+        assert tools._asset_href("earth-search", "c", "dead", "visual") is None
+        assert tools._asset_href("earth-search", "c", "dead", "visual") is None
+        assert len(calls) == 2  # a failure is cached too
+        calls.clear()
+        _fallback_map(asset_href="https://x/v.tif")  # caller holds the href and bbox: no fetch at all
+        assert calls == []
+    finally:
+        tools._get_json = saved
+        tools._ITEMS.clear()
+
+
+def t_statistics_429_retries_once_on_eoapi():
+    saved = tools._client, tools._get_json
+    item = {"bbox": [0, 0, 1, 1], "assets": {"visual": {"href": "https://x/v.tif"}}}
+    seen = []
+    class C:
+        def __init__(self, eoapi_status):
+            self.eoapi_status = eoapi_status
+        def get(self, url, **kw):
+            seen.append(url)
+            if "raster.eoapi.dev" in url:
+                return _Resp(self.eoapi_status, {"b1": {"min": 0, "max": 1}})
+            return _Resp(429)
+    tools._get_json = lambda url, **kw: item
+    tools._ITEMS.clear()
+    try:
+        tools._client = C(200)
+        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "I1")
+        assert "visual" in out and "b1" not in out and out["note"].startswith("titiler.xyz rate-limited")
+        assert len(seen) == 2 and "raster.eoapi.dev/external/statistics" in seen[1]
+        seen.clear()
+        tools._client = C(429)  # both limited: an error dict, no third try
+        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "I1")
+        assert "rate-limited" in out["error"] and len(seen) == 2
+    finally:
+        tools._client, tools._get_json = saved
+        tools._ITEMS.clear()
+
+
+def _archive_item(i, x, cloud):
+    return {"type": "Feature", "stac_version": "1.1.0", "id": i, "collection": "sentinel-2-l2a",
+            "geometry": {"type": "Polygon", "coordinates": [[[x, 0], [x + 1, 0], [x + 1, 1], [x, 1], [x, 0]]]},
+            "bbox": [x, 0, x + 1, 1],
+            "properties": {"datetime": f"2026-10-0{x % 9 + 1}T00:00:00Z", "eo:cloud_cover": cloud},
+            "assets": {"visual": {"href": "https://e/v.tif", "type": "image/tiff"}},
+            "links": [{"rel": "self", "href": f"https://earth-search.aws.element84.com/v1/items/{i}"}]}
+
+
+def t_geoparquet_archive_searches_like_a_catalog():
+    import rustac
+    assert [tools._is_archive(c) for c in ("a.parquet", "s3://x.parquet", "/tmp/a/b.GEOPARQUET", "https://h/x.parquet?v=1", "https://h/x.parquet#f", "earth-search", "veda")] == [True] * 5 + [False] * 2
+    saved = tools._client
+    tools._client = None  # any STAC API call in the archive path raises
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            href = str(Path(d) / "a.parquet")
+            rustac.write_sync(href, [_archive_item("a", 0, 5.0), _archive_item("b", 1, 50.0), _archive_item("n", 2, None), _archive_item("w", 175, 1.0)])
+            out = tools.search_imagery(href, [], bbox=[0, 0, 3, 1])
+            assert out["count"] == 3 and [i["id"] for i in out["items"]] == ["n", "b", "a"]
+            assert set(out["items"][0]) >= {"catalog", "collection", "id", "datetime", "cloud_cover", "bbox", "assets", "self_url", "covers_aoi_pct"}
+            assert out["items"][0]["self_url"].endswith("/items/n") and out["recommended"]
+            assert out["archive"]["href"] == href and out["archive"]["datetime_range"] == ["2026-10-01T00:00:00Z", "2026-10-05T00:00:00Z"]
+            assert out["archive"]["written"] and "snapshot" in out["archive"]["note"]
+            assert tools.search_imagery(href, [], bbox=[0, 0, 0.9, 1])["count"] == 1
+            capped = tools.search_imagery(href, [], bbox=[0, 0, 3, 1], max_cloud_cover=10)
+            assert [i["id"] for i in capped["items"]] == ["a"]  # no cloud value is dropped, as the API does
+            wrap = tools.search_imagery(href, [], bbox=[170, 0, -170, 1])  # antimeridian: not read as -170..170
+            assert [i["id"] for i in wrap["items"]] == ["w"]
+            assert "'earth-search'" in out["archive"]["note"]
+            noc = tools._recommend([{"id": "x", "cloud_cover": None, "covers_aoi_pct": 50.0, "datetime": "d"}, {"id": "y", "cloud_cover": 5.0, "covers_aoi_pct": 50.0, "datetime": "c"}])
+            assert noc["id"] == "x"  # a None cloud value must not crash the reason text
+            err = tools.write_archive("earth-search", ["c"], bbox=[0, 0, 1, 1], out_path=str(Path(d) / "a.txt"))
+            assert "error" in err and not (Path(d) / "a.txt").exists()
+    finally:
+        tools._client = saved
+def t_zarr_catalog_surfaces():
+    keys = {"title", "url", "variables", "sel", "coverage", "chunks", "stats", "tiles", "source"}
+    for sid, z in tools.ZARR_STORES.items():
+        assert keys <= z.keys(), (sid, keys - z.keys())
+        assert z["tiles"] or z.get("tiles_note"), f"{sid}: tiles false needs the reason"
+        assert all({"description", "units"} <= v.keys() for v in z["variables"].values()), sid
+    assert any(c["catalog"] == "zarr" for c in tools.list_catalogs())
+    hits = tools.search_datasets("temperature")  # STAC catalogs raise offline and are caught per catalog
+    assert any(h.get("catalog") == "zarr" and h.get("id") == "noaa-gfs-forecast" for h in hits)
+    d = tools.describe_collection("zarr", "noaa-hrrr-forecast")
+    assert d["id"] == "noaa-hrrr-forecast" and "TMP" in d["variables"] and d["tiles"] is False
+    assert "error" in tools.describe_collection("zarr", "nope")
+    sel = dict(valid_time="2023-01-10T12:00")
+    url = tools.tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel=sel)
+    assert "/zarr/tiles/" in url and "variable=2m_temperature" in url and "time%3Dnearest%3A%3A2023-01-10T12%3A00" in url
+    assert tools.tile_url_template("zarr", "noaa-gfs-forecast", "temperature_2m") == tools.ZARR_STORES["noaa-gfs-forecast"]["tiles_note"]
+    for sid, var in (("nasa-mur-sst", "analysed_sst"), ("noaa-gfs-forecast", "temperature_2m")):
+        assert "error" in tools.compute_statistics("zarr", sid, var, bbox=[0, 0, 1, 1])
+    assert "unknown" in tools.tile_url_template("zarr", "nope", "x")
+    assert "unknown variable" in tools.tile_url_template("zarr", "weatherbench2-era5", "nope")
+    assert tools.ZARR_STORES["noaa-hrrr-forecast"]["coverage"].startswith("CONUS only")
+
+
+def t_zarr_clip_reduce_and_select():
+    import numpy as np
+    import xarray as xr
+
+    # descending latitude and 0..360 longitude, like GFS/ERA5: a bbox in -180..180 still lands
+    lat, lon = np.arange(30.0, 24.0, -1.0), np.arange(255.0, 265.0, 1.0)
+    da = xr.DataArray(np.arange(60.0).reshape(6, 10), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=lon))
+    r = tools._clip_reduce(da, [-104.5, 26.5, -102.5, 28.5])
+    assert r["stats"]["count"] == 4 and r["stats"]["min"] == 21.0 and r["stats"]["max"] == 32.0, r
+    assert "coarse grid" in r["caveats"][0]
+    tiny = tools._clip_reduce(da, [-103.9, 27.1, -103.8, 27.2])
+    assert tiny["stats"]["count"] == 1 and "smaller than one grid cell" in tiny["caveats"][0]
+    assert "error" in tools._clip_reduce(da.where(False), [-104.5, 26.5, -102.5, 28.5])
+    t = np.array(["2026-10-25T00", "2026-10-25T06"], dtype="datetime64[ns]")
+    ts = xr.DataArray(np.zeros((2, 6, 10)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=lat, longitude=lon))
+    _, used, notes = tools._zarr_select(ts, dict(valid_time="2026-10-25T05:00"))
+    assert used["time"] == "2026-10-25 06:00:00" and "snapped" in notes[0]
+
+
+def t_zarr_bbox_outside_coverage_is_refused():
+    import numpy as np
+    import xarray as xr
+
+    lat, lon = np.arange(30.0, 24.0, -1.0), np.arange(255.0, 265.0, 1.0)
+    da = xr.DataArray(np.zeros((6, 10)), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=lon))
+    assert "outside" in tools._clip_reduce(da, [5.0, 45.0, 6.0, 46.0])["error"]
+    wide = xr.DataArray(np.zeros((6, 360)), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=np.arange(360.0)))
+    assert "outside" in tools._clip_reduce(wide, [-1.0, 26.0, 1.0, 28.0])["error"]  # across 0 on a 0..360 grid
+    z = tools.ZARR_STORES["weatherbench2-era5"]
+    saved = tools._open_zarr
+    tools._open_zarr = lambda sid: xr.Dataset({"2m_temperature": wide.expand_dims(time=[np.datetime64("2023-01-10", "ns")])})
+    try:
+        err = tools._zarr_statistics("weatherbench2-era5", "2m_temperature", [-1.0, 26.0, 1.0, 28.0], None)
+    finally:
+        tools._open_zarr = saved
+    assert z["title"] in err["error"] and z["coverage"] in err["error"], err
+
+
+def t_zarr_select_says_how_far_it_snapped():
+    import numpy as np
+    import xarray as xr
+
+    t = np.array(["2022-12-31T18", "2023-01-10T12"], dtype="datetime64[ns]")
+    da = xr.DataArray(np.zeros((2, 2, 2)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=[1.0, 0.0], longitude=[0.0, 1.0]))
+    _, used, notes = tools._zarr_select(da, dict(valid_time="2023-01-11T00:00"))
+    assert used["time"].startswith("2023-01-10") and "outside the store's range" in notes[0] and "off by" in notes[0], notes
+
+
+def t_http_zarr_store_range_206():
+    import asyncio
+    from zarr.abc.store import RangeByteRequest
+
+    store = tools._http_zarr_store("https://example.com/test.zarr")
+    class FakeBuf:
+        @classmethod
+        def from_bytes(cls, b): return b
+    class FakeProto:
+        buffer = FakeBuf
+
+    class FakeResp:
+        def __init__(self, status, content):
+            self.status_code = status
+            self.content = content
+        def raise_for_status(self):
+            if self.status_code >= 400: raise RuntimeError(f"HTTP {self.status_code}")
+
+    async def run():
+        # 206 partial content returns bytes
+        async def get_206(url, headers): return FakeResp(206, b"abc")
+        store._c.get = get_206
+        res = await store.get("data", FakeProto, RangeByteRequest(0, 3))
+        assert res == b"abc"
+
+        # 200 on a Range request raises RuntimeError (server ignored Range)
+        async def get_200(url, headers): return FakeResp(200, b"full content")
+        store._c.get = get_200
+        try:
+            await store.get("data", FakeProto, RangeByteRequest(0, 3))
+            raise AssertionError("expected server Range refusal error")
+        except RuntimeError as e:
+            assert "ignored a Range request" in str(e)
+
+        # 404 returns None
+        async def get_404(url, headers): return FakeResp(404, b"")
+        store._c.get = get_404
+        assert (await store.get("data", FakeProto, None)) is None
+
+    asyncio.run(run())
+
+
+def t_write_archive_paging_get_merge():
+    # Test next-link GET paging and merge in write_archive
+    saved_client = tools._client
+    calls = []
+    class FakeClient:
+        def post(self, url, json=None, **kw):
+            calls.append(("POST", url, json))
+            return _FakeResp({
+                "features": [_archive_item("item-1", 1, 10.0)],
+                "links": [{"rel": "next", "href": "search?page=2", "method": "GET", "merge": True, "body": {"token": "abc"}}]
+            })
+        def get(self, url, **kw):
+            calls.append(("GET", url, kw))
+            return _FakeResp({
+                "features": [_archive_item("item-2", 2, 20.0)],
+                "links": []
+            })
+    tools._client = FakeClient()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            out_p = str(Path(d) / "paged.parquet")
+            res = tools.write_archive("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1], out_path=out_p, limit=5, max_cloud_cover=20)
+            assert calls[0][2]["query"] == {"eo:cloud_cover": {"lte": 20}}
+            assert res["written"] == dt.datetime.now(dt.timezone.utc).date().isoformat()
+            assert res["count"] == 2
+            assert Path(out_p).exists()
+            assert len(calls) == 2
+            assert calls[0][0] == "POST"
+            assert calls[1][0] == "GET" and calls[1][1].endswith("/search?page=2")
+    finally:
+        tools._client = saved_client
+
+
+def _stub_geocode_search(ambiguous):
+    cands = [dict(name="A", bbox=[0, 0, 1, 1], source="gazet", where="x"),
+             dict(name="B", bbox=[5, 5, 6, 6], source="gazet", where="y")]
+    g = dict(name="A", bbox=[0, 0, 1, 1], source="gazet", candidates=cands, ambiguous=ambiguous)
+    posts = []
+
+    class Resp:
+        status_code = 200
+        headers = {}
+        def raise_for_status(self): pass
+        def json(self): return dict(features=[], links=[])
+
+    class Client:
+        def post(self, url, **k):
+            posts.append(url)
+            return Resp()
+
+    saved = tools.geocode, tools._client
+    tools.geocode, tools._client = (lambda q: g), Client()
+    try:
+        return tools.search_imagery("earth-search", ["sentinel-2-l2a"], place="Somewhere"), posts
+    finally:
+        tools.geocode, tools._client = saved
+
+
+def t_ambiguous_geocode_refuses_place_tools():
+    out, posts = _stub_geocode_search(True)
+    assert "more than one place" in out["error"] and len(out["candidates"]) == 2, out
+    assert posts == [], "an ambiguous name must not reach the network"
+
+
+def t_unambiguous_geocode_runs_the_search():
+    out, posts = _stub_geocode_search(False)
+    assert "error" not in out and len(posts) == 1, out
+
+
+def _stub_frames(n):
+    return [{"type": "raster", "name": f"2026-0{i + 1}", "tiles": f"https://t.example/{i}/{{z}}/{{x}}/{{y}}.png"}
+            for i in range(n)]
+
+
+def t_timelapse_page_controls_and_cap():
+    with tempfile.TemporaryDirectory() as d:
+        r = tools.render_timelapse("tl", [0, 0, 1, 1], _stub_frames(3), out_path=str(Path(d) / "t.html"))
+        html = Path(r["map_path"]).read_text(encoding="utf-8")
+        assert r["frames"] == 3 and r["state"]["layers"], r
+        for needle in ('id="tl-prev"', 'id="tl-play"', 'id="tl-next"', 'id="tl-name"', "ArrowLeft", "window.gsPending",
+                       "2026-01", "2026-02", "2026-03", ".clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack, .clean #tl"):
+            assert needle in html, needle
+        # frames are shown one at a time: show() hides every layer but the current, and starts at 0
+        assert '"visibility", i === cur ? "visible" : "none"' in html and "show(0)" in html
+        assert "__" not in html.replace("__proto__", ""), "unfilled template marker"
+        over = tools.render_timelapse("tl", [0, 0, 1, 1], _stub_frames(9), out_path=str(Path(d) / "u.html"))
+        assert "error" in over and "cap of 8" in over["error"] and not (Path(d) / "u.html").exists(), over
+
+
+XSS = "<script>alert(1)</script>"
+
+
+def _hostile_pages(d):
+    raster = {"type": "raster", "name": "</script>" + XSS, "tiles": "https://t.example/{z}/{x}/{y}.png"}
+    main = {"type": "raster", "name": "m", "tiles": "https://t.example/{z}/{x}/{y}.png"}
+    pages = [
+        tools.render_map(XSS, [0, 0, 1, 1], [raster], subtitle=XSS, out_path=str(Path(d) / "a.html"))["map_path"],
+        tools.render_map_3d(XSS, [0, 0, 10, 10], main, subtitle=XSS, out_path=str(Path(d) / "b.html"))["path"],
+        tools.render_timelapse(XSS, [0, 0, 1, 1], [raster, raster], out_path=str(Path(d) / "c.html"))["map_path"],
+    ]
+    card = tools._postcard_html(b"x", XSS, XSS, XSS, XSS, XSS, XSS)
+    return [Path(p).read_text(encoding="utf-8") for p in pages] + [card]
+
+
+def t_renderers_escape_titles_and_names():
+    with tempfile.TemporaryDirectory() as d:
+        pages = _hostile_pages(d)
+    for html in pages:
+        assert XSS not in html and "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    for html in (pages[0], pages[2]):
+        # a layer name cannot end the JSON block: the raw closer appears only
+        # for the template's own script tags, the name's one is \\u003c
+        assert "\\u003c/script>" in html
+
+
+def t_fill_never_reexpands_values():
+    assert tools._fill("__A__ __B__ __C__", {"A": "__B__", "B": "x"}) == "__B__ x __C__"
+
+
+def t_artifact_path_confined():
+    with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+        old_out, old_cwd = os.environ["GROUNDSTATION_OUT"], os.getcwd()
+        os.environ["GROUNDSTATION_OUT"] = out
+        os.chdir(d)
+        try:
+            main = {"type": "raster", "name": "m", "tiles": "https://t.example/{z}/{x}/{y}.png"}
+            with tempfile.TemporaryDirectory() as elsewhere:
+                link = Path(d) / "link.html"
+                link.symlink_to(Path(elsewhere) / "target.html")
+                bad = [str(Path(elsewhere) / "x.html"), "../../x.html", str(Path(d) / "x.txt"), str(link)]
+                for p in bad:
+                    r = tools.render_map("t", [0, 0, 1, 1], [main], out_path=p)
+                    assert "error" in r and "map_path" not in r, (p, r)
+                assert not list(Path(elsewhere).iterdir())
+            (Path(d) / "docs").mkdir()
+            # a plain cwd is not a root: only GROUNDSTATION_OUT counts until cwd is a checkout
+            r = tools.render_map("t", [0, 0, 1, 1], [main], out_path=str(Path(d) / "docs" / "no.html"))
+            assert "error" in r and not (Path(d) / "docs" / "no.html").exists(), r
+            (Path(d) / ".git").mkdir()
+            for p in (Path(d) / "docs" / "ok.html", Path(out) / "ok.html"):
+                ok = tools.render_map("t", [0, 0, 1, 1], [main], out_path=str(p))
+                assert Path(ok["map_path"]).exists(), ok
+            assert not [f for f in (Path(d) / "docs").iterdir() if f.name.endswith(".tmp")]
+        finally:
+            os.chdir(old_cwd)
+            os.environ["GROUNDSTATION_OUT"] = old_out
+
+
+def t_zarr_tile_time_outside_range_refused():
+    # field test 12 card 4: a 2026 ask was served 2023 data without a word
+    out = tools.tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel={"time": "2026-10-25T12:00"})
+    assert "outside" in out and "2023-01-10" in out and "{z}" not in out, out
+    ok = tools.tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel={"time": "2023-01-10T12:00"})
+    assert "{z}" in ok, ok
+
+
+def t_zarr_snap_past_one_step_is_refused():
+    import numpy as np
+    import xarray as xr
+
+    t = np.array(["2026-10-25T00", "2026-10-25T06", "2026-10-25T12"], dtype="datetime64[ns]")
+    da = xr.DataArray(np.zeros((3, 2, 2)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=[1.0, 0.0], longitude=[0.0, 1.0]))
+    try:
+        tools._zarr_select(da, dict(valid_time="2026-10-20T21:00"))
+        raise AssertionError("a 5-day snap was not refused")
+    except ValueError as e:
+        assert "2026-10-25 00:00:00" in str(e) and "2026-10-25 12:00:00" in str(e), e
+    _, used, notes = tools._zarr_select(da, dict(valid_time="2026-10-25T09:00"))  # 3 h off on a 6 h grid
+    assert "snapped" in notes[0], notes
+    _, _, notes = tools._zarr_select(da, dict(valid_time="2026-10-25T05:00"))
+    assert "snapped" in notes[0], notes
+
+
+def t_zarr_stats_refusals_name_the_range():
+    import numpy as np
+    import xarray as xr
+
+    saved = tools._open_zarr
+    def boom(sid):
+        raise AssertionError("opened the store for a time it does not hold")
+    tools._open_zarr = boom
+    try:
+        mur = tools.compute_statistics("zarr", "nasa-mur-sst", "analysed_sst", bbox=[-122.05, 36.65, -121.75, 36.95], sel={"time": "2026-10-20"})
+        assert "2020-01-20" in mur["error"], mur
+        era = tools.compute_statistics("zarr", "weatherbench2-era5", "total_precipitation_6hr", bbox=[-122.4, 38.6, -121.4, 40.0], sel={"time": "2026-10-15T12:00"})
+        assert "1959-01-01" in era["error"] and "2023-01-10" in era["error"] and "stats" not in era, era
+    finally:
+        tools._open_zarr = saved
+    # a rolling store: the snap refusal carries the store's own range note
+    t = np.array(["2026-10-26T00", "2026-10-26T01"], dtype="datetime64[ns]")
+    da = xr.DataArray(np.zeros((2, 2, 2)), dims=("time", "y", "x"), coords=dict(time=t, y=[0.0, 1.0], x=[0.0, 1.0]))
+    tools._open_zarr = lambda sid: xr.Dataset({"TMP": da})
+    try:
+        hr = tools._zarr_statistics("noaa-hrrr-forecast", "TMP", [0.0, 0.0, 1.0, 1.0], dict(valid_time="2026-10-20T21:00"))
+    finally:
+        tools._open_zarr = saved
+    assert "2026-10-26 01:00:00" in hr["error"] and "past dates are not in this store" in hr["error"], hr
+
+
+def t_zarr_uncurated_variable_in_store_is_accepted():
+    import numpy as np
+    import xarray as xr
+
+    lat, lon = np.arange(30.0, 24.0, -1.0), np.arange(255.0, 265.0, 1.0)
+    da = xr.DataArray(np.ones((6, 10)), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=lon), attrs=dict(long_name="Sea ice", units="1"))
+    ds = xr.Dataset({"sea_ice": da.expand_dims(time=[np.datetime64("2023-01-10", "ns")])})
+    saved = tools._open_zarr
+    tools._open_zarr = lambda sid: ds
+    try:
+        ok = tools._zarr_statistics("weatherbench2-era5", "sea_ice", [-104.5, 26.5, -102.5, 28.5], dict(time="2023-01-10T00:00"))
+        assert ok["units"] == "1" and "Sea ice" in ok["dataset"], ok
+        bad = tools._zarr_statistics("weatherbench2-era5", "nope", [-104.5, 26.5, -102.5, 28.5], None)
+        assert "1 variables" in bad["error"] and "2m_temperature" in bad["error"], bad
+    finally:
+        tools._open_zarr = saved
+    assert "total_precipitation_6hr" in tools.describe_collection("zarr", "weatherbench2-era5")["variables"]
 
 
 def t_versions_agree():

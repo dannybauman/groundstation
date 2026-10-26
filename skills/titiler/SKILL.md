@@ -23,7 +23,7 @@ The `/stac` endpoints merge the `assets` list into positional bands `b1..bN`. An
 NDVI: expression=(b1-b2)/(b1+b2)&assets=nir&assets=red
 ```
 
-Writing `(nir-red)/(nir+red)` directly fails or silently misreads. (Some deployments support `asset_as_band=true` to accept named assets — test before relying on it.) The same expression syntax works on `/stac/statistics`, `/stac/preview.png`, and tiles.
+Writing `(nir-red)/(nir+red)` directly fails or silently misreads. (`asset_as_band=true` is a titiler.core option since 0.15 that not every deployment enables; test before relying on it.) TiTiler 2 says it outright: `expression` cannot declare `assets`, so always pass `assets=Red&assets=Green&expression=b1/b2`. The same expression syntax works on `/stac/statistics`, `/stac/preview.png`, and tiles.
 
 ## Rescale and colormaps — why layers render blank
 
@@ -41,3 +41,12 @@ Tile/preview output is 8-bit; the data usually isn't. No `rescale` = everything 
 - Constrain map viewers to the item's footprint bounds so browsers don't request out-of-footprint tiles (404 storms count against rate limits too).
 - The instance reads source buckets with *its* credentials: requester-pays or private buckets return 500/AccessDenied unless the deployment has AWS credentials (`AWS_REQUEST_PAYER=requester`, or `AWS_NO_SIGN_REQUEST=YES` for public buckets that need unsigned access). A working item on one instance can 500 on another — that's deployment config, not your request.
 - Statistics responses include histograms; drop them before pasting anywhere token-priced.
+
+## TiTiler 2 notes
+
+titiler.xyz runs 2.4.0 (checked 2026-10-25). Older instances differ, so check `/openapi.json` when a request 4xx's.
+
+- Tile endpoints lose the `@{scale}x` suffix (`/tiles/WebMercatorQuad/{z}/{x}/{y}.png`, never `@2x.png`). Planetary Computer's own older tiler still takes `@1x`, so leave those URLs alone.
+- `tilesize=` is a new optional query parameter on tile and tilejson endpoints. `/tilejson.json` now defaults to `tilesize=512`, so a 256px map source wants `tilesize=256`.
+- `assets` is required on the `/stac` endpoints; `assets=:all:` works on `/info` and `/statistics`.
+- Zarr: 2.0 adds `/zarr/...` endpoints. Pick the array with `variable=`, and a slice with `sel={dim}={method}::{value}`, e.g. `sel=time=nearest::2023-01-01`.
