@@ -2334,6 +2334,8 @@ __BRAND__
   @media (max-width: 500px) { #panel { box-sizing: border-box; max-width: calc(100vw - 150px); } }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
     color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
+  /* MapLibre opens its attribution on a phone, so the credit rides above it and wraps short of the legend */
+  @media (max-width: 500px) { #credit { bottom: 60px; max-width: 40vw; } }
   #mapL { position: absolute; inset: 0; z-index: 1; }
   #divider { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: var(--ink);
     z-index: 3; cursor: ew-resize; touch-action: none; }
@@ -3349,6 +3351,8 @@ __BRAND__
   #panel button:disabled { background: var(--mid); cursor: default; }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
     color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
+  /* MapLibre opens its attribution on a phone, so the credit rides above it and wraps short of the legend */
+  @media (max-width: 500px) { #credit { bottom: 60px; max-width: 40vw; } }
   .clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack,
   .clean .maplibregl-ctrl-top-right { display: none !important; }
 </style>
