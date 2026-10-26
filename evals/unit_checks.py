@@ -833,8 +833,9 @@ def t_stack_layer_toggle_present_when_on():
     assert "sentinel-2-l2a" in html and "prefers-reduced-motion" in html
 
 
-def t_stack_layer_absent_by_default():
-    html, r = _render_stack_map()
+def t_stack_layer_absent_when_off():
+    # on by default since 0.23.0 (field tests 10 and 11 shipped 19 of 20 without it); off is the opt-out
+    html, r = _render_stack_map(stack_layer=False)
     assert 'id="stack-toggle"' not in html and 'class="stack-entry"' not in html
     assert "note" not in r
 
@@ -870,7 +871,7 @@ def t_stack_3d_claims_terrain():
     html = _render_3d(stack_layer=True)
     assert 'id="stack-toggle"' in html and 'id="stack"' in html
     assert "AWS Terrarium terrain" in html and "sentinel-2-l2a" in html
-    assert 'id="stack-toggle"' not in _render_3d()  # off by default, bytes unchanged
+    assert 'id="stack-toggle"' not in _render_3d(stack_layer=False)  # off on request, bytes unchanged
 
 
 def t_stack_postcard_listing_static_and_honest():
@@ -943,6 +944,9 @@ def t_snapshot_card_templates_and_facts():
     for html in (map_html, _render_3d()):
         assert "window.gsMaps" in html and 'location.hash === "#clean"' in html
         assert ".clean #panel" in html
+    # the flat map counts its load handlers down, so a snapshot cannot fire
+    # between map.loaded() and the raster layers being added (field test 11)
+    assert "window.gsPending = 1;" in map_html and "window.gsPending--;" in map_html
     # a snapshot card inherits the map's facts: MapLibre + events claimed
     # only because the view exercised them; imagery cards still claim neither
     facts = tools._map_stack_facts([], [{"type": "geojson", "name": "ev"}], {"events": True})

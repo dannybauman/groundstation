@@ -33,8 +33,63 @@
 <script>if (location.hash === "#clean") document.documentElement.classList.add("clean");</script>
 </head><body>
 <div id="map"></div>
-<div id="panel"><h1>Sierra west of Tahoe: NDSI 2026-10-17</h1><p></p><div id="toggles"></div><a id="stacmap" href="https://developmentseed.org/stac-map/?href=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10SGJ_20261017_0_L2A" target="_blank">Open in stac-map</a></div>
+<div id="panel"><h1>Sierra west of Tahoe: NDSI 2026-10-17</h1><p></p><div id="toggles"></div></div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
+<button id="stack-toggle" aria-expanded="false">Stack</button>
+<aside id="stack" aria-label="Technology stack">
+  <h2>The stack behind this map</h2>
+  <p class="stack-sub">4 components on screen · 1 built by Development Seed · islands: Cloud Native Geospatial, Data in the Browser</p>
+  <p class="stack-sub">the pipeline in order · tap any entry for what it is and what it talks to</p>
+  <div class="stack-group">4 · pixels</div><details class="stack-entry"><summary><span class="dot k-pixels"></span><span class="s-head"><span class="stack-name">TiTiler<span class="role ds">created</span><span class="island" title="Development Seed island">cng</span></span><span class="inst">serving this layer via titiler.xyz</span></span></summary><div class="more"><p>dynamic tile server — turns COGs into web map tiles on the fly, band math included</p><div class="spk">speaks to STAC, COG + HTTP range requests, rio-tiler</div><a href="https://github.com/developmentseed/titiler" target="_blank" rel="noopener">github.com/developmentseed/titiler</a></div></details><div class="stack-group">5 · draw</div><details class="stack-entry"><summary><span class="dot k-draw"></span><span class="s-head"><span class="stack-name">MapLibre GL<span class="role">uses</span><span class="island" title="Development Seed island">dib</span></span><span class="inst">draws every interactive artifact — layers, swipe compares, 3D terrain</span></span></summary><div class="more"><p>the open-source WebGL map renderer</p><div class="spk">speaks to TiTiler, OpenFreeMap, AWS Terrarium terrain</div><a href="https://maplibre.org" target="_blank" rel="noopener">maplibre.org</a></div></details><details class="stack-entry"><summary><span class="dot k-draw"></span><span class="s-head"><span class="stack-name">OpenFreeMap<span class="role">uses</span></span><span class="inst">the light basemap under every 2D map and snapshot card</span></span></summary><div class="more"><p>free vector basemap tiles with no API key, built from OpenMapTiles</p><div class="spk">speaks to OpenStreetMap, MapLibre GL</div><a href="https://openfreemap.org" target="_blank" rel="noopener">openfreemap.org</a></div></details><details class="stack-entry"><summary><span class="dot k-draw"></span><span class="s-head"><span class="stack-name">OpenStreetMap<span class="role">uses</span></span><span class="inst">the data under every basemap here, the raster tiles under 3D scenes, and the gazetteer behind Nominatim</span></span></summary><div class="more"><p>the volunteer map of the world</p><div class="spk">speaks to OpenFreeMap, Nominatim</div><a href="https://www.openstreetmap.org" target="_blank" rel="noopener">www.openstreetmap.org</a></div></details>
+</aside>
+<style>
+  #stack-toggle { position: absolute; top: 12px; right: 52px; z-index: 4; font: 12px/1 "Roboto", system-ui, sans-serif;
+    letter-spacing: .08em; text-transform: uppercase; background: var(--paper); color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+  #stack-toggle:hover, #stack-toggle[aria-expanded="true"] { background: var(--accent); color: #fff; }
+  #stack { position: absolute; top: 0; right: 0; bottom: 40px; width: 330px; max-width: 88vw; z-index: 3;
+    background: var(--paper); color: var(--ink); font: 13px/1.5 "Roboto", system-ui, sans-serif;
+    border-left: 3px solid var(--accent); padding: 46px 16px 16px; overflow-y: auto;
+    transform: translateX(105%); transition: transform .22s ease; box-shadow: -2px 0 12px rgba(0,0,0,.12); }
+  #stack.open { transform: none; }
+  @media (prefers-reduced-motion: reduce) { #stack, .stack-entry summary::after { transition: none; } }
+  #stack h2 { font: 700 15px/1.2 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 2px; }
+  #stack .stack-sub { margin: 0 0 12px; color: var(--mid); font-size: 11.5px; font-style: italic; }
+  .stack-group { font: 700 10px/1 "Roboto Mono", monospace; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--mid); border-bottom: 1px solid var(--rule); padding-bottom: 4px; margin: 14px 0 8px; }
+  .stack-entry { margin: 0 0 9px; }
+  .stack-entry summary { display: flex; gap: 8px; cursor: pointer; list-style: none; }
+  .stack-entry summary::-webkit-details-marker { display: none; }
+  .stack-entry summary::after { content: "▸"; flex: none; margin-left: auto; color: var(--mid);
+    font-size: 10px; align-self: center; transition: transform .15s ease; }
+  .stack-entry[open] summary::after { transform: rotate(90deg); }
+  .stack-entry .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; }
+  .dot.k-place { background: var(--k-place); } .dot.k-catalog { background: var(--k-catalog); }
+  .dot.k-data { background: var(--k-data); } .dot.k-pixels { background: var(--k-pixels); }
+  .dot.k-draw { background: var(--k-draw); } .dot.k-orbit { background: var(--k-orbit); }
+  .stack-name .island { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--accent); border: 1px dashed var(--accent); border-radius: 3px; padding: 2px 4px; margin-left: 4px;
+    vertical-align: 1px; }
+  .s-head { display: flex; flex-direction: column; min-width: 0; }
+  .stack-name { font-weight: 600; }
+  .stack-name .role { font: 500 9px/1 "Roboto Mono", monospace; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--mid); border: 1px solid var(--rule); border-radius: 3px; padding: 2px 4px; margin-left: 6px;
+    vertical-align: 1px; }
+  .stack-name .role.ds { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .stack-entry .inst { font: 11px/1.5 "Roboto Mono", monospace; color: var(--mid); }
+  .stack-entry .more { margin: 3px 0 2px 16px; }
+  .stack-entry .more p { margin: 2px 0; color: var(--ink); }
+  .stack-entry .spk { font: 10.5px/1.5 "Roboto Mono", monospace; color: var(--mid); margin: 2px 0; }
+  .stack-entry a { color: var(--mid); font-size: 10.5px; text-decoration: none; border-bottom: 1px solid var(--rule); }
+  .stack-entry a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+</style>
+<script>
+  const _sb = document.getElementById("stack-toggle"), _sp = document.getElementById("stack");
+  _sb.addEventListener("click", () => {
+    const open = _sp.classList.toggle("open");
+    _sb.setAttribute("aria-expanded", String(open));
+  });
+</script>
 
 <script>
 const LAYERS = [{"type": "raster", "name": "NDSI 2026-10-17", "tiles": "https://titiler.xyz/stac/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=https%3A%2F%2Fearth-search.aws.element84.com%2Fv1%2Fcollections%2Fsentinel-2-l2a%2Fitems%2FS2C_10SGJ_20261017_0_L2A&expression=%28b1-b2%29%2F%28b1%2Bb2%29&assets=green&assets=swir16&rescale=-1%2C1&colormap_name=blues", "opacity": 1, "bounds": [-120.699351, 38.706573, -119.387652, 39.722366]}];
@@ -102,9 +157,10 @@ if (COMPARE && rasters.length === 2) {
   const mapL = new maplibregl.Map({ container: "mapL", style: BASE_STYLE(),
     bounds: MAP_OPTS.bounds, fitBoundsOptions: MAP_OPTS.fitBoundsOptions });
   window.gsMaps = [mapL, mapR];  // exposed for scripted screenshots and checks
+  window.gsPending = 2;  // load handlers still to add their layers; a snapshot waits for 0
   mapR.addControl(new maplibregl.NavigationControl());
-  mapR.on("load", () => { addLayerTo(mapR, rasters[0], rasters[0].i); geojsons.forEach(g => addLayerTo(mapR, g, g.i)); });
-  mapL.on("load", () => { addLayerTo(mapL, rasters[1], rasters[1].i); geojsons.forEach(g => addLayerTo(mapL, g, g.i)); });
+  mapR.on("load", () => { addLayerTo(mapR, rasters[0], rasters[0].i); geojsons.forEach(g => addLayerTo(mapR, g, g.i)); window.gsPending--; });
+  mapL.on("load", () => { addLayerTo(mapL, rasters[1], rasters[1].i); geojsons.forEach(g => addLayerTo(mapL, g, g.i)); window.gsPending--; });
   let syncing = false;
   const follow = (src, dst) => src.on("move", () => {
     if (syncing) return; syncing = true;
@@ -132,6 +188,7 @@ if (COMPARE && rasters.length === 2) {
 } else {
   const map = new maplibregl.Map({ container: "map", ...MAP_OPTS });
   window.gsMaps = [map];  // exposed for scripted screenshots and checks
+  window.gsPending = 1;  // the load handler still has to add the layers; a snapshot waits for 0
   map.addControl(new maplibregl.NavigationControl());
   map.on("load", () => {
     const toggles = document.getElementById("toggles");
@@ -150,6 +207,7 @@ if (COMPARE && rasters.length === 2) {
       row.appendChild(cb); row.appendChild(lab);
       toggles.appendChild(row);
     });
+    window.gsPending--;
   });
 }
 </script></body></html>

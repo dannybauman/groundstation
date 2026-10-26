@@ -1805,9 +1805,10 @@ if (COMPARE && rasters.length === 2) {
   const mapL = new maplibregl.Map({ container: "mapL", style: BASE_STYLE(),
     bounds: MAP_OPTS.bounds, fitBoundsOptions: MAP_OPTS.fitBoundsOptions });
   window.gsMaps = [mapL, mapR];  // exposed for scripted screenshots and checks
+  window.gsPending = 2;  // load handlers still to add their layers; a snapshot waits for 0
   mapR.addControl(new maplibregl.NavigationControl());
-  mapR.on("load", () => { addLayerTo(mapR, rasters[0], rasters[0].i); geojsons.forEach(g => addLayerTo(mapR, g, g.i)); });
-  mapL.on("load", () => { addLayerTo(mapL, rasters[1], rasters[1].i); geojsons.forEach(g => addLayerTo(mapL, g, g.i)); });
+  mapR.on("load", () => { addLayerTo(mapR, rasters[0], rasters[0].i); geojsons.forEach(g => addLayerTo(mapR, g, g.i)); window.gsPending--; });
+  mapL.on("load", () => { addLayerTo(mapL, rasters[1], rasters[1].i); geojsons.forEach(g => addLayerTo(mapL, g, g.i)); window.gsPending--; });
   let syncing = false;
   const follow = (src, dst) => src.on("move", () => {
     if (syncing) return; syncing = true;
@@ -1835,6 +1836,7 @@ if (COMPARE && rasters.length === 2) {
 } else {
   const map = new maplibregl.Map({ container: "map", ...MAP_OPTS });
   window.gsMaps = [map];  // exposed for scripted screenshots and checks
+  window.gsPending = 1;  // the load handler still has to add the layers; a snapshot waits for 0
   map.addControl(new maplibregl.NavigationControl());
   map.on("load", () => {
     const toggles = document.getElementById("toggles");
@@ -1853,6 +1855,7 @@ if (COMPARE && rasters.length === 2) {
       row.appendChild(cb); row.appendChild(lab);
       toggles.appendChild(row);
     });
+    window.gsPending--;
   });
 }
 </script></body></html>
@@ -2111,7 +2114,10 @@ def _snapshot_artifact(
             # a postcard has no MapLibre map — its pixels are already embedded —
             # so requiring gsMaps to exist hangs until timeout on a page that
             # was ready immediately
-            loaded = "!window.gsMaps || window.gsMaps.every(m => m.loaded())"
+            # map.loaded() turns true before the "load" handler has added the raster
+            # layers, so a shot on it alone is the base map (field test 11, cards 18 and 19)
+            loaded = ("!window.gsMaps || (!window.gsPending && "
+                      "window.gsMaps.every(m => m.loaded() && m.areTilesLoaded()))")
             page.wait_for_function(loaded, timeout=90000)
             # re-fit to the card's bbox, keeping any pitch. Flat maps get zero
             # padding (the load-time fit pads 40px and leaks area beyond the
@@ -2281,7 +2287,7 @@ def render_map(
     subtitle: str = "",
     out_path: str | None = None,
     compare: bool | None = None,
-    stack_layer: bool = False,
+    stack_layer: bool = True,
     stack_facts: dict[str, Any] | None = None,
     postcard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -2309,7 +2315,7 @@ def render_map(
     only when both rasters come from the SAME collection (a comparison), overlay
     when they differ (e.g. burn severity over imagery — pass opacity ~0.75).
 
-    stack_layer: True adds a "Stack" toggle revealing the technologies behind
+    stack_layer: on by default, a "Stack" toggle revealing the technologies behind
     the map — the actual collections, tiler, formats, and buckets on screen,
     joined from docs/stack.md. Attribution to projects, never people.
     stack_facts: honest extras the panel can't see from the layers alone —
@@ -2554,7 +2560,7 @@ def render_map_3d(
     subtitle: str = "",
     out_path: str | None = None,
     exaggeration: float = 1.5,
-    stack_layer: bool = False,
+    stack_layer: bool = True,
     extra_layers: list[dict[str, Any]] | None = None,
     postcard: dict[str, Any] | None = None,
     stack_facts: dict[str, Any] | None = None,
@@ -2570,7 +2576,7 @@ def render_map_3d(
     artifact carries a live slider, a fly-through orbit, and a reset button.
     Best over relief-rich areas — pick the lowest-cloud recent scene first.
 
-    stack_layer: same "Stack" toggle as render_map, and here the panel also
+    stack_layer: the same "Stack" toggle as render_map (on by default), and here the panel also
     names the Terrarium terrain actually under the imagery.
 
     extra_layers: more layers in the same shape, embedded but not requested
@@ -2909,7 +2915,7 @@ def render_postcard(
     expression: str | None = None,
     caption: str = "",
     out_path: str | None = None,
-    stack_layer: bool = False,
+    stack_layer: bool = True,
     bbox: list[float] | None = None,
     fill_item_ids: list[str] | None = None,
     aspect: str | None = None,
@@ -2925,7 +2931,7 @@ def render_postcard(
     assets/rescale/colormap_name/expression take the same shapes as
     tile_url_template, so an NDVI card is expression + colormap_name.
 
-    stack_layer: True prints a compact stack listing in the credit block —
+    stack_layer: on by default, prints a compact stack listing in the credit block —
     the static back-of-postcard form of the map artifacts' Stack panel, with
     no links, so the card stays free of live URLs.
 
@@ -3064,7 +3070,7 @@ def compare_dates(
     expression: str = "(nir-red)/(nir+red)",
     max_cloud_cover: float = 40,
     label: str | None = None,
-    stack_layer: bool = False,
+    stack_layer: bool = True,
 ) -> dict[str, Any]:
     """Compare two time windows over a place: matched scenes, index delta, swipe map.
 
