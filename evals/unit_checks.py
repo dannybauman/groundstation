@@ -608,7 +608,7 @@ def t_compare_dates_clips_means_to_bbox():
     tools.render_map = lambda **kw: maps.append(kw) or {"map_path": "x.html"}
     try:
         out = tools.compare_dates(bbox=box, window_before="a/b", window_after="c/d", stack_facts={"terrain": True})
-        assert maps[0]["stack_facts"] == {"geocoded": False, "terrain": True}, maps[0]["stack_facts"]
+        assert maps[0]["stack_facts"] == {"terrain": True}, maps[0]["stack_facts"]
         assert seen == [box, box], seen
         assert out["clipped_to"] == box and "extent_note" not in out
     finally:
@@ -1001,7 +1001,11 @@ def t_stack_postcard_listing_static_and_honest():
 
 def t_stack_map_honest_extra_facts():
     # callers that geocoded / fetched events say so; the panel only then claims it
-    html, _ = _render_stack_map(stack_layer=True, stack_facts={"geocoded": True, "events": True, "weather": True})
+    token = tools._tool_geocoded.set(True)  # only a tool that ran the geocode credits it
+    try:
+        html, _ = _render_stack_map(stack_layer=True, stack_facts={"events": True, "weather": True})
+    finally:
+        tools._tool_geocoded.reset(token)
     for name in ("Gazet", "Nominatim", "NASA EONET", "GDACS", "Open-Meteo", "Overture Maps"):
         assert name in html, f"{name} missing despite honest facts"
     base, _ = _render_stack_map(stack_layer=True)
@@ -1767,7 +1771,11 @@ def t_stack_panel_credits_the_geocoder_that_answered():
     lay = [{"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}]
     with tempfile.TemporaryDirectory() as d:
         def names(fact):
-            m = tools.render_map("t", [0, 0, 10, 10], lay, out_path=str(Path(d) / "m.html"), stack_layer=True, stack_facts={"geocoded": fact})
+            token = tools._tool_geocoded.set(fact)
+            try:
+                m = tools.render_map("t", [0, 0, 10, 10], lay, out_path=str(Path(d) / "m.html"), stack_layer=True)
+            finally:
+                tools._tool_geocoded.reset(token)
             return {n for n in pat.findall(Path(m["map_path"]).read_text()) if n in ("Gazet", "Nominatim")}
         assert names("gazet") == {"Gazet"}
         assert names("nominatim") == {"Nominatim"}
@@ -2778,6 +2786,78 @@ def t_postcard_names_the_uncovered_side_and_why_it_cannot_fill():
     assert out["uncovered_pct"] > 20 and "south" in out["uncovered_side"], out
     assert "south" in out["coverage_note"] and "direct COG access" in out["coverage_note"], out
     assert "direct COG access" in out2["coverage_note"] and out2["dropped"], out2
+
+
+def _compare_fixture(before_cloud, render, **kw):
+    item = lambda i, d, c: {"id": i, "datetime": f"{d}T10:00:00Z", "collection": "sentinel-2-l2a", "bbox": [0, 0, 1, 1], "cloud_cover": c}
+    saved = tools.search_imagery, tools.compute_statistics, tools.render_map
+    wins = iter([[item("S2B_31TBF_20240201_0_L2A", "2024-02-01", 1)], [item("S2B_31TBF_20240101_0_L2A", "2024-01-01", before_cloud)]])
+    tools.search_imagery = lambda *a, **k: {"items": next(wins)}
+    tools.compute_statistics = lambda *a, **k: {"x": {"mean": 0.5}}
+    tools.render_map = render
+    try:
+        return tools.compare_dates(bbox=[0, 0, 1, 1], window_before="2024-01-01/2024-01-02", window_after="2024-02-01/2024-02-02", **kw)
+    finally:
+        tools.search_imagery, tools.compute_statistics, tools.render_map = saved
+
+
+def t_compare_dates_returns_render_maps_error():
+    # Field test 15: an out_path outside the repo made render_map return an error and compare_dates index map_path
+    out = _compare_fixture(1, lambda **kw: {"error": "out_path must be inside the out root"}, out_path="/tmp/outside.html")
+    assert out == {"error": "out_path must be inside the out root"}, out
+
+
+_PORTLAND_GAZET = [
+    {"source": "divisions_area", "id": "or", "name": "Portland", "country": "US", "subtype": "locality",
+     "bbox": [-122.837, 45.433, -122.472, 45.653], "similarity": 1.0},
+    {"source": "divisions_area", "id": "me", "name": "Portland", "country": "US", "subtype": "locality",
+     "bbox": [-70.347, 43.544, -69.976, 43.728], "similarity": 1.0},
+]
+_STATE_OF = lambda lat, lon: {"state": "Oregon" if lon < -100 else "Maine", "country": "United States"}
+
+
+def t_geocode_refusal_drops_names_without_the_ask():
+    # Field test 15: Le Moule (Guadeloupe) sat in the Portland refusal; its name shares no word with the ask
+    moule = {"source": "divisions_area", "id": "gp", "name": "Le Moule", "country": "GP", "subtype": "locality",
+             "bbox": [-61.4, 16.3, -61.3, 16.4], "similarity": 1.0}
+    out, _ = _with_geocoders({"ids": [*_PORTLAND_GAZET, moule]}, [], lambda: tools.geocode("Portland"), reverse=_STATE_OF)
+    assert out["ambiguous"] and len(out["candidates"]) == 2, out["candidates"]
+    assert "Le Moule" not in str(out) and out["geocode_note"].startswith("2 places match"), out
+
+
+def t_geocode_note_names_the_state():
+    # Field test 15: the refusal named Oregon and Maine while the note still gave 45.5N 122.7W
+    out, _ = _with_geocoders({"ids": _PORTLAND_GAZET}, [], lambda: tools.geocode("Portland"), reverse=_STATE_OF)
+    note = out["geocode_note"]
+    assert "Oregon, United States" in note and "Maine, United States" in note and "122.7W" not in note, note
+
+
+def t_timelapse_caveat_says_frames_are_the_callers():
+    # Field test 15: Hobet's 2016 window found 0 scenes at the cap and the frames began at 2018 unsaid
+    layer = lambda n: {"type": "raster", "name": n, "tiles": "https://t.example/{z}/{x}/{y}.png"}
+    with tempfile.TemporaryDirectory() as d:
+        out = tools.render_timelapse("t", [0, 0, 1, 1], [layer("2018"), layer("2020")], out_path=str(Path(d) / "t.html"))
+    assert "caller's" in out["caveat"][0] and "0 scenes" in out["caveat"][0], out
+
+
+def t_compare_dates_cloud_caveat_names_side_and_scene():
+    # Field test 15: Rolling Fork's before scene was 46% cloud and only the cloud field said so
+    ok = lambda **kw: {"map_path": "x.html"}
+    cav = _compare_fixture(46, ok)["caveat"][0]
+    assert "before scene S2B_31TBF_20240101_0_L2A 46%" in cav, cav
+    assert "caveat" not in _compare_fixture(10, ok)
+
+
+def t_stack_facts_geocoded_is_the_tools_alone():
+    # Field test 15: a caller's {"geocoded": "nominatim"} for a hand-picked box credited a lookup that never ran
+    out = _compare_fixture(1, lambda **kw: {"map_path": "x.html"}, stack_facts={"geocoded": "nominatim"})
+    assert out["stack_facts_ignored"] == ["geocoded"], out
+    assert tools._map_stack_facts([], [], {"geocoded": "nominatim"})["geocoded"] is False
+    token = tools._tool_geocoded.set("gazet")
+    try:
+        assert tools._map_stack_facts([], [], {"geocoded": "nominatim"})["geocoded"] == "gazet"
+    finally:
+        tools._tool_geocoded.reset(token)
 
 
 def t_versions_agree():

@@ -9,6 +9,7 @@ that scaffold as a toolset later.
 
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import hashlib
 import json
@@ -118,6 +119,12 @@ def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
         score += 0.1 + (0.2 if kind in want else 0.0)
     return dict(name=name, bbox=bbox, source=source, where=where, kind=kind,
                 extent=[round(width, 4), round(height, 4)], importance=importance, score=round(score, 3))
+
+
+def _names_the_ask(name: str, ask: str) -> bool:
+    """A candidate whose name shares no word with the ask is a fuzzy-match stray (Le Moule for Portland)"""
+    words = lambda t: set(re.findall(r"\w+", t.lower()))
+    return bool(words(name) & words(ask))
 
 
 def _state_country(c: dict[str, Any]) -> str:
@@ -547,6 +554,7 @@ def geocode(query: str) -> dict[str, Any]:
             pool.append((_candidate(f"{name} ({_where(h)})" if _where(h) else name, bb, "gazet", _gazet_where(h),
                                     str(h.get("subtype") or "place").lower(), None, want), h))
         if pool:
+            pool = [p for p in pool if _names_the_ask(p[1].get("name") or "", query)] or pool
             pool = sorted(pool, key=lambda p: -p[0]["score"])[:4]
             top, h = pool[0]
             w, s, e, n = top["bbox"]
@@ -558,17 +566,23 @@ def geocode(query: str) -> dict[str, Any]:
                 "bbox": [w, s, e, n],
                 "source": "gazet",
             }
+            ambiguous = _settle(out, [c for c, _ in pool])
             # Picking one silently is the geocoder deciding for the caller, so
             # say which and name the rest. Field test No.8: two US counties are
-            # both "Harris County (US, county)", so each tie carries where it is
+            # both "Harris County (US, county)", so each tie carries where it is.
+            # A refusal has looked up each state (_settle), so name that over coordinates
             if len(pool) > 1:
+                def label(c: dict[str, Any], o: dict[str, Any]) -> str:
+                    return f"({c['where']})" if ambiguous else f"({_where(o)}) {_at(o)}"
                 out["geocode_note"] = (
-                    f"{len(pool)} places match {query!r} equally well; using {top['name']} {_at(h)} (best score), not "
-                    + ", ".join(f"{o.get('name')} ({_where(o)}) {_at(o)}" for _, o in pool[1:])
+                    f"{len(pool)} places match {query!r} equally well; using {top['name']} "
+                    + (f"{label(top, h)}" if ambiguous else _at(h))
+                    + " (best score), not "
+                    + ", ".join(f"{o.get('name')} {label(c, o)}" for c, o in pool[1:])
                     + ". Pass the fuller name if another was meant"
                 )
-            if _settle(out, [c for c, _ in pool]):
-                out["geocode_note"] += ". ambiguous: pass the fuller name or a bbox"
+                if ambiguous:
+                    out["geocode_note"] += ". ambiguous: pass the fuller name or a bbox"
             return out
     except httpx.HTTPError:
         _gazet_skip_until = time.time() + 300  # a slow or dead Space must not tax every geocode
@@ -615,6 +629,7 @@ def geocode(query: str) -> dict[str, Any]:
         imp = r.get("importance")
         pool.append((_candidate(r.get("display_name", key[0]), [w, s, e, n], "nominatim", key[0], key[1],
                                 None if imp is None else round(float(imp), 3), want), r))
+    pool = [p for p in pool if _names_the_ask(p[1].get("display_name", ""), matched)] or pool
     pool = sorted(pool, key=lambda p: -p[0]["score"])[:4]
     top, r0 = pool[0]
     out = {
@@ -2630,6 +2645,10 @@ def _snapshot_artifact(
             browser.close()
 
 
+# only a tool that ran a geocode sets this (compare_dates); a caller's stack_facts never can
+_tool_geocoded: contextvars.ContextVar[bool | str] = contextvars.ContextVar("tool_geocoded", default=False)
+
+
 def _map_stack_facts(
     resolved: list[dict[str, Any]],
     layers: list[dict[str, Any]],
@@ -2661,7 +2680,8 @@ def _map_stack_facts(
         "weather": False,
         "passes": False,
         "snapshot": False,
-        **(extra_facts or {}),
+        **{k: v for k, v in (extra_facts or {}).items() if k != "geocoded"},
+        "geocoded": _tool_geocoded.get(),
     }
 
 
@@ -2700,10 +2720,10 @@ def _notes_result(out: dict[str, Any], notes: list[str] | None, stack_facts: dic
     """Hand the notes back, and name stack_facts keys the panel can't use instead of dropping them."""
     if notes:
         out["notes"] = notes
-    bad = [k for k in (stack_facts or {}) if k not in _KNOWN_STACK_FACTS]
+    bad = [k for k in (stack_facts or {}) if k not in _KNOWN_STACK_FACTS or k == "geocoded"]
     if bad:
         out["stack_facts_ignored"] = bad
-        extra = "stack_facts takes provenance flags only (geocoded, events, weather, passes, terrain, snapshot); put free text in notes"
+        extra = "stack_facts takes provenance flags only (events, weather, passes, terrain, snapshot; geocoded is set by the tool that geocoded); put free text in notes"
         out["note"] = f'{out["note"]}. {extra}' if out.get("note") else extra
 
 
@@ -2849,8 +2869,8 @@ def render_map(
     the map — the actual collections, tiler, formats, and buckets on screen,
     joined from docs/stack.md. Attribution to projects, never people.
     stack_facts: honest extras the panel can't see from the layers alone —
-    pass {"geocoded": <geocode's source, "gazet" or "nominatim">} if you resolved the place via geocode,
-    {"events": True} if an events layer came from active_events, and
+    {"geocoded": ...} is ignored and named in stack_facts_ignored: only a tool that ran
+    the geocode (compare_dates) credits it. Pass {"events": True} if an events layer came from active_events, and
     {"passes": True} if next_pass informed the answer. Only claim
     what actually happened.
 
@@ -2992,7 +3012,8 @@ def render_timelapse(
     tiles up front, the rest load when shown, so keep it to a few frames: more
     than max_frames (hard ceiling 12) is an error. Use for 3 or more dates, a
     season or a progression; for two dates use render_map (the swipe).
-    Returns {map_path, frames, state}.
+    Returns {map_path, frames, state, caveat}; the frames are the caller's, so a
+    window that found 0 scenes at the cloud cap is the caller's to name.
     """
     cap = min(max_frames, TIMELAPSE_MAX_FRAMES)
     if len(frames) < 2:
@@ -3023,6 +3044,8 @@ def render_timelapse(
         "map_path": out_path,
         "frames": len(resolved),
         "state": {"bbox": bbox, "interval_ms": int(interval_ms), "layers": [_layer_state(l) for l in resolved]},
+        "caveat": ["frames are the caller's: this tool searches no windows, so a window that returned 0 scenes "
+                   "at the cloud cap is not seen here. Name any missing date range yourself next to the map"],
     }
     _notes_result(out, notes, stack_facts)
     return out
@@ -3712,6 +3735,7 @@ def _delta_caveats(
     mean_before: float | None,
     cloud_after: float | None,
     cloud_before: float | None,
+    ids: tuple[str, str] = ("", ""),
 ) -> list[str]:
     """Reasons this delta shouldn't be read at face value. Empty when it's clean."""
     out: list[str] = []
@@ -3723,7 +3747,7 @@ def _delta_caveats(
     if cloudy:
         out.append(
             "cloud may be driving this delta ("
-            + ", ".join(f"{w} scene {c:.0f}%" for w, c in cloudy)
+            + ", ".join(f"{w} scene {ids[w == 'before']} {c:.0f}%".replace("  ", " ") for w, c in cloudy)
             + f", threshold {CLOUD_CAVEAT_PCT:.0f}%). Cloud pushes a normalized index toward zero."
         )
     if mean_before is not None and abs(mean_before) < FLAT_BASELINE:
@@ -3846,16 +3870,22 @@ def compare_dates(
     title = f"{label or place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}"
     if not out_path:
         out_path = _artifact_path(None, "map", f"{title} {hashlib.sha1(repr(bbox).encode()).hexdigest()[:6]}")
-    m = render_map(
-        title=title,
-        out_path=out_path,
-        subtitle=f"{expression} · means over the area · drag the divider · tile {best_tile}",
-        bbox=bbox,
-        layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
-        stack_layer=stack_layer,
-        stack_facts={"geocoded": geocoded, **(stack_facts or {})},
-        notes=notes,
-    )
+    token = _tool_geocoded.set(geocoded)
+    try:
+        m = render_map(
+            title=title,
+            out_path=out_path,
+            subtitle=f"{expression} · means over the area · drag the divider · tile {best_tile}",
+            bbox=bbox,
+            layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
+            stack_layer=stack_layer,
+            stack_facts=stack_facts,
+            notes=notes,
+        )
+    finally:
+        _tool_geocoded.reset(token)
+    if "error" in m:
+        return m
     delta = round(mean_after - mean_before, 4) if mean_after is not None and mean_before is not None else None
     out = {
         "tile": best_tile,
@@ -3867,7 +3897,7 @@ def compare_dates(
         "map_path": m["map_path"],
         **scope,
     }
-    caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"))
+    caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"), (a["id"], b["id"]))
     if caveats:
         out["caveat"] = caveats
     _notes_result(out, notes, stack_facts)
