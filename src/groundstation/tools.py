@@ -1830,7 +1830,10 @@ def compute_statistics(
     are applied (Sentinel-2 comes back as reflectance, 0 to 1, and an expression is
     computed on the corrected bands, so an index is not biased by the post-2022 offset).
     Earth Search's post-2022 pixels already have the offset taken out (earthsearch:boa_offset_applied),
-    so only the scale is applied there; Planetary Computer items carry no raster:bands, so nothing is.
+    so only the scale is applied there. Planetary Computer sentinel-2-l2a items carry no raster:bands and
+    its pixels keep the offset, so the collection convention is applied (scale 0.0001, offset -0.1 from
+    processing baseline 04.00, 0 before) and band_scaling's source says so; a Sentinel-2 item from any
+    other catalog without raster:bands comes back raw with scaling_applied false and a scaling_note.
     scaling_applied: true and band_scaling (the factors used) say so. apply_scaling=False
     is the raw escape hatch: raw digital numbers, with scaling_note naming the factors
     that were not applied.
@@ -1865,7 +1868,16 @@ def compute_statistics(
     # applying it again put half of an August cropland scene below zero (red median 926 DN here, 1930 on PC)
     offset_in_pixels = bool(item and (item.get("properties") or {}).get("earthsearch:boa_offset_applied"))
     factors: dict[str, tuple[float, float]] = {}
+    no_rb = bool(item) and not any(a.get("raster:bands") for a in item.get("assets", {}).values())
+    convention: dict[str, tuple[float, float]] = {}
+    baseline = str((item.get("properties") or {}).get("s2:processing_baseline") or "") if item else ""
+    if no_rb and catalog == "planetary-computer" and collection_id == "sentinel-2-l2a" and baseline:
+        # PC pixels keep the +1000 (red median 1930 vs 926 on earth-search), so the offset is real from 04.00 on
+        # ponytail: string compare on the NN.NN baseline, fine until a baseline passes 99.99
+        off = -0.1 if baseline >= "04.00" else 0
+        convention = {k: (0.0001, off) for k in item["assets"] if re.fullmatch(r"B(0[1-9]|1[0-2]|8A)", k)}
     if apply_scaling and item:
+        factors.update(convention)
         for key, a in item.get("assets", {}).items():
             b0 = (a.get("raster:bands") or [{}])[0]
             sc, off = b0.get("scale") or 1, 0 if offset_in_pixels else b0.get("offset") or 0
@@ -1873,9 +1885,9 @@ def compute_statistics(
                 factors[key] = (sc, off)
     params: list[tuple[str, str]] = [("max_size", "512")]
     corrected = False
+    raw_expression = expression
     if expression:
         if factors:
-            raw_expression = expression
             # the offset does not cancel in a ratio, so each band is corrected before the index is computed
             # fixed-point numbers only: 1e-05 would read as the identifier "e" to the band parser
             def _corrected(m: re.Match) -> str:
@@ -1956,6 +1968,12 @@ def compute_statistics(
         for i, a in enumerate(names, 1):
             if f"b{i}" in out and a not in out:
                 out[a] = out.pop(f"b{i}")
+            elif f"{a}_b1" in out and a not in out:  # PC names the band asset_b1
+                out[a] = out.pop(f"{a}_b1")
+    if corrected and isinstance(out, dict) and expression in out:
+        # PC keys the result by the expression it was sent; give back the one the caller wrote,
+        # in place: compare_dates reads the first value, and a pop would put clipped_to first
+        out = {raw_expression if k == expression else k: v for k, v in out.items()}
     if retried and isinstance(out, dict):
         out["note"] = "titiler.xyz rate-limited; statistics from raster.eoapi.dev"
     if factors and isinstance(out, dict):
@@ -2003,13 +2021,23 @@ def compute_statistics(
                     if offset_in_pixels and g.get("offset"):
                         g["declared_offset"], g["offset"] = g["offset"], 0
                     groups.setdefault(tuple(sorted(g.items())), {**g, "bands": []})["bands"].append(key)
+        if convention:
+            (sc, off), = set(convention.values())
+            groups[("convention",)] = {"scale": sc, "offset": off, "bands": list(convention),
+                                       "source": "collection convention: the item carries no raster:bands"}
+        elif no_rb and collection_id.startswith("sentinel-2") and not out.get("scaling_applied"):
+            out["scaling_applied"] = False
+            out["scaling_note"] = (
+                "values are raw digital numbers: this Sentinel-2 item carries no raster:bands and "
+                f"groundstation knows no scale or offset convention it can apply for {catalog} here, so nothing is applied"
+            )
         if groups:
             out["band_scaling"] = list(groups.values())
             raw = [g for g in groups.values() if g.get("scale") not in (None, 1) or g.get("offset") not in (None, 0)]
             if raw and not out.get("scaling_applied"):
                 g = max(raw, key=lambda g: len(g["bands"]))
                 out["scaling_note"] = (
-                    f"values are raw digital numbers: the item's raster:bands give scale {g.get('scale')} "
+                    f"values are raw digital numbers: {'the collection convention gives' if 'source' in g else "the item's raster:bands give"} scale {g.get('scale')} "
                     f"and offset {g.get('offset')} on {len(g['bands'])} bands (physical = raw * scale + offset), "
                     "and nothing here applies them; with an expression a non-zero offset shifts the index too"
                     + (f" (the declared offset {g['declared_offset']} is already in the pixels)" if "declared_offset" in g else "")
