@@ -2740,6 +2740,7 @@ def render_map_3d(
     extra_layers: list[dict[str, Any]] | None = None,
     postcard: dict[str, Any] | None = None,
     stack_facts: dict[str, Any] | None = None,
+    fill_coverage: bool = True,
 ) -> dict[str, Any]:
     """Write a self-contained 3D terrain fly-through with imagery draped over it.
 
@@ -2761,6 +2762,11 @@ def render_map_3d(
     below ~95) — the gaps become one click away without loading tiles nobody
     asked for. They drape beneath the main scene, so it always wins.
 
+    fill_coverage: when the main item layer clips the view and no extra_layers
+    were passed, the same-day items of its collection that fill the gap drape
+    on load beneath it, named in state["layers"] and "filled_with". False turns
+    the search off and renders the main layer alone.
+
     postcard: {"place": ..., "date": ..., "caption": ...} bakes a share card
     of the actual 3D view — pitched terrain, drape, extras auto-loaded —
     via a headless-browser snapshot. Same playwright/chromium requirement
@@ -2768,6 +2774,24 @@ def render_map_3d(
     """
     # ponytail: one draped layer; add a second when a real ask needs it
     resolved = _resolve_layer(layer)
+    siblings: list[dict[str, Any]] = []
+    sibling_specs: list[dict[str, Any]] = []
+    if (fill_coverage and not extra_layers and layer.get("type") == "item"
+            and resolved.get("bounds")
+            and _union_coverage_pct(bbox, [resolved["bounds"]]) < PARTIAL_COVERAGE_PCT):
+        try:
+            cat, coll = layer["catalog"], layer["collection_id"]
+            day = ((_item(cat, coll, layer["item_id"]) or {}).get("properties", {}).get("datetime") or "")[:10]
+            found = search_imagery(cat, [coll], bbox=bbox, datetime_range=f"{day}T00:00:00Z/{day}T23:59:59Z",
+                                   limit=10) if day else {}
+            fcs = find_full_coverage_set(found.get("items") or [], bbox, threshold=PARTIAL_COVERAGE_PCT)
+            for it in (fcs or {}).get("items", []):
+                if it["id"] != layer["item_id"]:
+                    spec = {**layer, "name": it["id"], "item_id": it["id"], "bbox": it.get("bbox")}
+                    sibling_specs.append(spec)
+                    siblings.append({**_resolve_layer(spec), "reason": "same-day sibling filling the view"})
+        except Exception:
+            siblings, sibling_specs = [], []  # search failed: render the main layer alone, as before
     style = {
         "version": 8,
         "sources": {
@@ -2803,6 +2827,13 @@ def render_map_3d(
             },
         ],
     }
+    for i, sb in enumerate(siblings):
+        # beneath "imagery" so the main scene always wins
+        style["sources"][f"sibling{i}"] = {
+            "type": "raster", "tiles": [sb["tiles"]], "tileSize": 256,
+            **({"bounds": sb["bounds"]} if sb.get("bounds") else {}),
+        }
+        style["layers"].insert(-1, {"id": f"sibling{i}", "type": "raster", "source": f"sibling{i}"})
     extras = [_resolve_layer(l) for l in (extra_layers or [])]
     extra_html = ""
     if extras:
@@ -2813,7 +2844,7 @@ def render_map_3d(
         ])})
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for([resolved, *extras], [layer, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True})
+        stack_html = _stack_chunk_for([resolved, *siblings, *extras], [layer, *sibling_specs, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True})
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = (
@@ -2838,14 +2869,19 @@ def render_map_3d(
         "bbox": bbox,
         "exaggeration": round(float(exaggeration), 2),
         "terrain": True,
-        "layers": [_layer_state(resolved), *(_layer_state(e, deferred=True) for e in extras)],
+        "layers": [_layer_state(resolved), *(_layer_state(s) for s in siblings),
+                   *(_layer_state(e, deferred=True) for e in extras)],
     }
+    if siblings:
+        out["filled_with"] = [s["name"] for s in siblings]
+        for ls, sb in zip(out["state"]["layers"][1:], siblings):
+            ls["reason"] = sb["reason"]
     # Same blind spot render_map had, but 3D differs twice: only the ONE main
     # layer drapes on load (extras wait behind the button), and an uncovered
     # area shows terrain with no imagery rather than blank. So report what the
     # viewer actually gets first, and what the button would add.
     if resolved.get("bounds"):
-        _cov = _union_coverage_pct(bbox, [resolved["bounds"]])
+        _cov = _union_coverage_pct(bbox, [resolved["bounds"], *(s["bounds"] for s in siblings if s.get("bounds"))])
         out["state"]["coverage_pct"] = _cov
         if _cov < PARTIAL_COVERAGE_PCT:
             _extra_boxes = [e["bounds"] for e in extras if e.get("bounds")]

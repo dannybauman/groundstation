@@ -307,6 +307,32 @@ def t_3d_state_marks_what_does_not_draw_on_load():
         assert "coverage_pct_loaded" not in r["state"]
 
 
+def t_3d_fills_short_coverage_with_same_day_siblings():
+    main = {"type": "item", "catalog": "earth-search", "collection_id": "c", "item_id": "A_1",
+            "assets": ["visual"], "bbox": [0, 0, 6, 10]}
+    sib = {"id": "A_2", "collection": "c", "datetime": "2026-10-23T19:00:00Z", "bbox": [5, 0, 10, 10]}
+    main_it = {**sib, "id": "A_1", "bbox": [0, 0, 6, 10]}
+    o_img, o_item, o_tile = tools.search_imagery, tools._item, tools.tile_url_template
+    tools.search_imagery = lambda *a, **kw: {"items": [main_it, sib]}
+    tools._item = lambda cat, coll, iid: {"properties": {"datetime": "2026-10-23T19:00:00Z"}}
+    tools.tile_url_template = lambda cat, coll, iid, *a: f"https://x/{iid}/{{z}}/{{x}}/{{y}}.png"
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            r = tools.render_map_3d("t", [0, 0, 10, 10], main, out_path=str(Path(d) / "a.html"))
+            s = r["state"]
+            assert r["filled_with"] == ["A_2"] and s["coverage_pct"] == 100.0
+            assert [l["name"] for l in s["layers"]] == ["A_1", "A_2"]
+            assert not s["layers"][1].get("deferred") and "sibling" in s["layers"][1]["reason"]
+            assert "coverage_note" not in r
+            html = Path(r["path"]).read_text()
+            assert "https://x/A_2/" in html and "sibling0" in html
+            r = tools.render_map_3d("t", [0, 0, 10, 10], main, fill_coverage=False, out_path=str(Path(d) / "b.html"))
+            assert r["state"]["coverage_pct"] == 60.0 and "filled_with" not in r
+            assert len(r["state"]["layers"]) == 1
+    finally:
+        tools.search_imagery, tools._item, tools.tile_url_template = o_img, o_item, o_tile
+
+
 def t_field_test_etime_parser():
     # the field-test preflight compares MCP server start time against source
     # mtime; getting ps -o etime parsing wrong makes the warning silently never

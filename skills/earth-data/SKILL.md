@@ -70,7 +70,7 @@ When someone asks about running the whole thing on their own data or infrastruct
 Triggers: "3D", "fly-through", "terrain", "what does this valley actually look like", anywhere relief is the story (mountains, canyons, coastlines, volcanoes, glaciers).
 
 - Run the normal flow first — `geocode`, then `search_imagery` — and pick the lowest-cloud recent scene that covers the area. Terrain is only as good as the imagery draped on it.
-- When the best scene clips the AOI (`covers_aoi_pct` below ~95), pass the other scenes of the same-day `full_coverage_set` as `extra_layers` — they embed as a "Load full coverage" button, so the gaps are one click away without loading tiles upfront. Say so in your answer ("the west edge loads on click").
+- When the best scene clips the AOI (`covers_aoi_pct` below ~95), `render_map_3d` fills the gap itself: it finds the same-day siblings of that item and drapes them on load beneath the main scene, named in `state["layers"]` and `filled_with`, with `coverage_pct` reporting the union. `extra_layers` is still there for your own click-to-load extras (a "Load full coverage" button), and `fill_coverage=False` turns the search off. Quote `filled_with` in your answer.
 - Then `render_map_3d(title, bbox, layer, exaggeration=1.5)` with that one scene as the layer (same shape as a `render_map` layer). The artifact carries an exaggeration slider, a fly-through orbit, and a reset button.
 - Elevation is the keyless AWS Terrarium tileset, so the page shares as-is. It's global at ~10m-ish over land, sea floor included, and flat terrain looks flat — pick relief-rich AOIs or the 3D adds nothing.
 - Exaggeration 1.5 reads well for mountains; push to 2-3 for gentle terrain, drop to 1 when the shape should stay honest.
