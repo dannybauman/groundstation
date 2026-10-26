@@ -3073,9 +3073,13 @@ def compare_dates(
 
     a, b = pick(after_items), pick(before_items)
 
+    scope: dict[str, Any] = {}
+
     def _mean(it: dict[str, Any]) -> float | None:
         try:
-            s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression)
+            # without the bbox the mean is the whole Sentinel-2 tile, not the place asked about
+            s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox)
+            scope.update({k: s[k] for k in ("clipped_to", "extent_note") if k in s})
             return round(next(iter(s.values()))["mean"], 4)
         except Exception:
             return None
@@ -3090,7 +3094,7 @@ def compare_dates(
         }
     m = render_map(
         title=f"{label or place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}",
-        subtitle=f"{expression} · drag the divider · tile {best_tile}",
+        subtitle=f"{expression} · means over the area · drag the divider · tile {best_tile}",
         bbox=bbox,
         layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
         stack_layer=stack_layer,
@@ -3105,6 +3109,7 @@ def compare_dates(
         "delta_pct": round(delta / abs(mean_before) * 100, 1) if delta is not None and mean_before else None,
         "expression": expression,
         "map_path": m["map_path"],
+        **scope,
     }
     caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"))
     if caveats:

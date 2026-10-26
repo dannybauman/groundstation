@@ -537,6 +537,33 @@ def t_conditions_weather_partitioning():
         tools.next_pass = orig_next
 
 
+def t_compare_dates_clips_means_to_bbox():
+    # Field tests 4, 8, 10, 11: the delta was a whole-tile number for the place asked about
+    saved = (tools.search_imagery, tools.compute_statistics, tools.render_map)
+    box = [-121.5, 39.4, -121.4, 39.5]
+    seen = []
+
+    def item(i, d):
+        return {"id": i, "collection": "sentinel-2-l2a", "datetime": d + "T18:00:00Z",
+                "cloud_cover": 1, "bbox": [-122, 39, -121, 40]}
+
+    tools.search_imagery = lambda *a, **kw: {"items": [item("S2A_10TFK_20260601_0_L2A", "2026-06-01"),
+                                                       item("S2A_10TFK_20260501_0_L2A", "2026-05-01")]}
+
+    def fake_stats(cat, coll, iid, **kw):
+        seen.append(kw.get("bbox"))
+        return {"nd": {"mean": 0.5}, "clipped_to": kw.get("bbox")}
+
+    tools.compute_statistics = fake_stats
+    tools.render_map = lambda **kw: {"map_path": "x.html"}
+    try:
+        out = tools.compare_dates(bbox=box, window_before="a/b", window_after="c/d")
+        assert seen == [box, box], seen
+        assert out["clipped_to"] == box and "extent_note" not in out
+    finally:
+        tools.search_imagery, tools.compute_statistics, tools.render_map = saved
+
+
 # smallest valid PNG (1x1) — the card only has to embed bytes, not decode them
 CANNED_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
