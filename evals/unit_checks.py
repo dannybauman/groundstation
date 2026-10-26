@@ -319,7 +319,7 @@ def t_3d_fills_short_coverage_with_same_day_siblings():
     o_img, o_item, o_tile = tools.search_imagery, tools._item, tools.tile_url_template
     tools.search_imagery = lambda *a, **kw: {"items": [main_it, sib]}
     tools._item = lambda cat, coll, iid: {"properties": {"datetime": "2026-10-23T19:00:00Z"}}
-    tools.tile_url_template = lambda cat, coll, iid, *a: f"https://x/{iid}/{{z}}/{{x}}/{{y}}.png"
+    tools.tile_url_template = lambda cat, coll, iid, *a, **k: f"https://x/{iid}/{{z}}/{{x}}/{{y}}.png"
     try:
         with tempfile.TemporaryDirectory() as d:
             r = tools.render_map_3d("t", [0, 0, 10, 10], main, out_path=str(Path(d) / "a.html"))
@@ -3032,6 +3032,33 @@ def t_stretch_fetched_once_per_item_asset_box():
         # tile_url_template shares the same stretch and the same cache
         u = tools.tile_url_template("planetary-computer", "modis-11A1-061", "I1", assets=["LST_Day_1km"], bbox=[0, 0, 1, 2])
         assert "rescale=14000%2C15500" in u and len(calls) == 2, (u, calls)
+    finally:
+        restore()
+
+
+def t_stretch_one_range_across_a_coverage_set():
+    # 2 tiles of one product side by side on 2 ranges draw a seam: one temperature, 2 colours
+    calls = []
+    restore = _stretch_env({"LST_Day_1km": {}}, calls)
+    post = tools._client.post
+
+    def per_item(url, **k):
+        r = post(url, **k)
+        if "statistics" in url and "I2" in url + json.dumps(k, default=str):
+            r._b = {"b1": {"percentile_2": 13900.0, "percentile_98": 15800.0}}
+        return r
+
+    tools._client.post = per_item
+    try:
+        items = [{"id": i, "catalog": "planetary-computer", "collection": "modis-11A1-061", "bbox": [0, 0, 2, 2]} for i in ("I1", "I2")]
+        layer = {"type": "coverage_set", "set": {"date": "d", "items": items}, "assets": ["LST_Day_1km"]}
+        with tempfile.TemporaryDirectory() as d:
+            r = tools.render_map("t", [0, 0, 1, 1], [layer], out_path=str(Path(d) / "a.html"))
+        a, b = r["state"]["layers"][:2]
+        assert len(calls) == 2, calls
+        assert a["rescale_used"] == b["rescale_used"] == "13900,15800", (a, b)
+        assert "widest of 2 scenes" in a["rescale_basis"], a
+        assert "rescale=13900%2C15800" in a["tiles"] and "rescale=13900%2C15800" in b["tiles"]
     finally:
         restore()
 

@@ -1941,14 +1941,13 @@ def compute_statistics(
     return out
 
 
-_STRETCH: dict[tuple, tuple[str, str] | None] = {}
-_STRETCH_BASIS = "2nd to 98th percentile of the raw values over the "
+_STRETCH: dict[tuple, tuple[float, float] | None] = {}
 _RGB_ASSETS = ("visual", "image")
 
 
 def _auto_stretch(catalog: str, collection_id: str, item_id: str, assets: list[str],
-                  colormap_name: str | None, box: list[float] | None) -> tuple[str, str] | None:
-    """(rescale, basis) from the data for a continuous single-asset layer, else None.
+                  colormap_name: str | None, box: list[float] | None) -> tuple[float, float] | None:
+    """(lo, hi) from the data for a continuous single-asset layer, else None.
 
     One statistics call per item, asset and box, kept for the process (a failure
     is kept as None, like _item). Raw values on purpose: tiles are raw, so
@@ -1966,11 +1965,40 @@ def _auto_stretch(catalog: str, collection_id: str, item_id: str, assets: list[s
             stats = compute_statistics(catalog, collection_id, item_id, assets=assets, bbox=box)
             b = next(v for v in stats.values() if isinstance(v, dict) and "percentile_2" in v)
             lo, hi = float(b["percentile_2"]), float(b["percentile_98"])
-            if lo < hi:
-                _STRETCH[key] = (f"{lo:.6g},{hi:.6g}", _STRETCH_BASIS + ("box" if box else "item"))
+            if math.isfinite(lo) and math.isfinite(hi) and lo < hi:
+                _STRETCH[key] = (lo, hi)
         except Exception:
             pass
     return _STRETCH[key]
+
+
+def _shared_stretch(layers: list[dict[str, Any]], view: list[float] | None) -> list[dict[str, Any]]:
+    """Fill rescale and rescale_basis on item layers that have neither rescale nor expression.
+
+    One range per catalog, collection, asset and colormap across all the layers:
+    the lowest 2nd and highest 98th percentile among the scenes, so a coverage
+    set's tiles, a swipe's two dates and a timelapse's frames draw one value
+    in one colour. Layers whose statistics fail take the others' range.
+    """
+    def key(l):
+        if l.get("type") != "item" or l.get("rescale") or l.get("expression"):
+            return None
+        return (l["catalog"], l["collection_id"], tuple(l.get("assets") or _default_assets(l["collection_id"])), l.get("colormap_name"))
+
+    ranges: dict[tuple, list[tuple[float, float]]] = {}
+    for l in layers:
+        if k := key(l):
+            st = _auto_stretch(k[0], k[1], l["item_id"], list(k[2]), k[3], view or l.get("bbox"))
+            ranges.setdefault(k, []).extend([st] if st else [])
+    out = []
+    for l in layers:
+        rs = ranges.get(key(l)) or []
+        if rs:
+            basis = f"2nd to 98th percentile of the raw values over the {'box' if view else 'scene'}"
+            l = {**l, "rescale": "%.6g,%.6g" % (min(r[0] for r in rs), max(r[1] for r in rs)),
+                 "rescale_basis": basis + (f", widest of {len(rs)} scenes" if len(rs) > 1 else "")}
+        out.append(l)
+    return out
 
 
 def tile_url_template(
@@ -1999,7 +2027,8 @@ def tile_url_template(
     With no rescale, a continuous single-asset layer (not visual/image, not
     categorical, no expression) is stretched 2nd to 98th percentile of the raw
     values over bbox (the whole item when bbox is omitted), so an unfamiliar
-    collection's units do not draw black. Pass rescale="lo,hi" to override;
+    collection's units do not draw black. When the statistics fail or come
+    back flat the URL carries no rescale. Pass rescale="lo,hi" to override;
     render_map reports what it used as rescale_used / rescale_basis.
     """
     if catalog == "zarr":
@@ -2025,7 +2054,7 @@ def tile_url_template(
     if expression and not rescale:
         rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
     elif not rescale and not expression and (st := _auto_stretch(catalog, collection_id, item_id, assets, colormap_name, bbox)):
-        rescale = st[0]
+        rescale = "%.6g,%.6g" % st
     backend = CATALOGS[catalog]["raster"]
     if backend == "pc":
         # item-tiles render empty for reprojection-heavy sources (MODIS
@@ -2478,18 +2507,16 @@ def _hole_text(aoi: list[float], shapes: list[Any]) -> str:
 def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[str, Any]:
     """An {"type": "item"} layer becomes a raster layer with tiles + scene bounds.
 
-    view is the map's box; with no rescale given it is the box the stretch is measured over.
+    view is the map's box; with no rescale given it is the box the stretch is
+    measured over. A map of several layers runs _shared_stretch over all of
+    them first, so this one-layer call only fills a layer nothing else shares
     """
     if l.get("type") != "item":
         return l
-    rescale, basis = l.get("rescale"), "given"
+    l = _shared_stretch([l], view)[0]
+    rescale, basis = l.get("rescale"), l.get("rescale_basis", "given")
     if not rescale and l.get("expression"):
         rescale, basis = "-1,1", "default for an index expression"
-    elif not rescale:
-        assets = l.get("assets") or _default_assets(l["collection_id"])
-        st = _auto_stretch(l["catalog"], l["collection_id"], l["item_id"], assets, l.get("colormap_name"), view or l.get("bbox"))
-        rescale, basis = st if st else (None, None)
-    l = {**l, "rescale": rescale}
     item_bounds = l.get("bbox")
     if item_bounds is None:
         # scene footprint bounds stop the map requesting (and the tiler
@@ -2504,6 +2531,7 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
         l.get("rescale"),
         l.get("colormap_name"),
         l.get("expression"),
+        bbox=view or l.get("bbox"),
     )
     # a caller who passed bbox wants no fetch at all, so only the bbox-less path reads the item
     geom = l.get("footprint") or (None if l.get("bbox") else (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("geometry"))
@@ -2963,8 +2991,9 @@ def render_map(
       {"type": "item", "name": ..., "catalog": ..., "collection_id": ...,
        "item_id": ..., "assets": [...], "rescale": "0,3000", "colormap_name": ...,
        # no rescale on a continuous one-asset layer: stretched 2nd to 98th
-       # percentile of the raw values over bbox; rescale_used / rescale_basis
-       # per layer in state.layers say what was used
+       # percentile of the raw values over bbox, one range shared by every
+       # scene of that collection and asset on the map; rescale_used /
+       # rescale_basis per layer in state.layers say what was used
        "expression": "(nir-red)/(nir+red)",  # expression for index layers
        "bbox": [w, s, e, n]}  # pass the item's bbox when you have it (from
                               # search results) — it skips a STAC re-fetch
@@ -3000,7 +3029,7 @@ def render_map(
     plus a postcard_note with the install command. Use when the view is
     the story; a plain one-scene imagery card is render_postcard's job.
     """
-    layers = [x for l in layers for x in _expand_coverage_set(l)]
+    layers = _shared_stretch([x for l in layers for x in _expand_coverage_set(l)], bbox)
     resolved = []
     raster_collections: list[str | None] = []
     for l in layers:
@@ -3144,7 +3173,7 @@ def render_timelapse(
                          "so pick fewer, evenly spaced windows (hard ceiling 12)"}
     if any(f.get("type") not in ("item", "raster") for f in frames):
         return {"error": "each frame must be one item or raster layer with a name"}
-    resolved = [_resolve_layer(f, bbox) for f in frames]
+    resolved = [_resolve_layer(f, bbox) for f in _shared_stretch(frames, bbox)]
     stack_html = ""
     if stack_layer:
         stack_html = _stack_chunk_for(resolved, frames, stack_facts, notes, bbox) or ""
@@ -3351,9 +3380,12 @@ def render_map_3d(
             found = search_imagery(cat, [coll], bbox=bbox, datetime_range=f"{day}T00:00:00Z/{day}T23:59:59Z",
                                    limit=10) if day else {}
             fcs = find_full_coverage_set(found.get("items") or [], bbox, threshold=PARTIAL_COVERAGE_PCT)
+            # siblings draw on the main scene's stretch, so the drape has no seam
+            share = ({"rescale": resolved["rescale_used"], "rescale_basis": resolved["rescale_basis"]}
+                     if resolved.get("rescale_used") else {})
             for it in (fcs or {}).get("items", []):
                 if it["id"] != layer["item_id"]:
-                    spec = {**layer, "name": it["id"], "item_id": it["id"], "bbox": it.get("bbox"),
+                    spec = {**layer, **share, "name": it["id"], "item_id": it["id"], "bbox": it.get("bbox"),
                             **({"footprint": it["footprint"]} if it.get("footprint") else {})}
                     sibling_specs.append(spec)
                     siblings.append({**_resolve_layer(spec), "reason": "same-day sibling filling the view"})
