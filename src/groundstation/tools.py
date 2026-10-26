@@ -745,6 +745,7 @@ ZARR_STORES: dict[str, dict[str, Any]] = {
         "stats": True,
         "tiles": True,
         "time_dim": "time",
+        "time_range": ["1959-01-01T00:00", "2023-01-10T18:00"],
         "source": "ECMWF ERA5 regridded by Google Research WeatherBench 2 (CC-BY-4.0)",
     },
 }
@@ -1152,12 +1153,14 @@ def write_archive(
     datetime_range: str | None = None,
     out_path: str | None = None,
     limit: int = 500,
+    max_cloud_cover: float | None = None,
 ) -> dict[str, Any]:
     """Cache a live STAC search as a stac-geoparquet archive.
 
     Pages the catalog's search (up to `limit` items) and writes the items with
     rustac. Pass the returned path as `catalog` to search_imagery to search the
-    snapshot with the network off. Returns path, count, datetime_range, written.
+    snapshot with the network off. max_cloud_cover filters the search the way
+    search_imagery's does. Returns path, count, datetime_range, written (UTC date).
     """
     import rustac
 
@@ -1174,6 +1177,8 @@ def write_archive(
     body: dict[str, Any] = {"collections": collections, "bbox": bbox, "limit": min(limit, 100)}
     if datetime_range:
         body["datetime"] = datetime_range
+    if max_cloud_cover is not None:
+        body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
     url = f"{CATALOGS[catalog]['stac']}/search"
     feats: list[dict[str, Any]] = []
     method = "POST"
@@ -1198,7 +1203,7 @@ def write_archive(
         "path": out_path,
         "count": len(feats),
         "datetime_range": [stamps[0], stamps[-1]] if stamps else None,
-        "written": dt.date.today().isoformat(),
+        "written": dt.datetime.now(dt.timezone.utc).date().isoformat(),
     }
 
 
@@ -1576,6 +1581,15 @@ def tile_url_template(
         v = z["variables"].get(item_id)
         if v is None:
             return f"unknown variable {item_id!r}; options: {', '.join(z['variables'])}"
+        lo, hi = z.get("time_range") or (None, None)
+        asked = (sel or {}).get(z["time_dim"]) or (sel or {}).get("valid_time")
+        if asked and lo:
+            try:
+                t = dt.datetime.fromisoformat(asked.replace("Z", "")).replace(tzinfo=None)
+            except ValueError:
+                t = None
+            if t and not dt.datetime.fromisoformat(lo) <= t <= dt.datetime.fromisoformat(hi):
+                return f"time {asked} is outside {collection_id}'s range ({lo} to {hi}); pick a time inside it, no tile URL returned"
         params = [("url", z["url"]), ("variable", item_id)]
         params += [("sel", f"{z['time_dim'] if k == 'valid_time' else k}=nearest::{x}") for k, x in (sel or {}).items()]
         if rescale or v.get("rescale"):
@@ -3195,6 +3209,7 @@ def compare_dates(
     max_cloud_cover: float = 40,
     label: str | None = None,
     stack_layer: bool = True,
+    stack_facts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare two time windows over a place: matched scenes, index delta, swipe map.
 
@@ -3204,7 +3219,7 @@ def compare_dates(
     earlier. Picks Sentinel-2 scenes from the SAME MGRS tile (best AOI coverage,
     lowest cloud), computes the expression's stats for both dates, and writes a
     side-by-side swipe map. Returns scenes, means, delta, and map_path.
-    stack_layer passes through to the swipe map, and since this tool geocodes
+    stack_layer and stack_facts pass through to the swipe map, and since this tool geocodes
     the place itself, the panel truthfully claims Gazet/Nominatim.
 
     A caveat list comes back when the delta shouldn't be read at face value —
@@ -3277,7 +3292,7 @@ def compare_dates(
         bbox=bbox,
         layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
         stack_layer=stack_layer,
-        stack_facts={"geocoded": geocoded},
+        stack_facts={"geocoded": geocoded, **(stack_facts or {})},
     )
     delta = round(mean_after - mean_before, 4) if mean_after is not None and mean_before is not None else None
     out = {
