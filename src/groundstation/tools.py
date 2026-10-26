@@ -1941,6 +1941,38 @@ def compute_statistics(
     return out
 
 
+_STRETCH: dict[tuple, tuple[str, str] | None] = {}
+_STRETCH_BASIS = "2nd to 98th percentile of the raw values over the "
+_RGB_ASSETS = ("visual", "image")
+
+
+def _auto_stretch(catalog: str, collection_id: str, item_id: str, assets: list[str],
+                  colormap_name: str | None, box: list[float] | None) -> tuple[str, str] | None:
+    """(rescale, basis) from the data for a continuous single-asset layer, else None.
+
+    One statistics call per item, asset and box, kept for the process (a failure
+    is kept as None, like _item). Raw values on purpose: tiles are raw, so
+    physical-unit statistics would stretch every scaled collection to black.
+    """
+    if catalog == "zarr" or len(assets) != 1 or assets[0] in _RGB_ASSETS or colormap_name in LEGENDS:
+        return None
+    key = (f"{catalog}:{collection_id}:{item_id}", assets[0], tuple(box) if box else None)
+    if key not in _STRETCH:
+        _STRETCH[key] = None
+        a = ((_item(catalog, collection_id, item_id) or {}).get("assets") or {}).get(assets[0]) or {}
+        if "classification:classes" in a or any("classification:classes" in b for b in a.get("raster:bands") or []):
+            return None
+        try:
+            stats = compute_statistics(catalog, collection_id, item_id, assets=assets, bbox=box)
+            b = next(v for v in stats.values() if isinstance(v, dict) and "percentile_2" in v)
+            lo, hi = float(b["percentile_2"]), float(b["percentile_98"])
+            if lo < hi:
+                _STRETCH[key] = (f"{lo:.6g},{hi:.6g}", _STRETCH_BASIS + ("box" if box else "item"))
+        except Exception:
+            pass
+    return _STRETCH[key]
+
+
 def tile_url_template(
     catalog: str,
     collection_id: str,
@@ -1950,6 +1982,7 @@ def tile_url_template(
     colormap_name: str | None = None,
     expression: str | None = None,
     sel: dict[str, str] | None = None,
+    bbox: list[float] | None = None,
 ) -> str:
     """XYZ tile URL template ({z}/{x}/{y}) for a STAC item, for web maps.
 
@@ -1962,6 +1995,12 @@ def tile_url_template(
     "(nir-red)/(nir+red)" with colormap_name="rdylgn" — supported on
     earth-search; ignored for veda/planetary-computer. Index expressions
     default to rescale="-1,1" (without a rescale they render blank).
+
+    With no rescale, a continuous single-asset layer (not visual/image, not
+    categorical, no expression) is stretched 2nd to 98th percentile of the raw
+    values over bbox (the whole item when bbox is omitted), so an unfamiliar
+    collection's units do not draw black. Pass rescale="lo,hi" to override;
+    render_map reports what it used as rescale_used / rescale_basis.
     """
     if catalog == "zarr":
         z = ZARR_STORES.get(collection_id)
@@ -1985,6 +2024,8 @@ def tile_url_template(
     assets = assets or ([] if expression else _default_assets(collection_id))
     if expression and not rescale:
         rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
+    elif not rescale and not expression and (st := _auto_stretch(catalog, collection_id, item_id, assets, colormap_name, bbox)):
+        rescale = st[0]
     backend = CATALOGS[catalog]["raster"]
     if backend == "pc":
         # item-tiles render empty for reprojection-heavy sources (MODIS
@@ -2434,10 +2475,21 @@ def _hole_text(aoi: list[float], shapes: list[Any]) -> str:
     return f"{pct:.0f}% of the view is uncovered, mostly {where}"
 
 
-def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
-    """An {"type": "item"} layer becomes a raster layer with tiles + scene bounds."""
+def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[str, Any]:
+    """An {"type": "item"} layer becomes a raster layer with tiles + scene bounds.
+
+    view is the map's box; with no rescale given it is the box the stretch is measured over.
+    """
     if l.get("type") != "item":
         return l
+    rescale, basis = l.get("rescale"), "given"
+    if not rescale and l.get("expression"):
+        rescale, basis = "-1,1", "default for an index expression"
+    elif not rescale:
+        assets = l.get("assets") or _default_assets(l["collection_id"])
+        st = _auto_stretch(l["catalog"], l["collection_id"], l["item_id"], assets, l.get("colormap_name"), view or l.get("bbox"))
+        rescale, basis = st if st else (None, None)
+    l = {**l, "rescale": rescale}
     item_bounds = l.get("bbox")
     if item_bounds is None:
         # scene footprint bounds stop the map requesting (and the tiler
@@ -2465,6 +2517,7 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
         **({"bounds": item_bounds} if item_bounds else {}),
         **({"pc_fallback": True} if l.get("item_id") in _PC_FALLBACKS else {}),
         **({"fallback_tiles": fallback} if fallback else {}),
+        **({"rescale_used": rescale, "rescale_basis": basis} if rescale else {}),
     }
 
 
@@ -2516,6 +2569,7 @@ def _layer_state(l: dict[str, Any], deferred: bool = False) -> dict[str, Any]:
         **({"bounds": l["bounds"]} if l.get("bounds") else {}),
         **({"tiles": l["tiles"]} if l.get("tiles") else {}),
         **({"fallback_tiles": l["fallback_tiles"]} if l.get("fallback_tiles") else {}),
+        **({"rescale_used": l["rescale_used"], "rescale_basis": l["rescale_basis"]} if l.get("rescale_used") else {}),
         **({"opacity": l["opacity"]} if l.get("opacity") not in (None, 1) else {}),
         **({"deferred": True} if deferred else {}),
     }
@@ -2908,6 +2962,9 @@ def render_map(
     layers is a list of:
       {"type": "item", "name": ..., "catalog": ..., "collection_id": ...,
        "item_id": ..., "assets": [...], "rescale": "0,3000", "colormap_name": ...,
+       # no rescale on a continuous one-asset layer: stretched 2nd to 98th
+       # percentile of the raw values over bbox; rescale_used / rescale_basis
+       # per layer in state.layers say what was used
        "expression": "(nir-red)/(nir+red)",  # expression for index layers
        "bbox": [w, s, e, n]}  # pass the item's bbox when you have it (from
                               # search results) — it skips a STAC re-fetch
@@ -2951,7 +3008,7 @@ def render_map(
             raster_collections.append(l.get("collection_id"))
         elif l.get("type") == "raster":
             raster_collections.append(None)
-        resolved.append(_resolve_layer(l))
+        resolved.append(_resolve_layer(l, bbox))
     if compare is None:
         # swipe only for a true comparison: two rasters of the same collection
         # whose footprints actually overlap. Same-collection alone is NOT enough
@@ -3087,7 +3144,7 @@ def render_timelapse(
                          "so pick fewer, evenly spaced windows (hard ceiling 12)"}
     if any(f.get("type") not in ("item", "raster") for f in frames):
         return {"error": "each frame must be one item or raster layer with a name"}
-    resolved = [_resolve_layer(f) for f in frames]
+    resolved = [_resolve_layer(f, bbox) for f in frames]
     stack_html = ""
     if stack_layer:
         stack_html = _stack_chunk_for(resolved, frames, stack_facts, notes, bbox) or ""

@@ -2929,6 +2929,113 @@ def t_map_subtitle_prints_the_uncovered_wedge():
         assert "uncovered" not in Path(p).read_text()
 
 
+class _StatsResp:
+    status_code = 200
+
+    def __init__(self, body):
+        self._b = body
+
+    def json(self):
+        return self._b
+
+    def raise_for_status(self):
+        pass
+
+
+def _stretch_env(item_assets, calls):
+    """Stub the item fetch and the tiler statistics POST; returns the restore function."""
+    saved = tools._get_json, tools._client.post
+    item = {"bbox": [0, 0, 2, 2], "assets": item_assets}
+    tools._get_json = lambda url, **k: item
+
+    def post(url, **k):
+        if "statistics" not in url:
+            return _StatsResp({"id": "mosaic1"})  # the PC mosaic registration shares this POST
+        calls.append(url)
+        return _StatsResp({"b1": {"min": 0, "max": 99999, "percentile_2": 14000.0, "percentile_98": 15500.0}})
+
+    tools._client.post = post
+    tools._STRETCH.clear()
+    tools._ITEMS.clear()
+
+    def restore():
+        tools._get_json, tools._client.post = saved
+        tools._STRETCH.clear()
+        tools._ITEMS.clear()
+
+    return restore
+
+
+def _stretch_layer(**kw):
+    return {"type": "item", "name": "lst", "catalog": "planetary-computer", "collection_id": "modis-11A1-061",
+            "item_id": "I1", "assets": ["LST_Day_1km"], **kw}
+
+
+def t_stretch_from_data_when_no_rescale():
+    # field test 15: MODIS LST drew black on a guessed rescale and took 2 hand-tuned tries
+    calls = []
+    restore = _stretch_env({"LST_Day_1km": {"raster:bands": [{"scale": 0.02}]}}, calls)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            r = tools.render_map("t", [0, 0, 1, 1], [_stretch_layer()], out_path=str(Path(d) / "a.html"))
+        st = r["state"]["layers"][0]
+        # raw numbers, not x0.02 physical: tiles are raw, so a scaled stretch would draw black
+        assert st["rescale_used"] == "14000,15500", st
+        assert "2nd to 98th percentile" in st["rescale_basis"] and "box" in st["rescale_basis"], st
+        assert "rescale=14000%2C15500" in st["tiles"], st["tiles"]
+        assert len(calls) == 1
+    finally:
+        restore()
+
+
+def t_stretch_given_rescale_passes_through():
+    calls = []
+    restore = _stretch_env({"LST_Day_1km": {}}, calls)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            r = tools.render_map("t", [0, 0, 1, 1], [_stretch_layer(rescale="13500,15500")], out_path=str(Path(d) / "a.html"))
+        st = r["state"]["layers"][0]
+        assert st["rescale_used"] == "13500,15500" and st["rescale_basis"] == "given", st
+        assert "rescale=13500%2C15500" in st["tiles"] and not calls
+    finally:
+        restore()
+
+
+def t_stretch_leaves_expression_visual_and_categorical_alone():
+    calls = []
+    restore = _stretch_env({"map": {"raster:bands": [{"classification:classes": [{"value": 10}]}]}, "visual": {}}, calls)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            out = str(Path(d) / "a.html")
+            e = tools.render_map("t", [0, 0, 1, 1], [{**_stretch_layer(), "assets": None, "expression": "(nir-red)/(nir+red)"}], out_path=out)
+            assert e["state"]["layers"][0]["rescale_used"] == "-1,1", e
+            v = tools.render_map("t", [0, 0, 1, 1], [_stretch_layer(assets=["visual"])], out_path=out)
+            c = tools.render_map("t", [0, 0, 1, 1], [_stretch_layer(assets=["map"])], out_path=out)
+            w = tools.render_map("t", [0, 0, 1, 1], [_stretch_layer(colormap_name="esa-worldcover")], out_path=out)
+        for r in (v, c, w):
+            assert "rescale_used" not in r["state"]["layers"][0] and "rescale=" not in r["state"]["layers"][0]["tiles"], r
+        assert not calls
+    finally:
+        restore()
+
+
+def t_stretch_fetched_once_per_item_asset_box():
+    calls = []
+    restore = _stretch_env({"LST_Day_1km": {}}, calls)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            for i in range(2):
+                tools.render_map("t", [0, 0, 1, 1], [_stretch_layer()], out_path=str(Path(d) / f"{i}.html"))
+            assert len(calls) == 1, calls
+            tools.render_map("t", [0, 0, 1, 2], [_stretch_layer()], out_path=str(Path(d) / "c.html"))
+            assert len(calls) == 2, calls
+        # tile_url_template shares the same stretch and the same cache
+        u = tools.tile_url_template("planetary-computer", "modis-11A1-061", "I1", assets=["LST_Day_1km"], bbox=[0, 0, 1, 2])
+        assert "rescale=14000%2C15500" in u and len(calls) == 2, (u, calls)
+    finally:
+        restore()
+
+
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files
