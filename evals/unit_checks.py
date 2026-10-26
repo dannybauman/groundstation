@@ -1955,14 +1955,16 @@ def t_geocode_point_extent_comes_from_its_kind():
     # Stop 27: a point is padded by what it is, not one 0.3 deg square
     def half_km(out):
         return round((out["bbox"][3] - out["bbox"][1]) * 111.32 / 2, 3)
-    pt = lambda kind, extra=None: dict(_nom("Foo, Utah, United States", kind, [-111.0, 37.0, -111.0, 37.0], 0.4), extratags=extra or {})
-    for kind, extra, km in [("bay", None, 2), ("town", None, 5), ("city", {"population": "50000"}, 8),
-                            ("city", {"population": "250000"}, 15), ("city", {"population": "2000000"}, 25)]:
-        out, _ = _with_geocoders({"ids": []}, [pt(kind, extra)], lambda: tools.geocode("Foo, Utah"))
+    pt = lambda kind, lat=37.0: _nom("Foo, Utah, United States", kind, [-111.0, lat, -111.0, lat], 0.4)
+    for kind, km in [("bay", 2), ("town", 5), ("city", 10)]:
+        out, _ = _with_geocoders({"ids": []}, [pt(kind)], lambda: tools.geocode("Foo, Utah"))
         assert out["extent_basis"] == "kind" and out["candidates"][0]["extent_basis"] == "kind" and half_km(out) == km, (kind, out)
         assert abs((out["bbox"][2] - out["bbox"][0]) / (out["bbox"][3] - out["bbox"][1]) - 1 / math.cos(math.radians(37.0))) < 1e-6, out
     out, _ = _with_geocoders({"ids": []}, [pt("quux")], lambda: tools.geocode("Foo, Utah"))
     assert out["extent_basis"] == "default" and abs(out["bbox"][2] - out["bbox"][0] - 0.3) < 1e-9, out
+    out, _ = _with_geocoders({"ids": []}, [pt("bay", 90.0)], lambda: tools.geocode("Foo, Utah"))
+    w, s, e, n = out["bbox"]
+    assert s < n <= 90.0 and w < e and e - w <= 360.0, ("a pole stays a box, not inverted or infinite", out)
     own = _nom("Foo, Utah, United States", "bay", [-111.2, 36.9, -111.0, 37.1], 0.4)
     out, _ = _with_geocoders({"ids": []}, [own], lambda: tools.geocode("Foo, Utah"))
     assert out["extent_basis"] == "own" and out["bbox"] == [-111.2, 36.9, -111.0, 37.1] and "bbox_note" not in out, out
