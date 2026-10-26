@@ -3359,6 +3359,18 @@ def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 
         out["gdacs_note"] = f"GDACS current-events feed listed {listed}; {len(out['gdacs'])} active within {days} days" + (" inside the bbox" if bbox else "")
     except Exception as e:
         out["gdacs_error"] = str(e)
+    # Field tests 11 (Bend) and 12 (Asheville, Harris County): GDACS timed out, the
+    # empty list read as calm and the brief headlined CALM. Empty is only all-clear if every source answered
+    out["sources"] = {
+        "eonet": {"ok": "eonet_error" not in out, "listed": len(out["eonet"]) if "eonet_error" not in out else None, "error": out.get("eonet_error")},
+        "gdacs": {"ok": "gdacs_error" not in out, "listed": len(out["gdacs"]) if "gdacs_error" not in out else None, "error": out.get("gdacs_error")},
+    }
+    down = [n.upper() for n, v in out["sources"].items() if not v["ok"]]
+    found = [f"{len(out[n])} {n.upper()} events in the box" for n in ("eonet", "gdacs") if out[n]]
+    out["all_clear"] = not down and not found
+    out["all_clear_note"] = (
+        f"{' and '.join(down)} did not answer, so an empty list is not all-clear" if down
+        else ", ".join(found) if found else "EONET and GDACS both answered with no events")
     return out
 
 
@@ -3824,7 +3836,11 @@ def _conditions_signals(dryness: dict[str, Any], wind: dict[str, Any], events: d
         if event_signals:
             signals.extend(event_signals)
         else:
-            signals.append("no active events within ~150 km")
+            down = [n.upper() for n, v in (events.get("sources") or {}).items() if not v.get("ok")]
+            if down:
+                signals.append(f"no events from {' or '.join(n for n in ('EONET', 'GDACS') if n not in down)}; {' and '.join(down)} did not answer")
+            else:
+                signals.append("no active events within ~150 km")
 
     return signals
 
@@ -3922,6 +3938,9 @@ def conditions_brief(
     try:
         events_data = active_events(bbox=bbox, pad=1.5)
         brief["events"] = events_data
+        for k in ("sources", "all_clear", "all_clear_note"):
+            if k in events_data:
+                brief[k] = events_data[k]
     except Exception as e:
         brief["events_error"] = str(e)
 
@@ -3988,6 +4007,6 @@ def conditions_brief(
     brief["summary"] = ". ".join(summary_parts) + "." if summary_parts else ""
 
     # Honesty framing note
-    brief["note"] = "current conditions from live sources — not a risk model, not a prediction"
+    brief["note"] = "current conditions from live sources — not a risk model, not a prediction; a source that did not answer is named in sources and an empty list is all-clear only when all_clear is true"
 
     return brief

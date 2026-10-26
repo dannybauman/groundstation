@@ -135,6 +135,7 @@ Pick the shape that fits the question:
 
 ## Judgment rules
 
+- **An empty events list is all-clear only when `all_clear` is true.** Otherwise quote `sources` and say which one did not answer (field tests 11 and 12: GDACS timed out and the brief still said CALM). `conditions_brief` passes `sources`, `all_clear` and `all_clear_note` through at the top level.
 - **Ask one clarifying question only when the prompt is genuinely ambiguous about intent — don't gate every query on it.** The classic case: "clearest" scene of a place that's currently smoky or cloudy — a clear/smoke-free image and the most recent image (which shows the smoke) are opposite answers. Same for an unspecified date to compare against, or whether the user wants a scene covering a whole city vs any scene that intersects it. When intent is clear, just run — follow-up corrections work well, so don't add friction. When you proceed on an assumption, state it in one line ("showing the most recent scene, which includes the current smoke") so the user can redirect.
 - Interpret statistics against the question: NDVI 0.38 mean is "moderately vegetated"; a drop from 0.5 to 0.2 between dates is the story, not the digits.
 - If a search returns nothing, widen one constraint at a time (cloud cover, then time window, then bbox) and say what you relaxed.
