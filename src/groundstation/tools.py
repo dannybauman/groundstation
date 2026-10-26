@@ -2320,6 +2320,12 @@ __BRAND__
   #panel h1 { font: 700 15px/1.25 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 4px; }
   #panel p { margin: 4px 0 8px; color: var(--mid); }
   #panel label { display: block; margin: 2px 0; cursor: pointer; }
+  #panel summary { cursor: pointer; font-weight: 700; }
+  /* a timelapse never fills the toggles, and an empty fold is a heading over nothing */
+  #panel details:has(#toggles:empty) { display: none; }
+  #panel small { display: block; margin-left: 22px; color: var(--mid); font-size: 11px; overflow-wrap: anywhere; }
+  /* the STACK button sits top-right, so a phone panel stops short of it */
+  @media (max-width: 500px) { #panel { box-sizing: border-box; max-width: calc(100vw - 150px); } }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
     color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
   #mapL { position: absolute; inset: 0; z-index: 1; }
@@ -2345,11 +2351,12 @@ __BRAND__
 </head><body>
 <div id="map"></div>
 __TLBAR__
-<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div>__STACMAP__</div>
+<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><details class="fold" open><summary>Layers</summary><div id="toggles"></div></details>__STACMAP__</div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
 __STACK__
 __LEGEND__
 <script>
+if (innerWidth <= 500) document.querySelectorAll("#panel details").forEach(d => d.removeAttribute("open"));
 const esc = s => String(s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
 const LAYERS = __LAYERS__;
 const BBOX = __BBOX__;
@@ -2494,6 +2501,7 @@ if (COMPARE && rasters.length === 2) {
       const lab = document.createElement("span");
       lab.id = "lbl" + id; lab.textContent = " " + l.name;
       row.appendChild(cb); row.appendChild(lab);
+      if (l.detail) { const d = document.createElement("small"); d.textContent = l.detail; row.title = l.detail; row.appendChild(d); }
       toggles.appendChild(row);
     });
     window.gsPending--;
@@ -2612,6 +2620,7 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
     return {
         "type": "raster",
         "name": l.get("name") or l["item_id"],
+        **({"detail": l["detail"]} if l.get("detail") else {}),
         "tiles": tiles,
         "opacity": l.get("opacity", 1),
         **({"bounds": item_bounds} if item_bounds else {}),
@@ -2637,14 +2646,11 @@ def _expand_coverage_set(layer: dict[str, Any]) -> list[dict[str, Any]]:
     prefix = layer.get("name") or (layer.get("set") or {}).get("date") or "coverage"
     params = {k: layer[k] for k in ("assets", "expression", "colormap_name", "rescale", "opacity") if k in layer}
     out = []
-    tags = [it["id"].split("_")[1] if "_" in it["id"] else it["id"] for it in items]
-    # a collection whose ids share their second segment (WorldCover) would name every layer alike
-    if len(set(tags)) < len(tags):
-        tags = [it["id"] for it in items]
-    for it, tag in zip(items, tags):
+    for it in items:
         out.append({
             "type": "item",
-            "name": f"{prefix} · {tag}",
+            "name": prefix,
+            "detail": it["id"],
             "catalog": it["catalog"],
             "collection_id": it["collection"],
             "item_id": it["id"],
@@ -2665,6 +2671,7 @@ def _layer_state(l: dict[str, Any], deferred: bool = False) -> dict[str, Any]:
     """
     return {
         "name": l.get("name"),
+        **({"detail": l["detail"]} if l.get("detail") else {}),
         "kind": l.get("type"),
         **({"bounds": l["bounds"]} if l.get("bounds") else {}),
         **({"tiles": l["tiles"]} if l.get("tiles") else {}),
@@ -3148,7 +3155,9 @@ def render_map(
     except ValueError as e:
         return {"error": str(e)}
     _write_artifact(out_path, html)
-    out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
+    # the scenes of one set share a name, so the caller's list carries the id too
+    label = lambda l: f'{l["name"]} · {l["detail"]}' if l.get("detail") else l["name"]
+    out = {"map_path": out_path, "layers": [label(l) for l in resolved]}
     # The map's contents were previously legible only to a human opening the
     # file, so every rendering bug this repo has shipped was caught by eye and
     # not by a check. `state` is the same thing the HTML was built from, in a
@@ -3169,7 +3178,7 @@ def render_map(
     if stack_note:
         out["note"] = stack_note
     _notes_result(out, notes, stack_facts, bbox)
-    fb = [l["name"] for l in resolved if l.get("pc_fallback")]
+    fb = [label(l) for l in resolved if l.get("pc_fallback")]
     if fb:
         out["note"] = (out["note"] + ". " if out.get("note") else "") + (
             f"Planetary Computer mosaic registration timed out for {', '.join(fb)}; item tiles are used "
