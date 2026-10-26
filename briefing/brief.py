@@ -246,7 +246,7 @@ def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
     candidates = [i for i in baseline.get("items", []) if tools._mgrs_tile(i["id"]) == tile]
     if not candidates:
         return None
-    ref = min(candidates, key=lambda i: i.get("cloud_cover") or 100)
+    ref = min(tools._with_coverage(candidates, best["bbox"]), key=tools._scene_key)
     expr = "(nir-red)/(nir+red)"
     now_s = tools.compute_statistics("earth-search", best["collection"], best["id"], expression=expr)
     ref_s = tools.compute_statistics("earth-search", ref["collection"], ref["id"], expression=expr)
@@ -254,8 +254,10 @@ def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
     ref_mean = next(iter(ref_s.values()))["mean"]
     return {
         "metric": "NDVI (vegetation) over MGRS tile " + tile,
-        "current": {"scene": best["id"], "date": best["datetime"][:10], "mean": round(now_mean, 3)},
-        "baseline": {"scene": ref["id"], "date": ref["datetime"][:10], "mean": round(ref_mean, 3)},
+        "current": {"scene": best["id"], "date": best["datetime"][:10], "cloud": best.get("cloud_cover"),
+                    "covers_aoi_pct": best.get("covers_aoi_pct"), "mean": round(now_mean, 3)},
+        "baseline": {"scene": ref["id"], "date": ref["datetime"][:10], "cloud": ref.get("cloud_cover"),
+                     "covers_aoi_pct": ref.get("covers_aoi_pct"), "mean": round(ref_mean, 3)},
         "delta": round(now_mean - ref_mean, 3),
         "delta_pct": round((now_mean - ref_mean) / abs(ref_mean) * 100, 1) if ref_mean else None,
     }
@@ -299,6 +301,8 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     )
 
     best = tools.pick_best_scene(imagery.get("items", []), bbox)
+    if best and best.get("covers_aoi_pct") is None:
+        best = tools._with_coverage([best], bbox)[0]
 
     change = None
     if best:
@@ -345,8 +349,8 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         )
         preview_url = tools.preview_item("earth-search", best["collection"], best["id"], max_size=768)["preview_url"]
         scene_caption = (
-            f"Sentinel-2, {best['datetime'][:10]}, {round(best.get('cloud_cover') or 0, 1)}% cloud cover — "
-            f"clearest of {imagery['count']} scenes in the last {days} days."
+            f"Sentinel-2, {best['datetime'][:10]}, {round(best.get('cloud_cover') or 0, 1)}% cloud cover, "
+            f"covers {round(best['covers_aoi_pct'])}% of the area — best of {imagery['count']} scenes in the last {days} days."
         )
     if smoke and smoke.get("tiles"):
         layers.append(

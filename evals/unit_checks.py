@@ -1158,6 +1158,36 @@ def t_pick_best_scene_prefers_coverage():
     ]
     assert tools.pick_best_scene(items, [0, 0, 1, 1])["id"] == "full"
     assert tools.pick_best_scene([], [0, 0, 1, 1]) is None
+    # same coverage: cloud decides, whatever order the server returned
+    same = [{"id": "b", "bbox": [0, 0, 1, 1], "cloud_cover": 20.0}, {"id": "a", "bbox": [0, 0, 1, 1], "cloud_cover": 2.0}]
+    assert tools.pick_best_scene(same, [0, 0, 1, 1])["id"] == "a"
+    # an exact tie: id decides, both orders
+    tie = [{"id": "y", "bbox": [0, 0, 1, 1], "cloud_cover": 5.0}, {"id": "x", "bbox": [0, 0, 1, 1], "cloud_cover": 5.0}]
+    assert tools.pick_best_scene(tie, [0, 0, 1, 1])["id"] == "x"
+    assert tools.pick_best_scene(tie[::-1], [0, 0, 1, 1])["id"] == "x"
+
+
+def t_ndvi_change_baseline_prefers_coverage():
+    # stop 33: a clear sliver must not be the baseline the delta is read against
+    saved = (tools.search_imagery, tools.compute_statistics)
+    box = [0, 0, 1, 1]
+    best = {"id": "S2A_10TFK_20260601_0_L2A", "collection": "sentinel-2-l2a", "datetime": "2026-06-01T18:00:00Z",
+            "cloud_cover": 3.0, "bbox": box, "covers_aoi_pct": 100.0}
+
+    def cand(i, d, cloud, bb):
+        return {"id": i, "collection": "sentinel-2-l2a", "datetime": d + "T18:00:00Z", "cloud_cover": cloud, "bbox": bb}
+
+    items = [cand("S2A_10TFK_20260501_0_L2A", "2026-05-01", 0.0, [0, 0, 0.02, 0.02]),
+             cand("S2B_10TFK_20260503_0_L2A", "2026-05-03", 20.0, box)]
+    tools.search_imagery = lambda *a, **kw: {"items": items}
+    tools.compute_statistics = lambda cat, coll, iid, **kw: {"nd": {"mean": 0.5}}
+    try:
+        out = brief.ndvi_change(best, dt.date(2026, 6, 10), 14)
+        assert out["baseline"]["scene"] == "S2B_10TFK_20260503_0_L2A", out
+        assert out["baseline"]["cloud"] == 20.0 and round(out["baseline"]["covers_aoi_pct"]) == 100
+        assert out["current"]["cloud"] == 3.0 and out["current"]["covers_aoi_pct"] == 100.0
+    finally:
+        tools.search_imagery, tools.compute_statistics = saved
 
 
 def t_expression_defaults_rescale():
