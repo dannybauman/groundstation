@@ -100,6 +100,7 @@ The first `search_datasets` call takes 20 to 30 seconds while collection lists c
 | `compare_dates` | "what changed?" in one call: same-tile scenes, index delta, swipe map | all of the above |
 | `render_map` | self-contained interactive HTML maps. 2 rasters become a swipe compare | MapLibre + live tiles |
 | `render_map_3d` | terrain fly-throughs: imagery draped over real relief | MapLibre terrain + keyless AWS Terrarium tiles |
+| `render_timelapse` | 2 to 12 frames (default cap 8) of one place over time, with prev / play / next; a frame loads tiles only when shown | MapLibre, hidden layers fetch nothing |
 | `render_postcard` | share cards with the pixels embedded and attribution baked in, so nothing expires | TiTiler previews |
 | `active_events` / `weather_summary` | open fires, floods and storms, plus the past and coming week of weather | NASA EONET, GDACS, Open-Meteo |
 | `smoke_forecast` | near-surface smoke now and hours ahead (CONUS) | NOAA HRRR smoke through raster.eoapi.dev, model guidance not observation |

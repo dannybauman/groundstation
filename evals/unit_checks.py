@@ -2123,6 +2123,26 @@ def t_unambiguous_geocode_runs_the_search():
     assert "error" not in out and len(posts) == 1, out
 
 
+def _stub_frames(n):
+    return [{"type": "raster", "name": f"2026-0{i + 1}", "tiles": f"https://t.example/{i}/{{z}}/{{x}}/{{y}}.png"}
+            for i in range(n)]
+
+
+def t_timelapse_page_controls_and_cap():
+    with tempfile.TemporaryDirectory() as d:
+        r = tools.render_timelapse("tl", [0, 0, 1, 1], _stub_frames(3), out_path=str(Path(d) / "t.html"))
+        html = Path(r["map_path"]).read_text(encoding="utf-8")
+        assert r["frames"] == 3 and r["state"]["layers"], r
+        for needle in ('id="tl-prev"', 'id="tl-play"', 'id="tl-next"', 'id="tl-name"', "ArrowLeft", "window.gsPending",
+                       "2026-01", "2026-02", "2026-03", ".clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack, .clean #tl"):
+            assert needle in html, needle
+        # frames are shown one at a time: show() hides every layer but the current, and starts at 0
+        assert '"visibility", i === cur ? "visible" : "none"' in html and "show(0)" in html
+        assert "__" not in html.replace("__proto__", ""), "unfilled template marker"
+        over = tools.render_timelapse("tl", [0, 0, 1, 1], _stub_frames(9), out_path=str(Path(d) / "u.html"))
+        assert "error" in over and "cap of 8" in over["error"] and not (Path(d) / "u.html").exists(), over
+
+
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files
