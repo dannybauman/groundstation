@@ -2572,6 +2572,93 @@ def t_next_pass_names_the_night_passes_it_dropped():
     assert all({"satellite", "time_utc", "sun_elevation_deg"} <= set(n) and n["sun_elevation_deg"] <= 0 for n in night), night
 
 
+def _poly(*pts):
+    return {"type": "Polygon", "coordinates": [[list(p) for p in pts] + [list(pts[0])]]}
+
+
+# bbox [-71, 43, -69, 44.5] reads 100 on the Casco Bay box, but the swath edge cuts across its south
+_SLANT = _poly((-71, 44.5), (-69, 44.5), (-69, 43.5), (-71, 43.9))
+_CASCO = [-70.40, 43.55, -69.90, 43.85]
+
+
+def _geo_item(id_, bbox, geometry=None, day="2026-08-24"):
+    f = _stac_item(id_, bbox, day)
+    if geometry:
+        f["geometry"] = geometry
+    return f
+
+
+def t_footprint_coverage_beats_the_bbox_and_names_the_side():
+    r = _with_stac_search([_geo_item("slant", [-71, 43, -69, 44.5], _SLANT)],
+                          lambda: tools.search_imagery("planetary-computer", ["landsat-c2-l2"], bbox=_CASCO))
+    it = r["items"][0]
+    assert tools._bbox_coverage_pct(_CASCO, it["bbox"]) == 100.0
+    assert 30 < it["covers_aoi_pct"] < 80 and it["coverage_basis"] == "footprint", it
+    pct, where = tools._uncovered_side(_CASCO, [_SLANT])
+    assert 20 < pct < 70 and "south" in where, (pct, where)
+
+
+def t_footprint_that_misses_the_box_reads_zero_and_is_not_recommended():
+    away = _poly((-80, 40), (-78, 40), (-78, 41), (-80, 41))
+    items = [_geo_item("miss", [-71, 43, -69, 44.5], away, day="2026-08-25"),
+             _geo_item("hit", [-71, 43, -69, 44.5], _poly((-71, 43), (-69, 43), (-69, 44.5), (-71, 44.5)), day="2026-08-24")]
+    r = _with_stac_search(items, lambda: tools.search_imagery("planetary-computer", ["landsat-c2-l2"], bbox=_CASCO))
+    by_id = {it["id"]: it for it in r["items"]}
+    assert by_id["miss"]["covers_aoi_pct"] == 0.0 and by_id["hit"]["covers_aoi_pct"] == 100.0, by_id
+    assert r["recommended"]["id"] == "hit", r["recommended"]
+
+
+def t_full_coverage_set_is_built_on_footprints():
+    box = [-70.40, 43.55, -69.90, 43.85]
+    west = _fcs_item("west", "2026-07-19", [-71, 43, -69, 44.5])
+    east = _fcs_item("east", "2026-07-19", [-71, 43, -69, 44.5])
+    west["footprint"] = _poly((-71, 43), (-70.15, 43), (-70.15, 44.5), (-71, 44.5))
+    east["footprint"] = _poly((-70.2, 43), (-69, 43), (-69, 44.5), (-70.2, 44.5))
+    # the bboxes alone would call either one a full cover and need no set
+    assert tools._union_coverage_pct(box, [west["bbox"]]) == 100.0
+    assert 40 < tools._union_coverage_pct(box, [west["footprint"]]) < 70
+    got = tools.find_full_coverage_set([west, east], box)
+    assert got and {i["id"] for i in got["items"]} == {"west", "east"} and got["union_covers_aoi_pct"] >= 99.0, got
+    # a hole in a footprint is not covered, a multipolygon is the union of its parts
+    holed = {"type": "Polygon", "coordinates": [[[-71, 43], [-69, 43], [-69, 44.5], [-71, 44.5], [-71, 43]],
+                                                [[-70.3, 43.6], [-70.0, 43.6], [-70.0, 43.8], [-70.3, 43.8], [-70.3, 43.6]]]}
+    assert 0 < tools._union_coverage_pct(box, [holed]) < 90
+    multi = {"type": "MultiPolygon", "coordinates": [west["footprint"]["coordinates"], east["footprint"]["coordinates"]]}
+    assert tools._union_coverage_pct(box, [multi]) >= 99.0
+
+
+def t_item_without_geometry_falls_back_to_bbox_and_says_so():
+    r = _with_stac_search([_geo_item("plain", [-71, 43, -69, 44.5])],
+                          lambda: tools.search_imagery("planetary-computer", ["landsat-c2-l2"], bbox=_CASCO))
+    it = r["items"][0]
+    assert it["covers_aoi_pct"] == 100.0 and it["coverage_basis"] == "bbox" and "footprint" not in it, it
+
+
+def t_recommendation_comes_from_the_set_when_no_scene_covers_the_box():
+    west = _geo_item("w", [-71, 43, -69, 44.5], _poly((-71, 43), (-70.15, 43), (-70.15, 44.5), (-71, 44.5)))
+    east = _geo_item("e", [-71, 43, -69, 44.5], _poly((-70.2, 43), (-69, 43), (-69, 44.5), (-70.2, 44.5)))
+    r = _with_stac_search([west, east], lambda: tools.search_imagery("planetary-computer", ["landsat-c2-l2"], bbox=_CASCO))
+    assert r["full_coverage_set"] and set(r["recommended"]["scene_ids"]) == {"w", "e"}, r["recommended"]
+    assert r["recommended"]["covers_aoi_pct"] >= 99.0
+
+
+def t_postcard_names_the_uncovered_side_and_why_it_cannot_fill():
+    saved = tools._client.get, tools._get_json
+    tools._client.get = lambda url, **k: _ImgResp(200)
+    tools._get_json = lambda url, **k: {"bbox": [-71, 43, -69, 44.5], "geometry": _SLANT, "license": "x"}
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            out = tools.render_postcard("planetary-computer", "landsat-c2-l2", "I", "P", "2026-10-21",
+                                        out_path=str(Path(d) / "c.html"), bbox=_CASCO)
+            out2 = tools.render_postcard("planetary-computer", "landsat-c2-l2", "I", "P", "2026-10-21",
+                                         out_path=str(Path(d) / "d.html"), bbox=_CASCO, fill_item_ids=["J"])
+    finally:
+        tools._client.get, tools._get_json = saved
+    assert out["uncovered_pct"] > 20 and "south" in out["uncovered_side"], out
+    assert "south" in out["coverage_note"] and "direct COG access" in out["coverage_note"], out
+    assert "direct COG access" in out2["coverage_note"] and out2["dropped"], out2
+
+
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files
