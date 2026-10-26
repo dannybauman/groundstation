@@ -1790,9 +1790,57 @@ def t_geocode_candidates_carry_kind_and_feature_word_picks():
     out, _ = _with_geocoders({"ids": []}, [kau, vol], lambda: tools.geocode("Kilauea, Hawaii"))
     assert out["ambiguous"] and [c["kind"] for c in out["candidates"]] == ["locality", "volcano"], out
     err = tools._ambiguous_error("Kilauea, Hawaii", out)["error"]
-    assert "locality (Kauai County) or volcano (Hawaii County)?" in err, err
+    assert "locality (Kauai County, Hawaii, United States) or volcano (Hawaii County, Hawaii, United States)?" in err, err
     out, _ = _with_geocoders({"ids": []}, [kau, vol], lambda: tools.geocode("Kilauea volcano, Hawaii"))
     assert out["candidates"][0]["kind"] == "volcano" and not out["ambiguous"], out
+
+
+def t_geocode_feature_word_yields_to_a_place_named_for_it():
+    # Field test No.13: "Lake Charles, Louisiana" took the lake over the city.
+    # Importances are the live ones: city 0.55 over lake 0.18, town 0.44 over reservoir 0.34
+    city = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "city", [-93.3, 30.1, -93.1, 30.3], 0.547)
+    lake = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "lake", [-93.24, 30.21, -93.22, 30.24], 0.182)
+    out, _ = _with_geocoders({"ids": []}, [city, lake], lambda: tools.geocode("Lake Charles, Louisiana"))
+    assert [c["kind"] for c in out["candidates"]] == ["city", "lake"] and not out.get("ambiguous"), out
+    assert "'lake' is part of the city's own name" in out["geocode_note"], out
+    town = _nom("Shasta Lake, Shasta County, California, United States", "town", [-122.4, 40.5, -122.3, 40.6], 0.441)
+    res = _nom("Shasta Lake, Shasta County, California, United States", "reservoir", [-122.5, 40.6, -122.1, 40.9], 0.342)
+    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta Lake, California"))
+    assert out["candidates"][0]["kind"] == "reservoir" and not out.get("ambiguous"), "a close town does not outrank the feature"
+
+
+def t_geocode_water_and_lake_are_one_kind():
+    # Field test No.13: Nominatim tags the Berkeley Pit "water", so the word lake found nothing
+    butte = _nom("Butte, Silver Bow County, Montana, United States", "city", [-112.6, 45.9, -112.4, 46.1], 0.5)
+    pit = _nom("Berkeley Pit, Butte, Silver Bow County, Montana, United States", "water", [-112.52, 46.01, -112.50, 46.02], 0.3)
+    out, _ = _with_geocoders({"ids": []}, [butte, pit], lambda: tools.geocode("Berkeley Pit lake, Butte, Montana"))
+    assert out["candidates"][0]["kind"] == "water", out
+    gz = {"ids": [
+        {"source": "divisions_area", "id": "au", "name": "Lake Powell", "country": "AU", "subtype": "locality",
+         "bbox": [142.87, -34.78, 143.02, -34.65], "similarity": 1.0},
+        {"source": "natural_earth", "id": "ne", "name": "Powell", "country": None, "subtype": "reservoir",
+         "bbox": [-111.56, 36.93, -110.36, 37.91], "similarity": 1.0},
+    ]}
+    out, _ = _with_geocoders(gz, [], lambda: tools.geocode("Lake Powell"))
+    assert out["name"] == "Powell (reservoir)" and not out.get("ambiguous"), "the word picks among Gazet's ties too"
+
+
+def t_geocode_refusal_names_state_or_country():
+    # Field test No.13: the Portland refusal named no states
+    ore = _nom("Portland, Multnomah County, Oregon, United States", "city", [-122.8, 45.4, -122.5, 45.7], 0.71)
+    me = _nom("Portland, Cumberland County, Maine, 04101, United States", "city", [-70.35, 43.54, -70.2, 43.7], 0.604)
+    out, _ = _with_geocoders({"ids": []}, [ore, me], lambda: tools.geocode("Portland"))
+    err = tools._ambiguous_error("Portland", out)["error"]
+    assert "city (Multnomah County, Oregon, United States) or city (Cumberland County, Maine, United States)?" in err, err
+    gz = {"ids": [
+        {"source": "divisions_area", "id": "or", "name": "Portland", "country": "US", "subtype": "locality",
+         "bbox": [-122.84, 45.43, -122.47, 45.65], "similarity": 1.0},
+        {"source": "divisions_area", "id": "me", "name": "Portland", "country": "US", "subtype": "locality",
+         "bbox": [-70.35, 43.54, -69.98, 43.73], "similarity": 1.0},
+    ]}
+    out, _ = _with_geocoders(gz, [], lambda: tools.geocode("Portland"))
+    err = tools._ambiguous_error("Portland", out)["error"]
+    assert "locality (US, at 45.5N 122.7W) or locality (US, at 43.6N 70.2W)?" in err, err
 
 
 def t_gdacs_feed_is_windowed_and_counted():

@@ -69,13 +69,19 @@ def slugify(text: str, max_len: int = 60) -> str:
     return "".join(ch if ch.isalnum() else "-" for ch in text.lower())[:max_len].strip("-")
 
 
-# a feature word in the ask -> the candidate kinds that count as that feature
+# a feature word in the ask -> the candidate kinds that count as that feature.
+# The sources use several words for one kind: Nominatim tags the Berkeley Pit
+# "water", Gazet has "alkaline lake" (field test No.13)
 _FEATURE_KINDS = {
-    **dict.fromkeys(("lake", "reservoir"), {"lake", "reservoir"}),
+    **dict.fromkeys(("lake", "reservoir"), {"lake", "reservoir", "water", "alkaline lake"}),
     **dict.fromkeys(("mountain", "mount", "peak"), {"mountain", "peak", "volcano"}),
     **{w: {w} for w in ("volcano", "river", "glacier", "bay", "island", "crater", "dam", "mine")},
     "falls": {"waterfall"},
 }
+
+
+def _feature_word(query: str) -> tuple[str | None, set[str]]:
+    return next(((t, _FEATURE_KINDS[t]) for t in re.findall(r"[a-z]+", query.lower()) if t in _FEATURE_KINDS), (None, set()))
 
 
 def _nominatim_kind(r: dict[str, Any]) -> str:
@@ -83,8 +89,12 @@ def _nominatim_kind(r: dict[str, Any]) -> str:
 
 
 def _kind_where(c: dict[str, Any]) -> str:
-    county = next((p for p in c["name"].split(", ") if p.endswith(("County", "Parish"))), None)
-    return county or c.get("where") or ""
+    """County, state and country for a Nominatim candidate; a Gazet record carries only its country and position"""
+    if c.get("source") != "nominatim":
+        return c.get("where") or ""
+    parts = [p for p in c["name"].split(", ") if not p.strip().isdigit()]
+    county = [p for p in parts[1:-2] if p.endswith(("County", "Parish"))][:1]
+    return ", ".join(county + parts[1:][-2:]) or c.get("where") or ""
 
 
 def _ambiguous_error(place: str, g: dict[str, Any]) -> dict[str, Any]:
@@ -266,6 +276,10 @@ def _where(o: dict[str, Any]) -> str:
     return ", ".join(x for x in (o.get("country"), o.get("subtype")) if x)
 
 
+def _gazet_where(o: dict[str, Any]) -> str:
+    return ", ".join(x for x in (o.get("country"), _at(o)) if x)
+
+
 def _at(o: dict[str, Any]) -> str:
     """A Gazet record's centre as a speakable position, so two same-named places read apart."""
     b = o.get("bbox") or []
@@ -321,7 +335,10 @@ def geocode(query: str) -> dict[str, Any]:
     source's own word lowercased (Gazet subtype, Nominatim addresstype or type:
     volcano, reservoir, town, county...) or "place". A feature word in the query
     (lake, volcano, river, peak...) makes the one candidate of that kind the
-    chosen result and clears ambiguous; the others stay listed. ambiguous is true
+    chosen result and clears ambiguous; the others stay listed. Lake, reservoir
+    and water count as one kind. The word yields when the source's top result
+    is another place whose own name carries it and that outranks the feature by
+    more than AMBIGUITY_MARGIN ("Lake Charles" is the city). ambiguous is true
     when the top two are real contenders in different places, and the
     place-taking tools then refuse the name until a fuller name or bbox is passed.
     """
@@ -343,6 +360,13 @@ def geocode(query: str) -> dict[str, Any]:
             if h.get("bbox") and len(h["bbox"]) == 4
             and (h.get("similarity") or 0.0) >= GAZET_MIN_SIMILARITY
         ]
+        # the feature word picks among the top ties too: "Lake Powell" ties an
+        # Australian locality with the Utah reservoir (field test No.13)
+        _, want = _feature_word(query)
+        top = [o for o in hits if o.get("similarity") == hits[0].get("similarity")] if hits else []
+        pick = [o for o in top if str(o.get("subtype") or "").lower() in want]
+        if len(pick) == 1:
+            hits = pick + [o for o in hits if o is not pick[0]]
         if hits:
             h = hits[0]
             w, s, e, n = (float(x) for x in h["bbox"])
@@ -370,7 +394,7 @@ def geocode(query: str) -> dict[str, Any]:
                 "bbox": [w, s, e, n],
                 "source": "gazet",
             }
-            cands = [dict(name=out["name"], bbox=[w, s, e, n], source="gazet", where=_at(h),
+            cands = [dict(name=out["name"], bbox=[w, s, e, n], source="gazet", where=_gazet_where(h),
                           kind=str(h.get("subtype") or "place").lower())]
             # Jaro-Winkler ties are real places sharing a name (Loja Province and
             # Loja Canton both score 1.0). Picking one silently is the geocoder
@@ -386,13 +410,13 @@ def geocode(query: str) -> dict[str, Any]:
                 )
                 cands += [
                     dict(name=f"{o.get('name')} ({_where(o)})", bbox=[float(x) for x in o["bbox"]],
-                         source="gazet", where=_at(o), kind=str(o.get("subtype") or "place").lower())
+                         source="gazet", where=_gazet_where(o), kind=str(o.get("subtype") or "place").lower())
                     for o in ties[:3]
                 ]
                 # ties share a similarity score, so each is a real contender. Any one
                 # elsewhere counts, not just the second: both top Portland hits are
                 # Oregon (urban centre and locality), Portland Maine is third
-                if any(not _bboxes_overlap(cands[0]["bbox"], c["bbox"]) for c in cands[1:]):
+                if len(pick) != 1 and any(not _bboxes_overlap(cands[0]["bbox"], c["bbox"]) for c in cands[1:]):
                     out["ambiguous"] = True
                     out["geocode_note"] += ". ambiguous: pass the fuller name or a bbox"
             out["candidates"] = cands
@@ -432,10 +456,19 @@ def geocode(query: str) -> dict[str, Any]:
     if not results:
         return {"error": f"No geocoding result for {query!r}"}
     # a feature word in the ask picks the one result of that kind ("Shasta Lake"
-    # is the reservoir, not the town). Stay with the source's order otherwise
-    want = next((_FEATURE_KINDS[t] for t in re.findall(r"[a-z]+", query.lower()) if t in _FEATURE_KINDS), None)
-    hit = [r for r in results if want and _nominatim_kind(r) in want]
-    if len(hit) == 1:
+    # is the reservoir, not the town). It yields when the source's top result is
+    # another place whose own name carries the word and that outranks the feature
+    # by more than the ambiguity margin: "Lake Charles" is the city at 0.55 over
+    # the lake at 0.18, Shasta Lake town only 0.44 over the reservoir at 0.34
+    # (field test No.13). Stay with the source's order otherwise
+    word, want = _feature_word(query)
+    hit = [r for r in results if _nominatim_kind(r) in want]
+    imp = lambda r: float(r.get("importance") or 0)
+    top_name = str(results[0].get("name") or results[0].get("display_name", "").split(", ")[0])
+    yielded = (len(hit) == 1 and hit[0] is not results[0] and word in re.findall(r"[a-z]+", top_name.lower())
+               and imp(results[0]) - imp(hit[0]) > AMBIGUITY_MARGIN)
+    picked = len(hit) == 1 and not yielded
+    if picked:
         results = hit + [r for r in results if r is not hit[0]]
     r0 = results[0]
     s, n, w, e = (float(x) for x in r0["boundingbox"])
@@ -465,12 +498,14 @@ def geocode(query: str) -> dict[str, Any]:
                           source="nominatim", where=sh, kind=_nominatim_kind(r)))
         if len(cands) == 2:
             contender = abs(float(r0.get("importance") or 0) - float(r.get("importance") or 0)) <= AMBIGUITY_MARGIN
-            out["ambiguous"] = contender and not _bboxes_overlap(cands[0]["bbox"], cands[1]["bbox"]) and len(hit) != 1
+            out["ambiguous"] = contender and not _bboxes_overlap(cands[0]["bbox"], cands[1]["bbox"]) and not picked
     out["candidates"] = cands
-    if matched != query or others or out.get("ambiguous"):
+    if matched != query or others or out.get("ambiguous") or yielded:
         out["geocode_note"] = (
             f"matched {matched!r}"
             + (f" after simplifying {query!r}" if matched != query else "")
+            + (f"; {word!r} is part of the {_nominatim_kind(r0)}'s own name and the source ranks it well above"
+               f" the {_nominatim_kind(hit[0])}, so the {_nominatim_kind(r0)} it is" if yielded else "")
             + (f"; other places share it: {' / '.join(others)}" if others else "")
             + ". Pass a state or country if another was meant"
             + (". ambiguous: pass the fuller name or a bbox" if out.get("ambiguous") else "")
