@@ -1327,7 +1327,7 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     least = min((cloud(it) for it in near if cloud(it) is not None), default=None)
     if least is not None:
         near = [it for it in near if cloud(it) is None or cloud(it) <= least + RECOMMEND_CLOUD_TIE]
-    best = max(near, key=lambda it: (it.get("datetime") or "", cov(it), -(cloud(it) or 0.0)))
+    best = max(near, key=lambda it: (it.get("datetime") or "", cov(it), -(cloud(it) or 0.0), it["id"]))
     with_cloud = [it for it in items if cloud(it) is not None]
     clearest = min(with_cloud, key=lambda it: cloud(it) or 0.0) if with_cloud else None
     bc = cloud(best)
@@ -3734,6 +3734,29 @@ def _delta_caveats(
     return out
 
 
+def _scene_key(it: dict[str, Any]) -> tuple[float, float, str]:
+    """Sort key for the best scene: coverage descending, cloud ascending, id as the last
+    tiebreak, so a tie never falls to the order the server returned"""
+    cloud = it.get("cloud_cover")
+    return (-(it.get("covers_aoi_pct") or 0.0), 100.0 if cloud is None else cloud, it["id"])
+
+
+def _scene_line(it: dict[str, Any]) -> dict[str, Any]:
+    return {"id": it["id"], "date": it["datetime"][:10], "cloud": it.get("cloud_cover"), "covers_aoi_pct": it.get("covers_aoi_pct")}
+
+
+def _picked_and_runner_up(picked: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
+    """The picked scene's coverage, the best scene it beat, and a note when only the id decided"""
+    others = sorted((i for i in items if i["id"] != picked["id"]), key=_scene_key)
+    out: dict[str, Any] = {"covers_aoi_pct": picked.get("covers_aoi_pct")}
+    if others:
+        r = others[0]
+        out["runner_up"] = _scene_line(r)
+        if _scene_key(r)[:2] == _scene_key(picked)[:2]:
+            out["pick_note"] = f"{r['id']} was equally good (same coverage and cloud); the scene id decided"
+    return out
+
+
 def compare_dates(
     place: str | None = None,
     bbox: list[float] | None = None,
@@ -3792,16 +3815,12 @@ def compare_dates(
     shared = {_mgrs_tile(i["id"]) for i in after_items} & {_mgrs_tile(i["id"]) for i in before_items}
     if not shared:
         return {"error": "No shared Sentinel-2 tile between the two windows — try wider windows."}
-    best_tile = max(
-        shared,
-        key=lambda t: max(_coverage(i, bbox) for i in after_items if _mgrs_tile(i["id"]) == t),
-    )
+    # a set has no order, and two tiles can both cover the box at 100 (Horta Sud, 31SBD and 30SYJ),
+    # so the tile is the one holding the best scene by the full key, never max() over the set
+    best_tile = _mgrs_tile(min((i for i in after_items if _mgrs_tile(i["id"]) in shared), key=_scene_key)["id"])
 
     def pick(items: list[dict[str, Any]]) -> dict[str, Any]:
-        return min(
-            (i for i in items if _mgrs_tile(i["id"]) == best_tile),
-            key=lambda i: i.get("cloud_cover") or 100,
-        )
+        return min((i for i in items if _mgrs_tile(i["id"]) == best_tile), key=_scene_key)
 
     a, b = pick(after_items), pick(before_items)
 
@@ -3840,8 +3859,8 @@ def compare_dates(
     delta = round(mean_after - mean_before, 4) if mean_after is not None and mean_before is not None else None
     out = {
         "tile": best_tile,
-        "after": {"id": a["id"], "date": a["datetime"][:10], "cloud": a.get("cloud_cover"), "mean": mean_after},
-        "before": {"id": b["id"], "date": b["datetime"][:10], "cloud": b.get("cloud_cover"), "mean": mean_before},
+        "after": {"id": a["id"], "date": a["datetime"][:10], "cloud": a.get("cloud_cover"), "mean": mean_after, **_picked_and_runner_up(a, after_items)},
+        "before": {"id": b["id"], "date": b["datetime"][:10], "cloud": b.get("cloud_cover"), "mean": mean_before, **_picked_and_runner_up(b, before_items)},
         "delta": delta,
         "delta_pct": round(delta / abs(mean_before) * 100, 1) if delta is not None and mean_before else None,
         "expression": expression,

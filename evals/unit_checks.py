@@ -2627,6 +2627,33 @@ def t_compare_dates_passes_notes_through():
         tools.search_imagery, tools.compute_statistics, tools._coverage = saved
 
 
+def t_compare_dates_same_call_same_scene():
+    # Stop 20: two tiles both cover the box at 100, so the tile came from set order and flipped between runs
+    def item(tile, d, cloud, cov=100.0):
+        return {"id": f"S2A_{tile}_{d}_0_L2A", "datetime": f"2024-{d[4:6]}-{d[6:]}T10:00:00Z", "collection": "sentinel-2-l2a",
+                "bbox": [0, 0, 1, 1], "cloud_cover": cloud, "covers_aoi_pct": cov}
+
+    def run(items):
+        saved = tools.search_imagery, tools.compute_statistics, tools.render_map
+        tools.search_imagery = lambda *a, **k: {"items": list(items)}
+        tools.compute_statistics = lambda *a, **k: {"x": {"mean": 0.5}}
+        tools.render_map = lambda **k: {"map_path": "x.html"}
+        try:
+            return tools.compare_dates(bbox=[0, 0, 1, 1], window_before="a/b", window_after="c/d")
+        finally:
+            tools.search_imagery, tools.compute_statistics, tools.render_map = saved
+
+    tied = [item("31SBD", "20241115", 20.0), item("30SYJ", "20241115", 20.0)]
+    one, two = run(tied), run(tied[::-1])
+    assert one["tile"] == two["tile"] == "30SYJ" and one["after"]["id"] == two["after"]["id"], (one["tile"], two["tile"])
+    assert one["after"]["runner_up"]["id"] == "S2A_31SBD_20241115_0_L2A" and "scene id decided" in one["after"]["pick_note"]
+    better = [item("31SBD", "20241115", 20.0, cov=100.0), item("30SYJ", "20241115", 5.0, cov=80.0)]
+    for order in (better, better[::-1]):
+        out = run(order)
+        assert out["tile"] == "31SBD" and "pick_note" not in out["after"], out["after"]
+        assert out["after"]["runner_up"]["covers_aoi_pct"] == 80.0
+
+
 def t_brief_page_and_conditions_brief_share_one_radius():
     import importlib.util
     spec = importlib.util.spec_from_file_location("brief", Path(__file__).resolve().parents[1] / "briefing" / "brief.py")
