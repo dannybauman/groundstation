@@ -9,6 +9,7 @@ that scaffold as a toolset later.
 
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import hashlib
 import json
@@ -16,6 +17,7 @@ import math
 import os
 import re
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
 from pathlib import Path
@@ -118,6 +120,39 @@ def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
         score += 0.1 + (0.2 if kind in want else 0.0)
     return dict(name=name, bbox=bbox, source=source, where=where, kind=kind,
                 extent=[round(width, 4), round(height, 4)], importance=importance, score=round(score, 3))
+
+
+# the boxes geocode returned, with the source that answered, so a caller's stack_facts can claim a geocode
+# only for a box that really came from one
+# ponytail: last 64 boxes in memory, rounded to 4 decimals; a persistent or per-session record if callers outlive it
+_geocoded_boxes: dict[tuple[float, ...], str] = {}
+
+
+def _bbox_key(bbox: list[float]) -> tuple[float, ...]:
+    return tuple(round(float(x), 4) for x in bbox)
+
+
+def _record_geocode(out: dict[str, Any]) -> dict[str, Any]:
+    key = _bbox_key(out["bbox"])
+    _geocoded_boxes.pop(key, None)
+    _geocoded_boxes[key] = out["source"]
+    while len(_geocoded_boxes) > 64:
+        del _geocoded_boxes[next(iter(_geocoded_boxes))]
+    return out
+
+
+def _geocoded_fact(facts: dict[str, Any] | None, bbox: list[float] | None) -> bool | str:
+    """What the panel may credit: the tool's own geocode, else a caller's claim that matches a box geocode returned"""
+    claimed = (facts or {}).get("geocoded")
+    if claimed and bbox is not None and _geocoded_boxes.get(_bbox_key(bbox)) == claimed:
+        return claimed
+    return _tool_geocoded.get()
+
+
+def _names_the_ask(name: str, ask: str) -> bool:
+    """A candidate whose name shares no word with the ask is a fuzzy-match stray (Le Moule for Portland)"""
+    words = lambda t: set(re.findall(r"\w+", unicodedata.normalize("NFKD", t.lower()).encode("ascii", "ignore").decode()))
+    return bool(words(name) & words(ask))
 
 
 def _state_country(c: dict[str, Any]) -> str:
@@ -547,6 +582,7 @@ def geocode(query: str) -> dict[str, Any]:
             pool.append((_candidate(f"{name} ({_where(h)})" if _where(h) else name, bb, "gazet", _gazet_where(h),
                                     str(h.get("subtype") or "place").lower(), None, want), h))
         if pool:
+            pool = [p for p in pool if _names_the_ask(p[1].get("name") or "", query)] or pool
             pool = sorted(pool, key=lambda p: -p[0]["score"])[:4]
             top, h = pool[0]
             w, s, e, n = top["bbox"]
@@ -558,18 +594,26 @@ def geocode(query: str) -> dict[str, Any]:
                 "bbox": [w, s, e, n],
                 "source": "gazet",
             }
+            ambiguous = _settle(out, [c for c, _ in pool])
             # Picking one silently is the geocoder deciding for the caller, so
             # say which and name the rest. Field test No.8: two US counties are
-            # both "Harris County (US, county)", so each tie carries where it is
+            # both "Harris County (US, county)", so each tie carries where it is.
+            # A refusal has looked up each state (_settle), so name that over coordinates
             if len(pool) > 1:
+                def label(c: dict[str, Any], o: dict[str, Any]) -> str:
+                    if ambiguous:
+                        return f"({c['where']}, {c['kind']})" if c.get("kind") else f"({c['where']})"
+                    return f"({_where(o)}) {_at(o)}"
                 out["geocode_note"] = (
-                    f"{len(pool)} places match {query!r} equally well; using {top['name']} {_at(h)} (best score), not "
-                    + ", ".join(f"{o.get('name')} ({_where(o)}) {_at(o)}" for _, o in pool[1:])
+                    f"{len(pool)} places match {query!r} equally well; using {h.get('name')} "
+                    + (f"{label(top, h)}" if ambiguous else _at(h))
+                    + " (best score), not "
+                    + ", ".join(f"{o.get('name')} {label(c, o)}" for c, o in pool[1:])
                     + ". Pass the fuller name if another was meant"
                 )
-            if _settle(out, [c for c, _ in pool]):
-                out["geocode_note"] += ". ambiguous: pass the fuller name or a bbox"
-            return out
+                if ambiguous:
+                    out["geocode_note"] += ". ambiguous: pass the fuller name or a bbox"
+            return _record_geocode(out)
     except httpx.HTTPError:
         _gazet_skip_until = time.time() + 300  # a slow or dead Space must not tax every geocode
     except Exception:
@@ -615,6 +659,7 @@ def geocode(query: str) -> dict[str, Any]:
         imp = r.get("importance")
         pool.append((_candidate(r.get("display_name", key[0]), [w, s, e, n], "nominatim", key[0], key[1],
                                 None if imp is None else round(float(imp), 3), want), r))
+    pool = [p for p in pool if _names_the_ask(p[1].get("display_name", ""), matched)] or pool
     pool = sorted(pool, key=lambda p: -p[0]["score"])[:4]
     top, r0 = pool[0]
     out = {
@@ -638,7 +683,7 @@ def geocode(query: str) -> dict[str, Any]:
             + ". Pass a state or country if another was meant"
             + (". ambiguous: pass the fuller name or a bbox" if ambiguous else "")
         )
-    return out
+    return _record_geocode(out)
 
 
 def _settle(out: dict[str, Any], cands: list[dict[str, Any]]) -> bool:
@@ -1523,6 +1568,9 @@ def search_imagery(
             it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
             it["coverage_basis"] = "bbox"
     result = {"bbox": bbox, "count": len(feats), "items": items}
+    if not feats and max_cloud_cover is not None:
+        result["note"] = (f"this window returned 0 scenes at max_cloud_cover {max_cloud_cover:g}; "
+                          "a higher cap or a wider window may find some")
     if archive:
         result["archive"] = archive
     readable = [it for it in items if "read_note" not in it]
@@ -2630,10 +2678,15 @@ def _snapshot_artifact(
             browser.close()
 
 
+# only a tool that ran a geocode sets this (compare_dates); a caller's stack_facts never can
+_tool_geocoded: contextvars.ContextVar[bool | str] = contextvars.ContextVar("tool_geocoded", default=False)
+
+
 def _map_stack_facts(
     resolved: list[dict[str, Any]],
     layers: list[dict[str, Any]],
     extra_facts: dict[str, Any] | None = None,
+    bbox: list[float] | None = None,
 ) -> dict[str, Any]:
     """The honest facts of a map render — shared by the panel and its postcard."""
     items = [l for l in layers if l.get("type") == "item" and l.get("catalog") and l.get("collection_id")]
@@ -2661,7 +2714,8 @@ def _map_stack_facts(
         "weather": False,
         "passes": False,
         "snapshot": False,
-        **(extra_facts or {}),
+        **{k: v for k, v in (extra_facts or {}).items() if k != "geocoded"},
+        "geocoded": _geocoded_fact(extra_facts, bbox),
     }
 
 
@@ -2696,14 +2750,15 @@ _KNOWN_STACK_FACTS = {
 }
 
 
-def _notes_result(out: dict[str, Any], notes: list[str] | None, stack_facts: dict[str, Any] | None) -> None:
+def _notes_result(out: dict[str, Any], notes: list[str] | None, stack_facts: dict[str, Any] | None,
+                  bbox: list[float] | None = None) -> None:
     """Hand the notes back, and name stack_facts keys the panel can't use instead of dropping them."""
     if notes:
         out["notes"] = notes
-    bad = [k for k in (stack_facts or {}) if k not in _KNOWN_STACK_FACTS]
+    bad = [k for k in (stack_facts or {}) if k not in _KNOWN_STACK_FACTS or (k == "geocoded" and not _geocoded_fact(stack_facts, bbox))]
     if bad:
         out["stack_facts_ignored"] = bad
-        extra = "stack_facts takes provenance flags only (geocoded, events, weather, passes, terrain, snapshot); put free text in notes"
+        extra = "stack_facts takes provenance flags only (events, weather, passes, terrain, snapshot; geocoded is kept only for a bbox geocode returned, with the source it returned); put free text in notes"
         out["note"] = f'{out["note"]}. {extra}' if out.get("note") else extra
 
 
@@ -2741,6 +2796,7 @@ def _stack_chunk_for(
     layers: list[dict[str, Any]],
     extra_facts: dict[str, Any] | None = None,
     notes: list[str] | None = None,
+    bbox: list[float] | None = None,
 ) -> str | None:
     from groundstation import stack as _stack
 
@@ -2750,7 +2806,7 @@ def _stack_chunk_for(
         # a malformed curated file must not take the map down with it — the
         # parser stays loud (evals hit it directly), the artifact stays alive
         return None
-    entries = _stack.stack_instances(components, _map_stack_facts(resolved, layers, extra_facts))
+    entries = _stack.stack_instances(components, _map_stack_facts(resolved, layers, extra_facts, bbox))
     if not entries:
         return None
     note_p = "".join(f"<p>{escape(n)}</p>" for n in _note_lines(notes))
@@ -2849,8 +2905,8 @@ def render_map(
     the map — the actual collections, tiler, formats, and buckets on screen,
     joined from docs/stack.md. Attribution to projects, never people.
     stack_facts: honest extras the panel can't see from the layers alone —
-    pass {"geocoded": <geocode's source, "gazet" or "nominatim">} if you resolved the place via geocode,
-    {"events": True} if an events layer came from active_events, and
+    {"geocoded": <geocode's source>} is kept only when bbox is one geocode returned with that
+    source, else it is named in stack_facts_ignored. Pass {"events": True} if an events layer came from active_events, and
     {"passes": True} if next_pass informed the answer. Only claim
     what actually happened.
 
@@ -2884,7 +2940,7 @@ def render_map(
         )
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for(resolved, layers, stack_facts, notes)
+        stack_html = _stack_chunk_for(resolved, layers, stack_facts, notes, bbox)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     legends = _legends_for(layers)
@@ -2924,7 +2980,7 @@ def render_map(
         out["stac_map_url"] = stac_map_url
     if stack_note:
         out["note"] = stack_note
-    _notes_result(out, notes, stack_facts)
+    _notes_result(out, notes, stack_facts, bbox)
     fb = [l["name"] for l in resolved if l.get("pc_fallback")]
     if fb:
         out["note"] = (out["note"] + ". " if out.get("note") else "") + (
@@ -2955,7 +3011,7 @@ def render_map(
             )
     if postcard:
         card_path, card_note = _artifact_postcard(
-            out_path, postcard, _map_stack_facts(resolved, layers, stack_facts), layers, stack_layer,
+            out_path, postcard, _map_stack_facts(resolved, layers, stack_facts, bbox), layers, stack_layer,
             bbox, "compare" if compare else "map",
         )
         if card_path:
@@ -2992,7 +3048,8 @@ def render_timelapse(
     tiles up front, the rest load when shown, so keep it to a few frames: more
     than max_frames (hard ceiling 12) is an error. Use for 3 or more dates, a
     season or a progression; for two dates use render_map (the swipe).
-    Returns {map_path, frames, state}.
+    Returns {map_path, frames, state}; the frames are the caller's, so a
+    window that found 0 scenes at the cloud cap is the caller's to name.
     """
     cap = min(max_frames, TIMELAPSE_MAX_FRAMES)
     if len(frames) < 2:
@@ -3005,7 +3062,7 @@ def render_timelapse(
     resolved = [_resolve_layer(f) for f in frames]
     stack_html = ""
     if stack_layer:
-        stack_html = _stack_chunk_for(resolved, frames, stack_facts, notes) or ""
+        stack_html = _stack_chunk_for(resolved, frames, stack_facts, notes, bbox) or ""
     html = (
         _fill(_MAP_TEMPLATE, {
             "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
@@ -3024,7 +3081,7 @@ def render_timelapse(
         "frames": len(resolved),
         "state": {"bbox": bbox, "interval_ms": int(interval_ms), "layers": [_layer_state(l) for l in resolved]},
     }
-    _notes_result(out, notes, stack_facts)
+    _notes_result(out, notes, stack_facts, bbox)
     return out
 
 
@@ -3269,7 +3326,7 @@ def render_map_3d(
         ])})
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for([resolved, *siblings, *extras], [layer, *sibling_specs, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True}, notes)
+        stack_html = _stack_chunk_for([resolved, *siblings, *extras], [layer, *sibling_specs, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True}, notes, bbox)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = (
@@ -3326,12 +3383,12 @@ def render_map_3d(
                 )
     if stack_note:
         out["note"] = stack_note
-    _notes_result(out, notes, stack_facts)
+    _notes_result(out, notes, stack_facts, bbox)
     if postcard:
         all_layers = [layer, *(extra_layers or [])]
         card_path, card_note = _artifact_postcard(
             out_path, postcard,
-            _map_stack_facts([resolved, *extras], all_layers, {**(stack_facts or {}), "terrain": True}),
+            _map_stack_facts([resolved, *extras], all_layers, {**(stack_facts or {}), "terrain": True}, bbox),
             all_layers, stack_layer, bbox, "3d",
         )
         if card_path:
@@ -3712,6 +3769,7 @@ def _delta_caveats(
     mean_before: float | None,
     cloud_after: float | None,
     cloud_before: float | None,
+    ids: tuple[str, str] = ("", ""),
 ) -> list[str]:
     """Reasons this delta shouldn't be read at face value. Empty when it's clean."""
     out: list[str] = []
@@ -3723,7 +3781,7 @@ def _delta_caveats(
     if cloudy:
         out.append(
             "cloud may be driving this delta ("
-            + ", ".join(f"{w} scene {c:.0f}%" for w, c in cloudy)
+            + ", ".join(f"{w} scene {ids[w == 'before']} {c:.0f}%".replace("  ", " ") for w, c in cloudy)
             + f", threshold {CLOUD_CAVEAT_PCT:.0f}%). Cloud pushes a normalized index toward zero."
         )
     if mean_before is not None and abs(mean_before) < FLAT_BASELINE:
@@ -3846,16 +3904,22 @@ def compare_dates(
     title = f"{label or place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}"
     if not out_path:
         out_path = _artifact_path(None, "map", f"{title} {hashlib.sha1(repr(bbox).encode()).hexdigest()[:6]}")
-    m = render_map(
-        title=title,
-        out_path=out_path,
-        subtitle=f"{expression} · means over the area · drag the divider · tile {best_tile}",
-        bbox=bbox,
-        layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
-        stack_layer=stack_layer,
-        stack_facts={"geocoded": geocoded, **(stack_facts or {})},
-        notes=notes,
-    )
+    token = _tool_geocoded.set(geocoded)
+    try:
+        m = render_map(
+            title=title,
+            out_path=out_path,
+            subtitle=f"{expression} · means over the area · drag the divider · tile {best_tile}",
+            bbox=bbox,
+            layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
+            stack_layer=stack_layer,
+            stack_facts=stack_facts,
+            notes=notes,
+        )
+    finally:
+        _tool_geocoded.reset(token)
+    if "error" in m:
+        return m
     delta = round(mean_after - mean_before, 4) if mean_after is not None and mean_before is not None else None
     out = {
         "tile": best_tile,
@@ -3867,10 +3931,10 @@ def compare_dates(
         "map_path": m["map_path"],
         **scope,
     }
-    caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"))
+    caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"), (a["id"], b["id"]))
     if caveats:
         out["caveat"] = caveats
-    _notes_result(out, notes, stack_facts)
+    _notes_result(out, notes, stack_facts, bbox)
     return out
 
 
