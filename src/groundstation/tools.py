@@ -87,6 +87,13 @@ _FEATURE_KINDS = {
 }
 
 
+# a point candidate's half-width in km by kind; a city is banded by population in _candidate
+_KIND_HALF_KM = {
+    **dict.fromkeys(("bay", "marina", "harbour", "beach", "village", "hamlet", "mine", "pit"), 2.0),
+    **dict.fromkeys(("town", "volcano", "mountain", "peak", "lake", "reservoir", "water"), 5.0),
+}
+
+
 _PHYSICAL_KINDS = set().union(*_FEATURE_KINDS.values())
 
 
@@ -99,7 +106,7 @@ def _nominatim_kind(r: dict[str, Any]) -> str:
 
 
 def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
-               importance: float | None, want: set[str]) -> dict[str, Any]:
+               importance: float | None, want: set[str], population: int = 0) -> dict[str, Any]:
     """One geocode candidate from any source, scored by the one rule, with the inputs shown.
 
     score = importance (0 where the source has none, as Gazet does)
@@ -111,6 +118,10 @@ def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
     both bonuses, the Shasta Lake reservoir at 0.34 beats the town at 0.44
     with them, and the Kilauea volcano at 0.48 clears the village at 0.35
     by more than AMBIGUITY_MARGIN without a feature word
+
+    A point (extent under POINT_DEG) also gets half_km from its kind, a city
+    from its population band, which _settle pads it by. extent_basis says where
+    the box comes from: own, kind or default (unknown kind, the 0.3 deg square)
     """
     w, s, e, n = bbox
     width, height = e - w + (360 if e < w else 0), n - s  # west > east crosses the dateline
@@ -118,8 +129,11 @@ def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
     score = (importance or 0.0) + 0.03 * math.log10(max(km2, 1.0))
     if kind in _PHYSICAL_KINDS:
         score += 0.1 + (0.2 if kind in want else 0.0)
+    half_km = (25.0 if population > 1e6 else 15.0 if population >= 1e5 else 8.0) if kind == "city" else _KIND_HALF_KM.get(kind)
+    basis = "own" if max(width, height) >= POINT_DEG else "kind" if half_km else "default"
     return dict(name=name, bbox=bbox, source=source, where=where, kind=kind,
-                extent=[round(width, 4), round(height, 4)], importance=importance, score=round(score, 3))
+                extent=[round(width, 4), round(height, 4)], importance=importance, score=round(score, 3),
+                extent_basis=basis, half_km=half_km)
 
 
 # the boxes geocode returned, with the source that answered, so a caller's stack_facts can claim a geocode
@@ -543,7 +557,10 @@ def geocode(query: str) -> dict[str, Any]:
     physical-feature kind, and a feature word in the query (lake, volcano,
     river, peak...) that names the candidate's kind. Lake, reservoir and water
     count as one kind. The top score is the result; its bbox is the
-    candidate's own however small, widened only when it is a point. ambiguous
+    candidate's own however small, widened only when it is a point: by
+    its kind's half-width (a bay 2 km, a town 5, a city 8 to 25 by population),
+    or the 0.3 deg square when the kind is unknown. extent_basis on the result
+    and each candidate says which: own, kind or default. ambiguous
     is true when a candidate in another place scores within AMBIGUITY_MARGIN
     of the top; each candidate's where then names its state and country, and
     the place-taking tools refuse the name until a fuller name or bbox is passed.
@@ -630,7 +647,7 @@ def geocode(query: str) -> dict[str, Any]:
     def _nominatim(q: str) -> list:
         return _get_json(
             "https://nominatim.openstreetmap.org/search",
-            params={"q": q, "format": "jsonv2", "limit": 5},
+            params={"q": q, "format": "jsonv2", "limit": 5, "extratags": 1},
         )
 
     def _short(dn: str) -> str:
@@ -666,7 +683,8 @@ def geocode(query: str) -> dict[str, Any]:
         s, n, w, e = (float(x) for x in r["boundingbox"])
         imp = r.get("importance")
         pool.append((_candidate(r.get("display_name", key[0]), [w, s, e, n], "nominatim", key[0], key[1],
-                                None if imp is None else round(float(imp), 3), want), r))
+                                None if imp is None else round(float(imp), 3), want,
+                                int((r.get("extratags") or {}).get("population", "0").replace(",", "") or 0)), r))
     pool = [p for p in pool if _names_the_ask(p[1].get("display_name", ""), matched)] or pool
     pool = sorted(pool, key=lambda p: -p[0]["score"])[:4]
     top, r0 = pool[0]
@@ -711,12 +729,15 @@ def _settle(out: dict[str, Any], cands: list[dict[str, Any]]) -> bool:
     # a point (Mount Rainier came back 0.0001 deg wide). A degenerate bbox makes
     # a useless imagery search and an empty 3D scene, so widen it and say so. A
     # real extent stays however small: the Berkeley Pit is 0.024 by 0.013 deg
-    if max(top["extent"]) < POINT_DEG:
-        d = 0.15
-        out["bbox"] = [out["lon"] - d, out["lat"] - d, out["lon"] + d, out["lat"] + d]
+    out["extent_basis"] = top["extent_basis"]
+    if top["extent_basis"] != "own":
+        dlat = top["half_km"] / 111.32 if top["half_km"] else 0.15
+        dlon = dlat / max(math.cos(math.radians(out["lat"])), 0.01) if top["half_km"] else 0.15
+        out["bbox"] = [out["lon"] - dlon, out["lat"] - dlat, out["lon"] + dlon, out["lat"] + dlat]
         out["bbox_note"] = (
-            "geocoder returned a point, not an extent — widened to a "
-            f"{2 * d:g} deg box around it. Pass your own bbox if the subject is bigger"
+            "geocoder returned a point, not an extent — widened to "
+            + (f"{2 * top['half_km']:g} km across for a {top['kind']}" if top["half_km"] else "a 0.3 deg box")
+            + " around it. Pass your own bbox if the subject is bigger"
         )
     return ambiguous
 

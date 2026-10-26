@@ -24,7 +24,7 @@ The fix already existed in this codebase several times over. `next_pass` returns
 
 | Tool | Derived value | Caveat |
 |---|---|---|
-| `geocode` | bbox | `bbox_note` when the geocoder returned a point and the box was widened |
+| `geocode` | bbox | `bbox_note` when the geocoder returned a point and the box was widened (by its kind, or 0.3 deg when the kind is unknown; `extent_basis` says which) |
 | `search_datasets` | hits | one record with `searched` and `note` when nothing matched |
 | `search_imagery` | ranking | `recommended` with a reason, `covers_aoi_pct` on every item, `read_note` on an item the tiler cannot read (never recommended, never in a coverage set) |
 | `compute_statistics` | mean and friends | `extent_note` when unclipped; `error` naming the cause when the scene has no readable pixels; physical values by default (`scaling_applied`, `band_scaling`), and `scaling_note` only on the raw path (`apply_scaling=False`) |
