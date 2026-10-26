@@ -1728,14 +1728,21 @@ __BRAND__
     display: flex; align-items: center; justify-content: center; font: 13px system-ui; }
   .side-label { position: absolute; bottom: 52px; z-index: 2; background: rgba(247,244,239,.96); color: var(--ink);
     padding: 4px 11px; border-radius: 6px; font: 12px "Roboto", system-ui, sans-serif; box-shadow: 0 1px 5px rgba(0,0,0,.15); }
+  #tl { position: absolute; bottom: 64px; left: 50%; transform: translateX(-50%); z-index: 3;
+    display: flex; align-items: center; gap: 8px; background: rgba(247,244,239,.96); color: var(--ink);
+    padding: 6px 12px; border-radius: 8px; font: 14px "Roboto", system-ui, sans-serif; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+  #tl button { font: inherit; color: inherit; background: none; border: 1px solid var(--mid); border-radius: 6px;
+    min-width: 32px; padding: 2px 8px; cursor: pointer; }
+  #tl span { min-width: 7em; text-align: center; }
   /* #clean = snapshot mode for postcard bakes: map chrome off, story on
      (divider + side labels stay; MapLibre's attribution control stays) */
-  .clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack,
+  .clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack, .clean #tl,
   .clean .maplibregl-ctrl-top-right { display: none !important; }
 </style>
 <script>if (location.hash === "#clean") document.documentElement.classList.add("clean");</script>
 </head><body>
 <div id="map"></div>
+__TLBAR__
 <div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div>__STACMAP__</div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
 __STACK__
@@ -1833,6 +1840,36 @@ if (COMPARE && rasters.length === 2) {
   });
   window.addEventListener("resize", () => setSplit(parseFloat(divider.style.left)));
   document.getElementById("toggles").innerHTML = '<span style="color:#555">drag the divider to compare</span>';
+} else if (__TIMELAPSE__) {
+  const map = new maplibregl.Map({ container: "map", ...MAP_OPTS });
+  window.gsMaps = [map];
+  window.gsPending = 1;
+  map.addControl(new maplibregl.NavigationControl());
+  let cur = 0, timer = null;
+  const name = document.getElementById("tl-name"), play = document.getElementById("tl-play");
+  // MapLibre fetches no tiles for a layer whose visibility is none, so hidden frames cost no bandwidth
+  const show = k => {
+    cur = (k + LAYERS.length) % LAYERS.length;
+    LAYERS.forEach((_, i) => map.setLayoutProperty("layer" + i, "visibility", i === cur ? "visible" : "none"));
+    name.textContent = LAYERS[cur].name + "  (" + (cur + 1) + "/" + LAYERS.length + ")";
+  };
+  const stop = () => { clearInterval(timer); timer = null; play.textContent = "\u25b6"; };
+  const step = k => { stop(); show(cur + k); };
+  document.getElementById("tl-prev").onclick = () => step(-1);
+  document.getElementById("tl-next").onclick = () => step(1);
+  play.onclick = () => {
+    if (timer) return stop();
+    play.textContent = "\u275a\u275a";
+    timer = setInterval(() => show(cur + 1), __INTERVAL__);
+  };
+  document.addEventListener("keydown", e => {
+    if (e.key === "ArrowLeft") step(-1); else if (e.key === "ArrowRight") step(1);
+  });
+  map.on("load", () => {
+    LAYERS.forEach((l, i) => addLayerTo(map, l, i));
+    show(0);
+    window.gsPending--;
+  });
 } else {
   const map = new maplibregl.Map({ container: "map", ...MAP_OPTS });
   window.gsMaps = [map];  // exposed for scripted screenshots and checks
@@ -2366,6 +2403,7 @@ def render_map(
         .replace("__LAYERS__", json.dumps(resolved))
         .replace("__BBOX__", json.dumps(bbox))
         .replace("__COMPARE__", json.dumps(compare))
+        .replace("__TLBAR__", "").replace("__TIMELAPSE__", "false").replace("__INTERVAL__", "0")
         .replace("__STACMAP__", f'<a id="stacmap" href="{stac_map_url}" target="_blank">Open in stac-map</a>' if stac_map_url else "")
         # __STACK__ goes last: its entries carry caller-supplied strings, and
         # replacing it earlier would let a literal "__LAYERS__" inside them be
@@ -2427,6 +2465,68 @@ def render_map(
         if card_note:
             out["postcard_note"] = card_note
     return out
+
+
+_TIMELAPSE_BAR = (
+    '<div id="tl"><button id="tl-prev" aria-label="previous frame">\u25c0</button>'
+    '<button id="tl-play" aria-label="play or pause">\u25b6</button>'
+    '<button id="tl-next" aria-label="next frame">\u25b6\u25b6</button><span id="tl-name"></span></div>'
+)
+TIMELAPSE_MAX_FRAMES = 12  # hard ceiling: every frame is a tile layer, and bandwidth is the cost
+
+
+def render_timelapse(
+    title: str,
+    bbox: list[float],
+    frames: list[dict[str, Any]],
+    subtitle: str = "",
+    out_path: str | None = None,
+    interval_ms: int = 1200,
+    max_frames: int = 8,
+    stack_layer: bool = True,
+    stack_facts: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A few frames of one place over time, with prev / play / next controls.
+
+    frames: layers in render_map's shape (item or raster), one per date, in time
+    order; each frame's "name" is its date or label. Only the first frame loads
+    tiles up front, the rest load when shown, so keep it to a few frames: more
+    than max_frames (hard ceiling 12) is an error. Use for 3 or more dates, a
+    season or a progression; for two dates use render_map (the swipe).
+    Returns {map_path, frames, state}.
+    """
+    cap = min(max_frames, TIMELAPSE_MAX_FRAMES)
+    if len(frames) < 2:
+        return {"error": "a timelapse needs at least 2 frames; use render_map for one scene"}
+    if len(frames) > cap:
+        return {"error": f"{len(frames)} frames is over the cap of {cap}: every frame is a tile layer, "
+                         "so pick fewer, evenly spaced windows (hard ceiling 12)"}
+    if any(f.get("type") not in ("item", "raster") for f in frames):
+        return {"error": "each frame must be one item or raster layer with a name"}
+    resolved = [_resolve_layer(f) for f in frames]
+    stack_html = ""
+    if stack_layer:
+        stack_html = _stack_chunk_for(resolved, frames, stack_facts) or ""
+    html = (
+        _MAP_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
+        .replace("__TITLE__", title)
+        .replace("__SUBTITLE__", subtitle)
+        .replace("__LAYERS__", json.dumps(resolved))
+        .replace("__BBOX__", json.dumps(bbox))
+        .replace("__COMPARE__", "false")
+        .replace("__TLBAR__", _TIMELAPSE_BAR)
+        .replace("__TIMELAPSE__", "true")
+        .replace("__INTERVAL__", str(int(interval_ms)))
+        .replace("__STACMAP__", "")
+        .replace("__STACK__", stack_html)
+    )
+    out_path = _artifact_path(out_path, "timelapse", title)
+    Path(out_path).write_text(html, encoding="utf-8")
+    return {
+        "map_path": out_path,
+        "frames": len(resolved),
+        "state": {"bbox": bbox, "interval_ms": int(interval_ms), "layers": [_layer_state(l) for l in resolved]},
+    }
 
 
 # ---------------------------------------------------------------- 3D artifact
