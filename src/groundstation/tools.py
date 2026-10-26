@@ -3638,9 +3638,22 @@ _EO_PREDICTOR_API = "https://api.github.com/repos/developmentseed/eo-predictor/c
 EO_PREDICTOR_URL = "https://developmentseed.org/eo-predictor"
 
 
-def _local_solar_hour(utc_hour: float, lon: float) -> float:
-    """Approximate local solar time — daylight check without an ephemeris file."""
-    return (utc_hour + lon / 15.0) % 24.0
+def _sun_elevation_deg(when: dt.datetime, lat: float, lon: float) -> float:
+    """Sun elevation above the horizon in degrees, from the NOAA approximation.
+
+    Accurate to about 1 degree, which is plenty for "is it daylight"; no
+    ephemeris file needed. `when` is UTC.
+    """
+    import math
+
+    n = when.timetuple().tm_yday
+    b = math.radians(360.0 / 365.0 * (n - 81))
+    decl = math.radians(23.44 * math.sin(b))
+    eot_min = 9.87 * math.sin(2 * b) - 7.53 * math.cos(b) - 1.5 * math.sin(b)
+    solar_h = when.hour + when.minute / 60.0 + when.second / 3600.0 + lon / 15.0 + eot_min / 60.0
+    ha = math.radians(15.0 * (solar_h - 12.0))
+    phi = math.radians(lat)
+    return math.degrees(math.asin(math.sin(phi) * math.sin(decl) + math.cos(phi) * math.cos(decl) * math.cos(ha)))
 
 
 def _pass_minima(dists_km: list[float], within_km: float) -> list[int]:
@@ -3739,8 +3752,11 @@ def next_pass(
 
     Answers "when could we next get imagery of this place." Propagates live
     Celestrak TLEs with Skyfield and reports each time a satellite's swath
-    band sweeps the point in the next `days` (max 7). Optical passes are
-    filtered to local daytime; radar (Sentinel-1) images day and night.
+    band sweeps the point in the next `days` (max 7). Every pass carries
+    `sun_elevation_deg` and `daylight` (sun above the horizon at the point at
+    pass time). Optical passes with the sun down are dropped, since optical
+    sensors do not acquire at night, and counted in `optical_passes_at_night`;
+    radar (Sentinel-1) is kept day or night and carries the flag too.
 
     Honest limits, and say them when it matters: this is swath geometry, not
     the acquisition plan — a pass is a POSSIBLE capture, not a promised one
@@ -3778,6 +3794,7 @@ def next_pass(
     target = wgs84.latlon(lat, lon)
 
     passes = []
+    at_night = 0
     for cname in wanted:
         cfg = cfgs.get(cname)
         if not cfg:
@@ -3799,15 +3816,17 @@ def next_pass(
             for i in _pass_minima(d.tolist(), cfg.get("reach_km", cfg["swath_km"] / 2)):
                 t = times[i]
                 utc = t.utc_datetime()
-                if cfg["optical"]:
-                    solar = _local_solar_hour(utc.hour + utc.minute / 60.0, lon)
-                    if not (6.0 <= solar <= 18.0):
-                        continue  # optical only acquires in daylight
+                sun = _sun_elevation_deg(utc, lat, lon)
+                if cfg["optical"] and sun <= 0:
+                    at_night += 1
+                    continue  # optical only acquires in daylight
                 passes.append(
                     {
                         "constellation": cname,
                         "satellite": sat.name,
                         "time_utc": utc.strftime("%Y-%m-%d %H:%M"),
+                        "sun_elevation_deg": round(sun, 1),
+                        "daylight": sun > 0,
                         "track_distance_km": round(float(d[i]), 1),
                         "kind": "optical" if cfg["optical"] else "radar (day or night, sees through cloud)",
                         "access": cfg.get("access", "open"),
@@ -3818,6 +3837,7 @@ def next_pass(
         "point": {"lat": lat, "lon": lon},
         "window_days": days,
         "passes": passes,
+        "optical_passes_at_night": at_night,
         "constellations_source": source,
         "constellations_available": list(cfgs),
         "skipped": skipped,
@@ -3825,6 +3845,8 @@ def next_pass(
         "note": (
             "swath geometry from live TLEs, not the acquisition plan — a pass is a "
             "possible capture, and imagery reaches public catalogs hours to a day later. "
+            "Optical passes are kept only when the sun is above the horizon at the point; "
+            "a low sun (under about 10 degrees) gives a dim image. "
             f"Commercial sensors only image if tasked. Richer view: {EO_PREDICTOR_URL}"
         ),
     }
@@ -4077,6 +4099,8 @@ def conditions_brief(
                 "constellation": p.get("constellation"),
                 "satellite": p.get("satellite"),
                 "time_utc": p.get("time_utc"),
+                "daylight": p.get("daylight"),
+                "sun_elevation_deg": p.get("sun_elevation_deg"),
                 "track_distance_km": p.get("track_distance_km"),
                 "kind": p.get("kind"),
                 "access": p.get("access"),
