@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import re
 import time
@@ -61,8 +62,11 @@ _gazet_skip_until = 0.0
 # miss: "Salinas Valley" came back as Salinas, Mexico at 0.9
 GAZET_URL = os.environ.get("GAZET_URL", "https://developmentseed-gazet.hf.space/api/search")
 GAZET_MIN_SIMILARITY = 0.95
-# ponytail: one margin for all geocoders; per-source margins if the live list below ever disagrees
+# two candidates in different places whose scores sit this close are both
+# real contenders, and the place-taking tools refuse the name
 AMBIGUITY_MARGIN = 0.15
+# a box under this in both directions is a point (a Nominatim node), not an extent
+POINT_DEG = 0.001
 GAZET_TIMEOUT_S = 10.0  # geocode is a hot path: a cold Space takes ~8s, a dead one must not hang the tool
 
 
@@ -81,6 +85,9 @@ _FEATURE_KINDS = {
 }
 
 
+_PHYSICAL_KINDS = set().union(*_FEATURE_KINDS.values())
+
+
 def _feature_word(query: str) -> tuple[str | None, set[str]]:
     return next(((t, _FEATURE_KINDS[t]) for t in re.findall(r"[a-z]+", query.lower()) if t in _FEATURE_KINDS), (None, set()))
 
@@ -89,8 +96,48 @@ def _nominatim_kind(r: dict[str, Any]) -> str:
     return str(r.get("addresstype") or r.get("type") or "place").lower()
 
 
+def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
+               importance: float | None, want: set[str]) -> dict[str, Any]:
+    """One geocode candidate from any source, scored by the one rule, with the inputs shown.
+
+    score = importance (0 where the source has none, as Gazet does)
+          + 0.03 x log10 of the extent in km2 (a point scores 0)
+          + 0.1 when the kind is a physical feature (lake, volcano, river...)
+          + 0.2 more when the ask names that feature ("lake", "volcano")
+    The weights were set against the live sources (field test No.14): the
+    Lake Charles city at importance 0.55 still beats the lake at 0.18 with
+    both bonuses, the Shasta Lake reservoir at 0.34 beats the town at 0.44
+    with them, and the Kilauea volcano at 0.48 clears the village at 0.35
+    by more than AMBIGUITY_MARGIN without a feature word
+    """
+    w, s, e, n = bbox
+    width, height = e - w + (360 if e < w else 0), n - s  # west > east crosses the dateline
+    km2 = width * height * 111.32**2 * max(math.cos(math.radians((s + n) / 2)), 0.01)
+    score = (importance or 0.0) + 0.03 * math.log10(max(km2, 1.0))
+    if kind in _PHYSICAL_KINDS:
+        score += 0.1 + (0.2 if kind in want else 0.0)
+    return dict(name=name, bbox=bbox, source=source, where=where, kind=kind,
+                extent=[round(width, 4), round(height, 4)], importance=importance, score=round(score, 3))
+
+
+def _state_country(c: dict[str, Any]) -> str:
+    """State and country at a candidate's centre, by one Nominatim reverse lookup at state zoom.
+
+    Gazet rows carry a country code and no state; ids_only=false adds an ISO
+    region code ("US-OR") but also every geometry, 4 MB for Canada, so a
+    reverse lookup on the refusal path is cheaper than either
+    """
+    w, s, e, n = c["bbox"]
+    try:
+        a = _get_json("https://nominatim.openstreetmap.org/reverse",
+                      params={"lat": (s + n) / 2, "lon": (w + e) / 2, "zoom": 5, "format": "jsonv2"}).get("address") or {}
+        return ", ".join(x for x in (a.get("state"), a.get("country")) if x) or c["where"]
+    except Exception:
+        return c["where"]
+
+
 def _kind_where(c: dict[str, Any]) -> str:
-    """County, state and country for a Nominatim candidate; a Gazet record carries only its country and position"""
+    """County, state and country for a Nominatim candidate; a Gazet record carries what geocode found for it"""
     if c.get("source") != "nominatim":
         return c.get("where") or ""
     parts = [p for p in c["name"].split(", ") if not p.strip().isdigit()]
@@ -444,16 +491,19 @@ def geocode(query: str) -> dict[str, Any]:
     names ("Barotse Floodplain", "Chelan County") rather than long phrases.
     Returns {name, lat, lon, bbox: [w, s, e, n], source, candidates}, plus
     geocode_note when several places match the name and one was picked.
-    candidates lists up to 4 {name, bbox, source, where, kind}, kind being the
-    source's own word lowercased (Gazet subtype, Nominatim addresstype or type:
-    volcano, reservoir, town, county...) or "place". A feature word in the query
-    (lake, volcano, river, peak...) makes the one candidate of that kind the
-    chosen result and clears ambiguous; the others stay listed. Lake, reservoir
-    and water count as one kind. The word yields when the source's top result
-    is another place whose own name carries it and that outranks the feature by
-    more than AMBIGUITY_MARGIN ("Lake Charles" is the city). ambiguous is true
-    when the top two are real contenders in different places, and the
-    place-taking tools then refuse the name until a fuller name or bbox is passed.
+    candidates lists up to 4 {name, bbox, source, where, kind, extent,
+    importance, score}, best score first, kind being the source's own word
+    lowercased (Gazet subtype, Nominatim addresstype or type: volcano,
+    reservoir, town, county...) or "place", extent [width, height] in degrees,
+    importance Nominatim's own (None from Gazet). Every candidate from either
+    source is scored by one rule (see _candidate): importance, extent, a
+    physical-feature kind, and a feature word in the query (lake, volcano,
+    river, peak...) that names the candidate's kind. Lake, reservoir and water
+    count as one kind. The top score is the result; its bbox is the
+    candidate's own however small, widened only when it is a point. ambiguous
+    is true when a candidate in another place scores within AMBIGUITY_MARGIN
+    of the top; each candidate's where then names its state and country, and
+    the place-taking tools refuse the name until a fuller name or bbox is passed.
     """
     global _gazet_skip_until
     try:
@@ -473,17 +523,15 @@ def geocode(query: str) -> dict[str, Any]:
             if h.get("bbox") and len(h["bbox"]) == 4
             and (h.get("similarity") or 0.0) >= GAZET_MIN_SIMILARITY
         ]
-        # the feature word picks among the top ties too: "Lake Powell" ties an
-        # Australian locality with the Utah reservoir (field test No.13)
-        _, want = _feature_word(query)
-        top = [o for o in hits if o.get("similarity") == hits[0].get("similarity")] if hits else []
-        pick = [o for o in top if str(o.get("subtype") or "").lower() in want]
-        if len(pick) == 1:
-            hits = pick + [o for o in hits if o is not pick[0]]
-        if hits:
-            h = hits[0]
-            w, s, e, n = (float(x) for x in h["bbox"])
-            if e - w >= 180:
+        want = _feature_word(query)[1]
+        # Jaro-Winkler ties are real places sharing a name (Loja Province and
+        # Loja Canton both score 1.0), so every tie is a candidate and the score
+        # picks among them, "Lake Powell" the Utah reservoir over an Australian
+        # locality (field test No.13)
+        pool = []
+        for h in [o for o in hits if o.get("similarity") == hits[0].get("similarity")] if hits else []:
+            bb = [float(x) for x in h["bbox"]]
+            if bb[2] - bb[0] >= 180:
                 # Field test No.8: Fiji came back as [-180, -21, 180, -12], the
                 # minimum bounding rectangle of a country that crosses the
                 # dateline. One geometry fetch gives the real extent
@@ -493,46 +541,34 @@ def geocode(query: str) -> dict[str, Any]:
                     timeout=GAZET_TIMEOUT_S * 3,
                 )
                 gr.raise_for_status()
-                fixed = _wrap_aware_bbox(gr.json().get("geometry") or {})
-                if fixed:
-                    w, s, e, n = fixed
-                    h = {**h, "bbox": fixed}
-            where = ", ".join(x for x in (h.get("country"), h.get("subtype")) if x)
+                bb = _wrap_aware_bbox(gr.json().get("geometry") or {}) or bb
+            h = {**h, "bbox": bb}
             name = h.get("name") or query
+            pool.append((_candidate(f"{name} ({_where(h)})" if _where(h) else name, bb, "gazet", _gazet_where(h),
+                                    str(h.get("subtype") or "place").lower(), None, want), h))
+        if pool:
+            pool = sorted(pool, key=lambda p: -p[0]["score"])[:4]
+            top, h = pool[0]
+            w, s, e, n = top["bbox"]
             lon_c = (w + (e + 360 if e < w else e)) / 2
             out: dict[str, Any] = {
-                "name": f"{name} ({where})" if where else name,
+                "name": top["name"],
                 "lat": (s + n) / 2,
                 "lon": lon_c - 360 if lon_c > 180 else lon_c,
                 "bbox": [w, s, e, n],
                 "source": "gazet",
             }
-            cands = [dict(name=out["name"], bbox=[w, s, e, n], source="gazet", where=_gazet_where(h),
-                          kind=str(h.get("subtype") or "place").lower())]
-            # Jaro-Winkler ties are real places sharing a name (Loja Province and
-            # Loja Canton both score 1.0). Picking one silently is the geocoder
-            # deciding for the caller, so say which and name the rest. Field test
-            # No.8: two US counties are both "Harris County (US, county)", so each
-            # tie carries where it is, from the bbox the record already has
-            ties = [o for o in hits[1:] if o.get("similarity") == h.get("similarity")]
-            if ties:
+            # Picking one silently is the geocoder deciding for the caller, so
+            # say which and name the rest. Field test No.8: two US counties are
+            # both "Harris County (US, county)", so each tie carries where it is
+            if len(pool) > 1:
                 out["geocode_note"] = (
-                    f"{len(ties) + 1} places match {query!r} equally well; using {out['name']} {_at(h)}, not "
-                    + ", ".join(f"{o.get('name')} ({_where(o)}) {_at(o)}" for o in ties[:3])
+                    f"{len(pool)} places match {query!r} equally well; using {top['name']} {_at(h)} (best score), not "
+                    + ", ".join(f"{o.get('name')} ({_where(o)}) {_at(o)}" for _, o in pool[1:])
                     + ". Pass the fuller name if another was meant"
                 )
-                cands += [
-                    dict(name=f"{o.get('name')} ({_where(o)})", bbox=[float(x) for x in o["bbox"]],
-                         source="gazet", where=_gazet_where(o), kind=str(o.get("subtype") or "place").lower())
-                    for o in ties[:3]
-                ]
-                # ties share a similarity score, so each is a real contender. Any one
-                # elsewhere counts, not just the second: both top Portland hits are
-                # Oregon (urban centre and locality), Portland Maine is third
-                if len(pick) != 1 and any(not _bboxes_overlap(cands[0]["bbox"], c["bbox"]) for c in cands[1:]):
-                    out["ambiguous"] = True
-                    out["geocode_note"] += ". ambiguous: pass the fuller name or a bbox"
-            out["candidates"] = cands
+            if _settle(out, [c for c, _ in pool]):
+                out["geocode_note"] += ". ambiguous: pass the fuller name or a bbox"
             return out
     except httpx.HTTPError:
         _gazet_skip_until = time.time() + 300  # a slow or dead Space must not tax every geocode
@@ -568,72 +604,68 @@ def geocode(query: str) -> dict[str, Any]:
             break
     if not results:
         return {"error": f"No geocoding result for {query!r}"}
-    # a feature word in the ask picks the one result of that kind ("Shasta Lake"
-    # is the reservoir, not the town). It yields when the source's top result is
-    # another place whose own name carries the word and that outranks the feature
-    # by more than the ambiguity margin: "Lake Charles" is the city at 0.55 over
-    # the lake at 0.18, Shasta Lake town only 0.44 over the reservoir at 0.34
-    # (field test No.13). Stay with the source's order otherwise
-    word, want = _feature_word(query)
-    hit = [r for r in results if _nominatim_kind(r) in want]
-    imp = lambda r: float(r.get("importance") or 0)
-    top_name = str(results[0].get("name") or results[0].get("display_name", "").split(", ")[0])
-    yielded = (len(hit) == 1 and hit[0] is not results[0] and word in re.findall(r"[a-z]+", top_name.lower())
-               and imp(results[0]) - imp(hit[0]) > AMBIGUITY_MARGIN)
-    picked = len(hit) == 1 and not yielded
-    if picked:
-        results = hit + [r for r in results if r is not hit[0]]
-    r0 = results[0]
-    s, n, w, e = (float(x) for x in r0["boundingbox"])
-    lat, lon = float(r0["lat"]), float(r0["lon"])
+    want = _feature_word(query)[1]
+    pool, seen = [], set()
+    for r in results:
+        key = (_short(r.get("display_name", "")), _nominatim_kind(r))
+        if key in seen:
+            continue
+        seen.add(key)
+        s, n, w, e = (float(x) for x in r["boundingbox"])
+        imp = r.get("importance")
+        pool.append((_candidate(r.get("display_name", key[0]), [w, s, e, n], "nominatim", key[0], key[1],
+                                None if imp is None else round(float(imp), 3), want), r))
+    pool = sorted(pool, key=lambda p: -p[0]["score"])[:4]
+    top, r0 = pool[0]
     out = {
-        "name": r0.get("display_name", query),
-        "lat": lat,
-        "lon": lon,
-        "bbox": [w, s, e, n],
+        "name": top["name"],
+        "lat": float(r0["lat"]),
+        "lon": float(r0["lon"]),
+        "bbox": list(top["bbox"]),
         "source": "nominatim",
     }
     # Field test No.8: "the Ashburn data center corridor" simplified to "Ashburn"
     # and Nominatim's first hit was Ashburn, Georgia. The fallback took the top
     # of a list it never showed. Say what was matched and who else shares it
-    mine = _short(r0.get("display_name", ""))
-    others = list(dict.fromkeys(_short(r.get("display_name", "")) for r in results[1:]))
-    others = [o for o in others if o != mine][:3]
-    seen = {(mine, _nominatim_kind(r0))}
-    cands = [dict(name=out["name"], bbox=[w, s, e, n], source="nominatim", where=mine, kind=_nominatim_kind(r0))]
-    for r in results[1:]:
-        sh = _short(r.get("display_name", ""))
-        if (sh, _nominatim_kind(r)) in seen or len(cands) == 4:
-            continue
-        seen.add((sh, _nominatim_kind(r)))
-        bb = [float(x) for x in r["boundingbox"]]
-        cands.append(dict(name=r.get("display_name", sh), bbox=[bb[2], bb[0], bb[3], bb[1]],
-                          source="nominatim", where=sh, kind=_nominatim_kind(r)))
-        if len(cands) == 2:
-            contender = abs(float(r0.get("importance") or 0) - float(r.get("importance") or 0)) <= AMBIGUITY_MARGIN
-            out["ambiguous"] = contender and not _bboxes_overlap(cands[0]["bbox"], cands[1]["bbox"]) and not picked
-    out["candidates"] = cands
-    if matched != query or others or out.get("ambiguous") or yielded:
+    others = list(dict.fromkeys(_short(r.get("display_name", "")) for r in results))
+    others = [o for o in others if o != top["where"]][:3]
+    ambiguous = _settle(out, [c for c, _ in pool])
+    if matched != query or others or ambiguous:
         out["geocode_note"] = (
             f"matched {matched!r}"
             + (f" after simplifying {query!r}" if matched != query else "")
-            + (f"; {word!r} is part of the {_nominatim_kind(r0)}'s own name and the source ranks it well above"
-               f" the {_nominatim_kind(hit[0])}, so the {_nominatim_kind(r0)} it is" if yielded else "")
             + (f"; other places share it: {' / '.join(others)}" if others else "")
             + ". Pass a state or country if another was meant"
-            + (". ambiguous: pass the fuller name or a bbox" if out.get("ambiguous") else "")
+            + (". ambiguous: pass the fuller name or a bbox" if ambiguous else "")
         )
+    return out
+
+
+def _settle(out: dict[str, Any], cands: list[dict[str, Any]]) -> bool:
+    """The tail both sources share: candidates on out, ambiguity, a point widened. Returns ambiguous"""
+    out["candidates"] = cands
+    top = cands[0]
+    ambiguous = any(top["score"] - c["score"] <= AMBIGUITY_MARGIN and not _bboxes_overlap(top["bbox"], c["bbox"])
+                    for c in cands[1:])
+    if ambiguous:
+        out["ambiguous"] = True
+        # Field test No.14: the Portland refusal named no state because Gazet
+        # answered and its rows carry none
+        for c in cands:
+            if c["source"] != "nominatim":
+                c["where"] = _state_country(c)
     # Nominatim returns a NODE for peaks and landmarks, so the bbox collapses to
     # a point (Mount Rainier came back 0.0001 deg wide). A degenerate bbox makes
-    # a useless imagery search and an empty 3D scene, so widen it and say so.
-    if (e - w) < 0.02 or (n - s) < 0.02:
+    # a useless imagery search and an empty 3D scene, so widen it and say so. A
+    # real extent stays however small: the Berkeley Pit is 0.024 by 0.013 deg
+    if max(top["extent"]) < POINT_DEG:
         d = 0.15
-        out["bbox"] = [lon - d, lat - d, lon + d, lat + d]
+        out["bbox"] = [out["lon"] - d, out["lat"] - d, out["lon"] + d, out["lat"] + d]
         out["bbox_note"] = (
             "geocoder returned a point, not an extent — widened to a "
             f"{2 * d:g} deg box around it. Pass your own bbox if the subject is bigger"
         )
-    return out
+    return ambiguous
 
 
 def reverse_geocode(lat: float, lon: float) -> dict[str, Any]:

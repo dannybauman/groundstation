@@ -1592,7 +1592,7 @@ _NOMINATIM_SALINAS = [{"boundingbox": ["36.2", "36.8", "-121.9", "-121.3"], "lat
                        "display_name": "Salinas Valley, Monterey County, California"}]
 
 
-def _with_geocoders(gazet_payload, nominatim_payload, fn, ctype="application/json"):
+def _with_geocoders(gazet_payload, nominatim_payload, fn, ctype="application/json", reverse=lambda lat, lon: {}):
     saved_get, saved_json, saved_skip = tools._client.get, tools._get_json, tools._gazet_skip_until
     calls = {"gazet": 0, "nominatim": 0}
 
@@ -1602,6 +1602,9 @@ def _with_geocoders(gazet_payload, nominatim_payload, fn, ctype="application/jso
         return _FakeResp(gazet_payload, ctype)
 
     def fake_json(url, **kw):
+        if url.endswith("/reverse"):
+            calls["reverse"] = calls.get("reverse", 0) + 1
+            return {"address": reverse(kw["params"]["lat"], kw["params"]["lon"])}
         calls["nominatim"] += 1
         return nominatim_payload
 
@@ -1841,48 +1844,67 @@ def t_nominatim_fallback_says_what_it_matched():
         out = tools.geocode("the Ashburn data center corridor")
     finally:
         tools._client.get, tools._get_json, tools._gazet_skip_until = saved_get, saved_json, saved_skip
-    assert out["source"] == "nominatim" and out["bbox"][0] == -83.67, out
+    # neither row carries an importance, so extent decides: Virginia's box is the larger
+    assert out["source"] == "nominatim" and out["bbox"][0] == -77.5, out
+    assert len(out["candidates"]) == 2, ("the same place twice is not two candidates", out["candidates"])
     note = out["geocode_note"]
     assert "matched 'Ashburn' after simplifying 'the Ashburn data center corridor'" in note, note
-    assert note.count("Ashburn, Virginia, United States") == 1, ("the same place twice is not two other places", note)
+    assert note.count("Ashburn, Georgia, United States") == 1, note
 
 
 def _nom(name, kind, box, imp=0.5):
-    return {"boundingbox": [str(box[1]), str(box[3]), str(box[0]), str(box[2])], "lat": "0", "lon": "0",
+    lat, lon = (box[1] + box[3]) / 2, (box[0] + box[2]) / 2
+    return {"boundingbox": [str(box[1]), str(box[3]), str(box[0]), str(box[2])], "lat": str(lat), "lon": str(lon),
             "display_name": name, "addresstype": kind, "importance": imp}
+
+
+def _scored_on_its_inputs(out):
+    # Stop 18: every candidate shows what it was scored on, best score first
+    for c in out["candidates"]:
+        assert {"kind", "extent", "importance", "source", "score"} <= c.keys(), c
+    scores = [c["score"] for c in out["candidates"]]
+    assert scores == sorted(scores, reverse=True), scores
+
+
+# boxes and importances are the live Nominatim ones from field test No.14
+_SHASTA_TOWN = _nom("Shasta Lake, Shasta County, California, United States", "town", [-122.411, 40.651, -122.337, 40.710], 0.441)
+_SHASTA_RES = _nom("Shasta Lake, Shasta County, California, United States", "reservoir", [-122.55, 40.70, -122.097, 40.933], 0.342)
+_KILAUEA_VILLAGE = _nom("Kilauea, Kauai County, Hawaii, 96754, United States", "locality", [-159.42, 22.19, -159.39, 22.215], 0.35)
+_KILAUEA_VOLCANO = _nom("Kilauea, Hawaii County, Hawaii, 96718, United States", "volcano", [-155.28705, 19.42105, -155.28695, 19.42115], 0.477)
 
 
 def t_geocode_candidates_carry_kind_and_feature_word_picks():
     # Field test No.12: "Shasta Lake" landed on the town, and Kilauea's candidates
     # said nothing about which was the volcano
-    town = _nom("Shasta Lake, Shasta County, California, United States", "town", [-122.4, 40.5, -122.3, 40.6], 0.6)
-    res = _nom("Shasta Lake, Shasta County, California, United States", "reservoir", [-122.5, 40.6, -122.1, 40.9], 0.5)
-    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta Lake, California"))
-    assert out["candidates"][0]["kind"] == "reservoir" and out["bbox"][2] - out["bbox"][0] > 0.3, out
+    out, _ = _with_geocoders({"ids": []}, [_SHASTA_TOWN, _SHASTA_RES], lambda: tools.geocode("Shasta Lake, California"))
+    _scored_on_its_inputs(out)
     assert [c["kind"] for c in out["candidates"]] == ["reservoir", "town"] and not out.get("ambiguous"), out
-    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta, California"))
-    assert out["candidates"][0]["kind"] == "town", "no feature word: the source's order stands"
-    kau = _nom("Kilauea, Kauai County, Hawaii, United States", "locality", [-159.4, 22.2, -159.3, 22.3], 0.5)
-    vol = _nom("Kilauea, Hawaii County, Hawaii, United States", "volcano", [-155.4, 19.3, -155.2, 19.5], 0.5)
-    out, _ = _with_geocoders({"ids": []}, [kau, vol], lambda: tools.geocode("Kilauea, Hawaii"))
-    assert out["ambiguous"] and [c["kind"] for c in out["candidates"]] == ["locality", "volcano"], out
-    err = tools._ambiguous_error("Kilauea, Hawaii", out)["error"]
-    assert "locality (Kauai County, Hawaii, United States) or volcano (Hawaii County, Hawaii, United States)?" in err, err
-    out, _ = _with_geocoders({"ids": []}, [kau, vol], lambda: tools.geocode("Kilauea volcano, Hawaii"))
-    assert out["candidates"][0]["kind"] == "volcano" and not out["ambiguous"], out
+    assert out["bbox"] == [-122.55, 40.70, -122.097, 40.933] and "bbox_note" not in out, out
+    with_word = out["candidates"][0]["score"]
+    out, _ = _with_geocoders({"ids": []}, [_SHASTA_TOWN, _SHASTA_RES], lambda: tools.geocode("Shasta, California"))
+    res = next(c for c in out["candidates"] if c["kind"] == "reservoir")
+    assert round(with_word - res["score"], 3) == 0.2, ("the word is worth 0.2 and nothing else", with_word, res)
+    # no feature word: importance 0.48 over 0.35 plus the feature kind clears the margin
+    out, _ = _with_geocoders({"ids": []}, [_KILAUEA_VILLAGE, _KILAUEA_VOLCANO], lambda: tools.geocode("Kilauea, Hawaii"))
+    _scored_on_its_inputs(out)
+    assert out["candidates"][0]["kind"] == "volcano" and not out.get("ambiguous"), out
+    assert out["candidates"][0]["extent"] == [0.0001, 0.0001] and "bbox_note" in out, "a node is a point, widened"
+    assert abs(out["bbox"][2] - out["bbox"][0] - 0.3) < 1e-9, out
+    out, _ = _with_geocoders({"ids": []}, [_KILAUEA_VILLAGE, _KILAUEA_VOLCANO], lambda: tools.geocode("Kilauea volcano, Hawaii"))
+    assert out["candidates"][0]["kind"] == "volcano" and not out.get("ambiguous"), out
 
 
 def t_geocode_feature_word_yields_to_a_place_named_for_it():
     # Field test No.13: "Lake Charles, Louisiana" took the lake over the city.
-    # Importances are the live ones: city 0.55 over lake 0.18, town 0.44 over reservoir 0.34
-    city = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "city", [-93.3, 30.1, -93.1, 30.3], 0.547)
-    lake = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "lake", [-93.24, 30.21, -93.22, 30.24], 0.182)
+    # The same rule that gives Shasta the reservoir gives Lake Charles the city:
+    # 0.55 over 0.18 is more than the word and the feature kind are worth
+    city = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "city", [-93.317, 30.124, -93.129, 30.272], 0.547)
+    lake = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "lake", [-93.245, 30.215, -93.218, 30.237], 0.182)
     out, _ = _with_geocoders({"ids": []}, [city, lake], lambda: tools.geocode("Lake Charles, Louisiana"))
+    _scored_on_its_inputs(out)
     assert [c["kind"] for c in out["candidates"]] == ["city", "lake"] and not out.get("ambiguous"), out
-    assert "'lake' is part of the city's own name" in out["geocode_note"], out
-    town = _nom("Shasta Lake, Shasta County, California, United States", "town", [-122.4, 40.5, -122.3, 40.6], 0.441)
-    res = _nom("Shasta Lake, Shasta County, California, United States", "reservoir", [-122.5, 40.6, -122.1, 40.9], 0.342)
-    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta Lake, California"))
+    assert out["candidates"][1]["importance"] == 0.182, "the importance the margin was judged on is on the output"
+    out, _ = _with_geocoders({"ids": []}, [_SHASTA_TOWN, _SHASTA_RES], lambda: tools.geocode("Shasta Lake, California"))
     assert out["candidates"][0]["kind"] == "reservoir" and not out.get("ambiguous"), "a close town does not outrank the feature"
 
 
@@ -1900,6 +1922,23 @@ def t_geocode_water_and_lake_are_one_kind():
     ]}
     out, _ = _with_geocoders(gz, [], lambda: tools.geocode("Lake Powell"))
     assert out["name"] == "Powell (reservoir)" and not out.get("ambiguous"), "the word picks among Gazet's ties too"
+    _scored_on_its_inputs(out)
+    assert [c["importance"] for c in out["candidates"]] == [None, None], "Gazet has no importance; extent and kind decide"
+    # Gazet scores "Lake Powell, Utah" under its gate, so Nominatim answers with
+    # the reservoir's own polygon, the lake and not a county
+    res = _nom("Lake Powell, San Juan County, Utah, United States", "reservoir", [-111.6, 36.85, -110.319, 37.915], 0.435)
+    out, _ = _with_geocoders({"ids": []}, [res], lambda: tools.geocode("Lake Powell, Utah"))
+    assert out["candidates"][0]["kind"] == "reservoir" and out["bbox"] == [-111.6, 36.85, -110.319, 37.915], out
+
+
+def t_geocode_real_extent_stays_however_small():
+    # Field test No.14: the pit's one candidate carried its 0.024 by 0.013 deg
+    # box and the top level was still the 0.3 deg point box. A real extent stays
+    pit = _nom("Berkeley Pit, Butte, Silver Bow County, Montana, United States", "water", [-112.524, 46.008, -112.5, 46.021], 0.353)
+    out, _ = _with_geocoders({"ids": []}, [pit], lambda: tools.geocode("Berkeley Pit"))
+    _scored_on_its_inputs(out)
+    assert out["bbox"] == [-112.524, 46.008, -112.5, 46.021] and "bbox_note" not in out, out
+    assert out["candidates"][0]["extent"] == [0.024, 0.013], out["candidates"]
 
 
 def t_geocode_refusal_names_state_or_country():
@@ -1909,15 +1948,27 @@ def t_geocode_refusal_names_state_or_country():
     out, _ = _with_geocoders({"ids": []}, [ore, me], lambda: tools.geocode("Portland"))
     err = tools._ambiguous_error("Portland", out)["error"]
     assert "city (Multnomah County, Oregon, United States) or city (Cumberland County, Maine, United States)?" in err, err
+    # Field test No.14: Gazet answers a bare "Portland" and its rows carry no
+    # state, so the refusal was word for word No.13's. The live four rows
     gz = {"ids": [
+        {"source": "urban_centres", "id": "ghsl_4941", "name": "Portland", "country": "United States", "subtype": "urban_centre",
+         "bbox": [-123.01, 45.358, -122.36, 45.718], "similarity": 1.0},
         {"source": "divisions_area", "id": "or", "name": "Portland", "country": "US", "subtype": "locality",
-         "bbox": [-122.84, 45.43, -122.47, 45.65], "similarity": 1.0},
+         "bbox": [-122.837, 45.433, -122.472, 45.653], "similarity": 1.0},
         {"source": "divisions_area", "id": "me", "name": "Portland", "country": "US", "subtype": "locality",
-         "bbox": [-70.35, 43.54, -69.98, 43.73], "similarity": 1.0},
+         "bbox": [-70.347, 43.544, -69.976, 43.728], "similarity": 1.0},
+        {"source": "urban_centres", "id": "ghsl_8297", "name": "Portland", "country": "United States", "subtype": "urban_centre",
+         "bbox": [-70.328, 43.621, -70.209, 43.694], "similarity": 1.0},
     ]}
-    out, _ = _with_geocoders(gz, [], lambda: tools.geocode("Portland"))
+    state = lambda lat, lon: {"state": "Oregon" if lon < -100 else "Maine", "country": "United States"}
+    out, calls = _with_geocoders(gz, [], lambda: tools.geocode("Portland"), reverse=state)
+    _scored_on_its_inputs(out)
+    assert out["ambiguous"] and calls["reverse"] == 4 and calls["nominatim"] == 0, (out, calls)
     err = tools._ambiguous_error("Portland", out)["error"]
-    assert "locality (US, at 45.5N 122.7W) or locality (US, at 43.6N 70.2W)?" in err, err
+    assert ("urban_centre (Oregon, United States) or locality (Oregon, United States)"
+            " or locality (Maine, United States) or urban_centre (Maine, United States)?") in err, err
+    out, calls = _with_geocoders(_GAZET_CHELAN, [], lambda: tools.geocode("Chelan County"), reverse=state)
+    assert "reverse" not in calls, "a name that is not refused costs no lookup"
 
 
 def t_gdacs_feed_is_windowed_and_counted():
