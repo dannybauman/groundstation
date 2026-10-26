@@ -2665,6 +2665,48 @@ def _map_stack_facts(
     }
 
 
+_NOTES_CSS = (
+    "<style>#notes { position: absolute; bottom: 60px; left: 12px; z-index: 2; max-width: min(320px, 80vw); "
+    "background: rgba(247,244,239,.96); color: var(--ink); border-top: 3px solid var(--accent); border-radius: 4px; "
+    "padding: 8px 12px; font: 12.5px/1.45 \"Roboto\", system-ui, sans-serif; box-shadow: 0 1px 6px rgba(0,0,0,.18); } "
+    "#notes b { display: block; font: 700 10px/1 \"Roboto Mono\", monospace; letter-spacing: .14em; "
+    "text-transform: uppercase; color: var(--mid); margin-bottom: 6px; } #notes div { margin: 0 0 4px; }</style>"
+)
+
+
+def _note_lines(notes: list[str] | None) -> list[str]:
+    return [str(n) for n in (notes or []) if str(n).strip()]
+
+
+def _notes_html(notes: list[str] | None) -> str:
+    """The caller's own free-text notes as one box, escaped like every other string on the page."""
+    lines = _note_lines(notes)
+    if not lines:
+        return ""
+    return (
+        f'{_NOTES_CSS}<aside id="notes" aria-label="Notes"><b>Notes</b>'
+        + "".join(f"<div>{escape(n)}</div>" for n in lines)
+        + "</aside>"
+    )
+
+
+_KNOWN_STACK_FACTS = {
+    "catalogs", "collections_by_catalog", "collections", "tiler_hosts", "maplibre",
+    "terrain", "geocoded", "events", "weather", "passes", "snapshot", "mosaic_scenes",
+}
+
+
+def _notes_result(out: dict[str, Any], notes: list[str] | None, stack_facts: dict[str, Any] | None) -> None:
+    """Hand the notes back, and name stack_facts keys the panel can't use instead of dropping them."""
+    if notes:
+        out["notes"] = notes
+    bad = [k for k in (stack_facts or {}) if k not in _KNOWN_STACK_FACTS]
+    if bad:
+        out["stack_facts_ignored"] = bad
+        extra = "stack_facts takes provenance flags only (geocoded, events, weather, passes, terrain, snapshot); put free text in notes"
+        out["note"] = f'{out["note"]}. {extra}' if out.get("note") else extra
+
+
 def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
     from groundstation.stack import STAGE_LABELS
 
@@ -2698,6 +2740,7 @@ def _stack_chunk_for(
     resolved: list[dict[str, Any]],
     layers: list[dict[str, Any]],
     extra_facts: dict[str, Any] | None = None,
+    notes: list[str] | None = None,
 ) -> str | None:
     from groundstation import stack as _stack
 
@@ -2710,7 +2753,9 @@ def _stack_chunk_for(
     entries = _stack.stack_instances(components, _map_stack_facts(resolved, layers, extra_facts))
     if not entries:
         return None
-    return _fill(_STACK_CHUNK, {"ENTRIES": _stack_panel_html(entries), "SUMMARY": escape(_stack.summary(entries))})
+    note_p = "".join(f"<p>{escape(n)}</p>" for n in _note_lines(notes))
+    notes_group = f'<div class="stack-group">Notes</div>{note_p}' if note_p else ""
+    return _fill(_STACK_CHUNK, {"ENTRIES": notes_group + _stack_panel_html(entries), "SUMMARY": escape(_stack.summary(entries))})
 
 
 def _artifact_postcard(
@@ -2774,6 +2819,7 @@ def render_map(
     stack_layer: bool = True,
     stack_facts: dict[str, Any] | None = None,
     postcard: dict[str, Any] | None = None,
+    notes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Write a self-contained interactive HTML map and return its file path.
 
@@ -2838,7 +2884,7 @@ def render_map(
         )
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for(resolved, layers, stack_facts)
+        stack_html = _stack_chunk_for(resolved, layers, stack_facts, notes)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     legends = _legends_for(layers)
@@ -2850,7 +2896,7 @@ def render_map(
             "LAYERS": _js(resolved), "BBOX": _js(bbox), "COMPARE": _js(compare),
             "TLBAR": "", "TIMELAPSE": "false", "INTERVAL": "0",
             "STACMAP": f'<a id="stacmap" href="{escape(stac_map_url)}" target="_blank">Open in stac-map</a>' if stac_map_url else "",
-            "STACK": stack_html, "LEGEND": _legend_map_html(legends),
+            "STACK": stack_html + _notes_html(notes), "LEGEND": _legend_map_html(legends),
         })
     )
     try:
@@ -2878,6 +2924,7 @@ def render_map(
         out["stac_map_url"] = stac_map_url
     if stack_note:
         out["note"] = stack_note
+    _notes_result(out, notes, stack_facts)
     fb = [l["name"] for l in resolved if l.get("pc_fallback")]
     if fb:
         out["note"] = (out["note"] + ". " if out.get("note") else "") + (
@@ -2936,6 +2983,7 @@ def render_timelapse(
     max_frames: int = 8,
     stack_layer: bool = True,
     stack_facts: dict[str, Any] | None = None,
+    notes: list[str] | None = None,
 ) -> dict[str, Any]:
     """A few frames of one place over time, with prev / play / next controls.
 
@@ -2957,13 +3005,13 @@ def render_timelapse(
     resolved = [_resolve_layer(f) for f in frames]
     stack_html = ""
     if stack_layer:
-        stack_html = _stack_chunk_for(resolved, frames, stack_facts) or ""
+        stack_html = _stack_chunk_for(resolved, frames, stack_facts, notes) or ""
     html = (
         _fill(_MAP_TEMPLATE, {
             "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
             "LAYERS": _js(resolved), "BBOX": _js(bbox), "COMPARE": "false",
             "TLBAR": _TIMELAPSE_BAR, "TIMELAPSE": "true", "INTERVAL": str(int(interval_ms)),
-            "STACMAP": "", "STACK": stack_html, "LEGEND": "",
+            "STACMAP": "", "STACK": stack_html + _notes_html(notes), "LEGEND": "",
         })
     )
     try:
@@ -2971,11 +3019,13 @@ def render_timelapse(
     except ValueError as e:
         return {"error": str(e)}
     _write_artifact(out_path, html)
-    return {
+    out = {
         "map_path": out_path,
         "frames": len(resolved),
         "state": {"bbox": bbox, "interval_ms": int(interval_ms), "layers": [_layer_state(l) for l in resolved]},
     }
+    _notes_result(out, notes, stack_facts)
+    return out
 
 
 # ---------------------------------------------------------------- 3D artifact
@@ -3114,6 +3164,7 @@ def render_map_3d(
     postcard: dict[str, Any] | None = None,
     stack_facts: dict[str, Any] | None = None,
     fill_coverage: bool = True,
+    notes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Write a self-contained 3D terrain fly-through with imagery draped over it.
 
@@ -3218,7 +3269,7 @@ def render_map_3d(
         ])})
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for([resolved, *siblings, *extras], [layer, *sibling_specs, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True})
+        stack_html = _stack_chunk_for([resolved, *siblings, *extras], [layer, *sibling_specs, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True}, notes)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = (
@@ -3226,7 +3277,7 @@ def render_map_3d(
             "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
             "STYLE": _js(style), "BBOX": _js(bbox),
             "EXAGGERATION": json.dumps(round(float(exaggeration), 2)),
-            "EXTRA": extra_html, "STACK": stack_html,
+            "EXTRA": extra_html, "STACK": stack_html + _notes_html(notes),
         })
     )
     try:
@@ -3275,6 +3326,7 @@ def render_map_3d(
                 )
     if stack_note:
         out["note"] = stack_note
+    _notes_result(out, notes, stack_facts)
     if postcard:
         all_layers = [layer, *(extra_layers or [])]
         card_path, card_note = _artifact_postcard(
@@ -3693,6 +3745,7 @@ def compare_dates(
     stack_layer: bool = True,
     stack_facts: dict[str, Any] | None = None,
     out_path: str | None = None,
+    notes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Compare two time windows over a place: matched scenes, index delta, swipe map.
 
@@ -3782,6 +3835,7 @@ def compare_dates(
         layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
         stack_layer=stack_layer,
         stack_facts={"geocoded": geocoded, **(stack_facts or {})},
+        notes=notes,
     )
     delta = round(mean_after - mean_before, 4) if mean_after is not None and mean_before is not None else None
     out = {
@@ -3797,6 +3851,7 @@ def compare_dates(
     caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"))
     if caveats:
         out["caveat"] = caveats
+    _notes_result(out, notes, stack_facts)
     return out
 
 
