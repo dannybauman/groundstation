@@ -5,18 +5,18 @@ description: Run, demo and operate groundstation without remembering a command. 
 
 # groundstation, operated
 
-Everything runs from the checkout that `~/.claude.json` `mcpServers.groundstation` points at (normally `~/Source/groundstation`). That is also the copy Claude launches as the MCP server. Do the thing, then say where the output is. Never hand the user these commands to type.
+Everything runs from groundstation's own folder, the one Claude launches the MCP server from: a checkout (normally `~/Source/groundstation`, the one `~/.claude.json` `mcpServers.groundstation` points at) or, for a store install, the plugin's install folder, which is 2 levels above this skill file. Do the thing, then say where the output is. Never hand the user these commands to type.
 
 ## The first reply
 
-A bare `/groundstation`, or the Astrolabe card's press, often arrives with nothing specific: no place, no question, no problem. Then the first reply is one short message that opens 2 doors, and waits:
+A bare `/groundstation` often arrives with nothing specific: no place, no question, no problem. Then the first reply is 1 short message that opens 2 doors, and waits:
 
 - Tell me what you want from Earth data: a place, a question, a problem you are chasing (a flood you heard about, a field you manage, a city you are moving to). We start there.
-- Or let me run a field test first: 3 real prompts against live satellite data, each answered with the numbers, the caveats and a map, as one page I open for you. About 5 minutes. It is the fastest way to see what these tools can do and what they refuse to claim.
+- Or let me run a field test first: 3 real prompts against live satellite data, each answered with the numbers, the caveats and a map, as 1 page I open for you. About 5 to 10 minutes. It is the fastest way to see what these tools can do and what they refuse to claim.
 
-A returning member gets the same 2 doors plus one line on the newest page they already have (`docs/field-test*.html` or `demo/`). When the ask already names something specific (a place, a question, "is it running", "demo", "brief me on"), there is no offer: do that thing.
+The Astrolabe card's first press goes to the earth-data skill, which opens with these same 2 doors; its second press asks for the doctor, which is specific. A returning member gets the same 2 doors plus 1 line on the newest page in `groundstation/` under the folder the chat works in, if there is one. When the ask already names something specific (a place, a question, "is it running", "demo", "brief me on"), there is no offer: do that thing.
 
-On a yes to the field test: 3 prompts around a place they named, or with none, the place `active_events` puts in the news this week. Run them honestly through the earth-data skill (`returned` is verbatim tool output, `answer` is our reading, every caveat kept), write the cases to `groundstation/field-test-<date>.cases.json` under the folder the chat works in (artifacts beside it in `img/`), build the page with `uv run scripts/field_test.py <that file>` from the groundstation checkout, open it, and end by asking which of the 3 they want to go deeper on.
+On a yes to the field test: 3 prompts around a place they named, or with none, a live event `active_events` lists this week. Run them honestly through the earth-data skill (`returned` is verbatim tool output, `answer` is our reading, every caveat kept). The map tools write only inside groundstation's own folder (`demo/`), so copy each map they return into `groundstation/img/` under the folder the chat works in and point the card's `artifact` at `img/<file>.html`. Write the cases to `groundstation/field-test-<date>.cases.json` there, in the shape of any `docs/*.cases.json` in groundstation's folder (`title`, `heading`, `sub`, `lede`, then `rounds`, each a `name` plus `cases` of `tag`, `prompt`, `answer`, `returned`, `artifact`). Build the page with `uv run --directory <groundstation's own folder> scripts/field_test.py "<absolute path to the cases file>"`. It lands beside the cases file as `field-test-<date>.html`, with a still of each map. Lines starting `[!]` are maintainer checks on versions and do not stop the page; mention one only if it names a stale server. Open the page and end by asking which of the 3 they want to go deeper on.
 
 ## Which door
 

@@ -25,7 +25,7 @@ The value here is the groundstation tools. If they aren't visible yet, the serve
 
 ## Nothing specific yet
 
-When the ask names no place and no question (a bare press of the Astrolabe card, "show me what this can do"), do not pick a place for them. Open the way the groundstation skill's "The first reply" says: one short message that asks what they want from Earth data and, in the same breath, offers to run a 3-prompt field test as a first show, then wait. Anything that names a place or a question skips the offer and starts the flow below.
+When the ask names no place and no question (the Astrolabe card's first press, which says "ask me which place to look at", or "show me what this can do"), do not pick a place for them. Open the way the groundstation skill's "The first reply" says: 1 short message that asks what they want from Earth data and, in the same breath, offers to run a 3-prompt field test as a first show, then wait. Anything that names a place or a question skips the offer and starts the flow below.
 
 ## The standard flow
 
