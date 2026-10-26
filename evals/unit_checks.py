@@ -1172,20 +1172,25 @@ def t_ndvi_change_baseline_prefers_coverage():
     saved = (tools.search_imagery, tools.compute_statistics)
     box = [0, 0, 1, 1]
     best = {"id": "S2A_10TFK_20260601_0_L2A", "collection": "sentinel-2-l2a", "datetime": "2026-06-01T18:00:00Z",
-            "cloud_cover": 3.0, "bbox": box, "covers_aoi_pct": 100.0}
+            "cloud_cover": 3.0, "bbox": [-1, -1, 2, 2], "covers_aoi_pct": 100.0}
+    seen = []
 
     def cand(i, d, cloud, bb):
         return {"id": i, "collection": "sentinel-2-l2a", "datetime": d + "T18:00:00Z", "cloud_cover": cloud, "bbox": bb}
 
     items = [cand("S2A_10TFK_20260501_0_L2A", "2026-05-01", 0.0, [0, 0, 0.02, 0.02]),
              cand("S2B_10TFK_20260503_0_L2A", "2026-05-03", 20.0, box)]
-    tools.search_imagery = lambda *a, **kw: {"items": items}
+    tools.search_imagery = lambda *a, **kw: seen.append(kw["bbox"]) or {"items": items}
     tools.compute_statistics = lambda cat, coll, iid, **kw: {"nd": {"mean": 0.5}}
     try:
-        out = brief.ndvi_change(best, dt.date(2026, 6, 10), 14)
+        out = brief.ndvi_change(best, box, dt.date(2026, 6, 10), 14)
+        assert seen == [box], seen  # ranked over the AOI, so both covers_aoi_pct mean the same area
         assert out["baseline"]["scene"] == "S2B_10TFK_20260503_0_L2A", out
         assert out["baseline"]["cloud"] == 20.0 and round(out["baseline"]["covers_aoi_pct"]) == 100
         assert out["current"]["cloud"] == 3.0 and out["current"]["covers_aoi_pct"] == 100.0
+        assert out["caveats"] == [], out
+        out = brief.ndvi_change({**best, "covers_aoi_pct": 47.6}, box, dt.date(2026, 6, 10), 14)
+        assert len(out["caveats"]) == 1 and "48%" in out["caveats"][0] and "100%" in out["caveats"][0], out
     finally:
         tools.search_imagery, tools.compute_statistics = saved
 
