@@ -1051,6 +1051,36 @@ Quiet day, alert level CALM as of 2026-07-09.
 """
 
 
+def t_events_empty_is_all_clear_only_if_every_source_answered():
+    saved = tools._get_json
+    try:
+        def gdacs_down(url, **kw):
+            if "gdacs" in url:
+                raise TimeoutError("timed out")
+            return {"events": []}
+        tools._get_json = gdacs_down
+        ev = tools.active_events(bbox=[-95.9, 29.5, -94.9, 30.2])
+        assert ev["all_clear"] is False and ev["sources"]["gdacs"]["ok"] is False, ev
+        assert ev["sources"]["eonet"]["ok"] is True and ev["sources"]["eonet"]["listed"] == 0
+        assert "GDACS did not answer" in ev["all_clear_note"], ev["all_clear_note"]
+        sig = tools._conditions_signals({}, {}, ev)
+        assert "no events from EONET; GDACS did not answer" in sig, sig
+        tools._get_json = lambda url, **kw: {"events": [], "features": []}
+        ev = tools.active_events(bbox=[-95.9, 29.5, -94.9, 30.2])
+        assert ev["all_clear"] is True and ev["sources"]["gdacs"]["listed"] == 0, ev
+    finally:
+        tools._get_json = saved
+
+
+def t_brief_calm_over_failed_source_becomes_watch():
+    md = "## TL;DR\nCALM. Nothing to report.\n\n## What changed\nNone."
+    down = {"events": {"sources": {"eonet": {"ok": True}, "gdacs": {"ok": False}}}}
+    out = brief._ensure_source_honesty(md, down)
+    assert "WATCH — GDACS did not answer; CALM is unconfirmed" in out and "Nothing to report." in out, out
+    assert brief._ensure_source_honesty(md, {"events": {"sources": {"gdacs": {"ok": True}}}}) == md
+    assert brief._ensure_source_honesty(md, {"weather_error": "x"}).count("WATCH") == 1
+
+
 def t_brief_checks_pass():
     problems = _fixture(GOOD_MD, events=[{"title": "Wildfire NAVARRE COULEE, Chelan, Washington"}])
     assert problems == [], problems
