@@ -240,10 +240,15 @@ def last_days_window(days: int, end_days_ago: int = 0) -> str:
 
 
 def pick_best_scene(items: list[dict[str, Any]], aoi_bbox: list[float]) -> dict[str, Any] | None:
-    """Best scene = covers the AOI, then low cloud — a clear sliver must not win."""
+    """The one rule (_scene_key): coverage first, then low cloud, then id — a clear sliver must not win."""
     if not items:
         return None
-    return max(items, key=lambda i: _coverage(i, aoi_bbox) - (i.get("cloud_cover") or 100) / 200)
+    return min(_with_coverage(items, aoi_bbox), key=_scene_key)
+
+
+def _with_coverage(items: list[dict[str, Any]], aoi_bbox: list[float]) -> list[dict[str, Any]]:
+    """Copies of items with covers_aoi_pct filled from the bbox where search_imagery did not"""
+    return [i if i.get("covers_aoi_pct") is not None else {**i, "covers_aoi_pct": _coverage(i, aoi_bbox) * 100} for i in items]
 
 
 def _coverage(item: dict[str, Any], aoi_bbox: list[float]) -> float:
