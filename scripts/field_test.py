@@ -240,7 +240,9 @@ def _autoshoot(case: dict, cases_path: Path) -> None:
 
 
 def build(cases_path: str | Path) -> Path:
-    cases_path = Path(cases_path)
+    # _autoshoot resolves the artifact, so the cases folder must be resolved too:
+    # on macOS /tmp is /private/tmp and the still's relpath climbs to / otherwise
+    cases_path = Path(cases_path).resolve()
     _preflight_server_freshness()
     _preflight_version_bumped()
     spec = json.loads(cases_path.read_text(encoding="utf-8"))
