@@ -1802,6 +1802,8 @@ def compute_statistics(
     The numbers are physical by default: the item's own raster:bands scale and offset
     are applied (Sentinel-2 comes back as reflectance, 0 to 1, and an expression is
     computed on the corrected bands, so an index is not biased by the post-2022 offset).
+    Earth Search's post-2022 pixels already have the offset taken out (earthsearch:boa_offset_applied),
+    so only the scale is applied there; Planetary Computer items carry no raster:bands, so nothing is.
     scaling_applied: true and band_scaling (the factors used) say so. apply_scaling=False
     is the raw escape hatch: raw digital numbers, with scaling_note naming the factors
     that were not applied.
@@ -1832,11 +1834,14 @@ def compute_statistics(
         item = _get_json(item_url)
     except Exception:
         item = None
+    # earth-search already took the -1000 out of post-2022 Sentinel-2 pixels yet still declares offset -0.1;
+    # applying it again put half of an August cropland scene below zero (red median 926 DN here, 1930 on PC)
+    offset_in_pixels = bool(item and (item.get("properties") or {}).get("earthsearch:boa_offset_applied"))
     factors: dict[str, tuple[float, float]] = {}
     if apply_scaling and item:
         for key, a in item.get("assets", {}).items():
             b0 = (a.get("raster:bands") or [{}])[0]
-            sc, off = b0.get("scale") or 1, b0.get("offset") or 0
+            sc, off = b0.get("scale") or 1, 0 if offset_in_pixels else b0.get("offset") or 0
             if (sc, off) != (1, 0):
                 factors[key] = (sc, off)
     params: list[tuple[str, str]] = [("max_size", "512")]
@@ -1846,11 +1851,11 @@ def compute_statistics(
             raw_expression = expression
             # the offset does not cancel in a ratio, so each band is corrected before the index is computed
             # fixed-point numbers only: 1e-05 would read as the identifier "e" to the band parser
-            # a negative offset leaves dark pixels below zero, where a ratio goes infinite and the mean comes back null
             def _corrected(m: re.Match) -> str:
-                sc, off = factors.get(m[0], (1, 0))
-                x = f"({m[0]}*{sc:.12f}{off:+.12f})"
-                return m[0] if m[0] not in factors else f"where({x}<0,0,{x})" if off < 0 else x
+                if m[0] not in factors:
+                    return m[0]
+                sc, off = factors[m[0]]
+                return f"({m[0]}*{sc:.12f}{off:+.12f})"
             expression = re.sub(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", _corrected, expression)
             corrected = expression != raw_expression
         if backend == "pc":  # PC accepts named-asset expressions directly
@@ -1968,6 +1973,8 @@ def compute_statistics(
             for band in a.get("raster:bands", []) or []:
                 if band.get("scale") is not None or band.get("offset") is not None:
                     g = {k: band[k] for k in ("scale", "offset", "unit") if k in band}
+                    if offset_in_pixels and g.get("offset"):
+                        g["declared_offset"], g["offset"] = g["offset"], 0
                     groups.setdefault(tuple(sorted(g.items())), {**g, "bands": []})["bands"].append(key)
         if groups:
             out["band_scaling"] = list(groups.values())
@@ -1978,6 +1985,7 @@ def compute_statistics(
                     f"values are raw digital numbers: the item's raster:bands give scale {g.get('scale')} "
                     f"and offset {g.get('offset')} on {len(g['bands'])} bands (physical = raw * scale + offset), "
                     "and nothing here applies them; with an expression a non-zero offset shifts the index too"
+                    + (f" (the declared offset {g['declared_offset']} is already in the pixels)" if "declared_offset" in g else "")
                 )
     except Exception:
         pass

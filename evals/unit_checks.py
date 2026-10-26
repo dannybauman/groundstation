@@ -1862,8 +1862,7 @@ def t_statistics_raw_path_keeps_the_scaling_note():
 def t_expression_bands_are_corrected_before_the_index():
     _, params = _scaled_stats(_S2_ITEM, expression="(nir-red)/(nir+red)")
     e = params["expression"]
-    assert e.count("*0.000100000000-0.100000000000)") == 8 and "where((b1*" in e and "where((b2*" in e, e
-    assert e.count("<0,0,") == 4, "a negative offset leaves dark pixels below zero, so they are floored"
+    assert e == "((b1*0.000100000000-0.100000000000)-(b2*0.000100000000-0.100000000000))/((b1*0.000100000000-0.100000000000)+(b2*0.000100000000-0.100000000000))", e
     # factor-less bands are left as written
     plain = {"bbox": [0, 0, 1, 1], "assets": {k: {"raster:bands": [{"scale": 1.0}]} for k in ("nir", "red")}}
     out, params = _scaled_stats(plain, expression="(nir-red)/(nir+red)")
@@ -1871,6 +1870,18 @@ def t_expression_bands_are_corrected_before_the_index():
     assert "scaling_applied" not in out, out
     _, params = _scaled_stats(_S2_ITEM, expression="(nir-red)/(nir+red)", apply_scaling=False)
     assert params["expression"] == "(b1-b2)/(b1+b2)", "the raw path sends the expression as written"
+
+
+def t_earth_search_offset_already_in_the_pixels_is_not_applied_twice():
+    # stop 23 review: S2A_15SXS_20230818 red median is 926 DN on earth-search, 1930 on PC; the -1000 is already gone
+    item = {**_S2_ITEM, "properties": {"earthsearch:boa_offset_applied": True}}
+    out, _ = _scaled_stats(item, assets=["green"])
+    assert abs(out["green"]["mean"] - 0.2) < 1e-9 and abs(out["green"]["min"] - 0.1) < 1e-9, out["green"]
+    assert out["band_scaling"][0]["offset"] == 0 and out["band_scaling"][0]["declared_offset"] == -0.1, out["band_scaling"]
+    _, params = _scaled_stats(item, expression="(nir-red)/(nir+red)")
+    assert "-0.1" not in params["expression"] and "where" not in params["expression"], params
+    out, _ = _scaled_stats(item, assets=["green"], apply_scaling=False)
+    assert "already in the pixels" in out["scaling_note"], out
 
 
 def t_nominatim_fallback_says_what_it_matched():
