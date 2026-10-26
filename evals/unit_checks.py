@@ -211,9 +211,13 @@ def t_next_pass_pure_helpers():
     assert tools._pass_minima([300, 200, 300], 145) == []
     # plateau at the minimum still counts once (<= left, < right)
     assert tools._pass_minima([300, 50, 50, 300], 145) == [2]
-    # local solar time: UTC 19:00 at 120W is 11:00 — a daytime optical pass
-    assert abs(tools._local_solar_hour(19.0, -120) - 11.0) < 0.01
-    assert abs(tools._local_solar_hour(2.0, 140) - 11.33) < 0.34
+    # sun elevation (NOAA approximation, about 1 degree)
+    U = dt.timezone.utc
+    sun = tools._sun_elevation_deg
+    assert sun(dt.datetime(2026, 3, 20, 12, 0, tzinfo=U), 0, 0) > 85
+    assert abs(sun(dt.datetime(2026, 6, 21, 12, 0, tzinfo=U), 0, 0) - 66.5) < 1.5
+    assert sun(dt.datetime(2026, 10, 26, 12, 29, tzinfo=U), 78.22, 15.65) < 0  # Longyearbyen, polar night
+    assert 30 < sun(dt.datetime(2026, 10, 28, 19, 13, tzinfo=U), 38.82, -123.19) < 40
 
 
 def t_coverage_note_names_the_hole():
