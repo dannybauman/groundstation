@@ -1488,7 +1488,8 @@ def compute_statistics(
     """Compute pixel statistics (min/max/mean/std/percentiles) for a STAC item.
 
     Same shape clipped or not: {band_or_expression: {min, max, mean, std, ...}},
-    plus clipped_to when an AOI was applied and extent_note when it was not.
+    plus clipped_to when an AOI was applied and extent_note when it was not,
+    and scaling_note when the item's raster:bands carry a scale or offset (the numbers are raw).
 
     expression is band math over asset names, e.g. "(nir-red)/(nir+red)" for
     NDVI on Sentinel-2 (Earth Search asset names; Planetary Computer uses band
@@ -1611,12 +1612,22 @@ def compute_statistics(
         # teaching this tool any one collection's units (MODIS LST is
         # 0.02 K per DN — the caller cannot guess that from raw values).
         # Both paths: a clipped number in the wrong unit is still wrong
-        for a in item.get("assets", {}).values():
+        groups: dict[tuple, dict[str, Any]] = {}
+        for key, a in item.get("assets", {}).items():
             for band in a.get("raster:bands", []) or []:
                 if band.get("scale") is not None or band.get("offset") is not None:
-                    out.setdefault("band_scaling", []).append(
-                        {k: band[k] for k in ("name", "scale", "offset", "unit") if k in band}
-                    )
+                    g = {k: band[k] for k in ("scale", "offset", "unit") if k in band}
+                    groups.setdefault(tuple(sorted(g.items())), {**g, "bands": []})["bands"].append(key)
+        if groups:
+            out["band_scaling"] = list(groups.values())
+            raw = [g for g in groups.values() if g.get("scale") not in (None, 1) or g.get("offset") not in (None, 0)]
+            if raw:
+                g = max(raw, key=lambda g: len(g["bands"]))
+                out["scaling_note"] = (
+                    f"values are raw digital numbers: the item's raster:bands give scale {g.get('scale')} "
+                    f"and offset {g.get('offset')} on {len(g['bands'])} bands (physical = raw * scale + offset), "
+                    "and nothing here applies them; with an expression a non-zero offset shifts the index too"
+                )
     except Exception:
         pass
     return out
@@ -3338,7 +3349,7 @@ def compare_dates(
         try:
             # without the bbox the mean is the whole Sentinel-2 tile, not the place asked about
             s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox)
-            scope.update({k: s[k] for k in ("clipped_to", "extent_note") if k in s})
+            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_note") if k in s})
             return round(next(iter(s.values()))["mean"], 4)
         except Exception:
             return None
