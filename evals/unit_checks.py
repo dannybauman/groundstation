@@ -2083,6 +2083,42 @@ def t_write_archive_paging_get_merge():
         tools._client = saved_client
 
 
+def _stub_geocode_search(ambiguous):
+    cands = [dict(name="A", bbox=[0, 0, 1, 1], source="gazet", where="x"),
+             dict(name="B", bbox=[5, 5, 6, 6], source="gazet", where="y")]
+    g = dict(name="A", bbox=[0, 0, 1, 1], source="gazet", candidates=cands, ambiguous=ambiguous)
+    posts = []
+
+    class Resp:
+        status_code = 200
+        headers = {}
+        def raise_for_status(self): pass
+        def json(self): return dict(features=[], links=[])
+
+    class Client:
+        def post(self, url, **k):
+            posts.append(url)
+            return Resp()
+
+    saved = tools.geocode, tools._client
+    tools.geocode, tools._client = (lambda q: g), Client()
+    try:
+        return tools.search_imagery("earth-search", ["sentinel-2-l2a"], place="Somewhere"), posts
+    finally:
+        tools.geocode, tools._client = saved
+
+
+def t_ambiguous_geocode_refuses_place_tools():
+    out, posts = _stub_geocode_search(True)
+    assert "more than one place" in out["error"] and len(out["candidates"]) == 2, out
+    assert posts == [], "an ambiguous name must not reach the network"
+
+
+def t_unambiguous_geocode_runs_the_search():
+    out, posts = _stub_geocode_search(False)
+    assert "error" not in out and len(posts) == 1, out
+
+
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files

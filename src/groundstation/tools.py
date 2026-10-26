@@ -59,6 +59,8 @@ _gazet_skip_until = 0.0
 # miss: "Salinas Valley" came back as Salinas, Mexico at 0.9
 GAZET_URL = os.environ.get("GAZET_URL", "https://developmentseed-gazet.hf.space/api/search")
 GAZET_MIN_SIMILARITY = 0.95
+# ponytail: one margin for all geocoders; per-source margins if the live list below ever disagrees
+AMBIGUITY_MARGIN = 0.15
 GAZET_TIMEOUT_S = 10.0  # geocode is a hot path: a cold Space takes ~8s, a dead one must not hang the tool
 
 
@@ -66,11 +68,25 @@ def slugify(text: str, max_len: int = 60) -> str:
     return "".join(ch if ch.isalnum() else "-" for ch in text.lower())[:max_len].strip("-")
 
 
+def _ambiguous_error(place: str, g: dict[str, Any]) -> dict[str, Any]:
+    return dict(
+        error=f"{place!r} matches more than one place; pass a fuller name or a bbox",
+        candidates=g["candidates"],
+        geocode_note=g.get("geocode_note"),
+    )
+
+
+def _bboxes_overlap(a: list[float], b: list[float]) -> bool:
+    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
+
+
 def _resolve_bbox(place: str | None, bbox: list[float] | None) -> list[float] | dict[str, Any]:
     if bbox is None and place:
         g = geocode(place)
         if "error" in g:
             return g
+        if g.get("ambiguous"):
+            return _ambiguous_error(place, g)
         bbox = g["bbox"]
     if bbox is None:
         return {"error": "Provide bbox or place"}
@@ -279,8 +295,11 @@ def geocode(query: str) -> dict[str, Any]:
     and physical features with their real extent. Everything else (towns,
     landmarks, descriptive phrases) falls back to OSM Nominatim. Use concise
     names ("Barotse Floodplain", "Chelan County") rather than long phrases.
-    Returns {name, lat, lon, bbox: [w, s, e, n], source}, plus geocode_note
-    when several places match the name equally well and one was picked.
+    Returns {name, lat, lon, bbox: [w, s, e, n], source, candidates}, plus
+    geocode_note when several places match the name and one was picked.
+    candidates lists up to 4 {name, bbox, source, where}; ambiguous is true
+    when the top two are real contenders in different places, and the
+    place-taking tools then refuse the name until a fuller name or bbox is passed.
     """
     global _gazet_skip_until
     try:
@@ -327,6 +346,7 @@ def geocode(query: str) -> dict[str, Any]:
                 "bbox": [w, s, e, n],
                 "source": "gazet",
             }
+            cands = [dict(name=out["name"], bbox=[w, s, e, n], source="gazet", where=_at(h))]
             # Jaro-Winkler ties are real places sharing a name (Loja Province and
             # Loja Canton both score 1.0). Picking one silently is the geocoder
             # deciding for the caller, so say which and name the rest. Field test
@@ -339,6 +359,18 @@ def geocode(query: str) -> dict[str, Any]:
                     + ", ".join(f"{o.get('name')} ({_where(o)}) {_at(o)}" for o in ties[:3])
                     + ". Pass the fuller name if another was meant"
                 )
+                cands += [
+                    dict(name=f"{o.get('name')} ({_where(o)})", bbox=[float(x) for x in o["bbox"]],
+                         source="gazet", where=_at(o))
+                    for o in ties[:3]
+                ]
+                # ties share a similarity score, so each is a real contender. Any one
+                # elsewhere counts, not just the second: both top Portland hits are
+                # Oregon (urban centre and locality), Portland Maine is third
+                if any(not _bboxes_overlap(cands[0]["bbox"], c["bbox"]) for c in cands[1:]):
+                    out["ambiguous"] = True
+                    out["geocode_note"] += ". ambiguous: pass the fuller name or a bbox"
+            out["candidates"] = cands
             return out
     except httpx.HTTPError:
         _gazet_skip_until = time.time() + 300  # a slow or dead Space must not tax every geocode
@@ -390,12 +422,27 @@ def geocode(query: str) -> dict[str, Any]:
     mine = _short(r0.get("display_name", ""))
     others = list(dict.fromkeys(_short(r.get("display_name", "")) for r in results[1:]))
     others = [o for o in others if o != mine][:3]
-    if matched != query or others:
+    seen = {mine}
+    cands = [dict(name=out["name"], bbox=[w, s, e, n], source="nominatim", where=mine)]
+    for r in results[1:]:
+        sh = _short(r.get("display_name", ""))
+        if sh in seen or len(cands) == 4:
+            continue
+        seen.add(sh)
+        bb = [float(x) for x in r["boundingbox"]]
+        cands.append(dict(name=r.get("display_name", sh), bbox=[bb[2], bb[0], bb[3], bb[1]],
+                          source="nominatim", where=sh))
+        if len(cands) == 2:
+            contender = abs(float(r0.get("importance") or 0) - float(r.get("importance") or 0)) <= AMBIGUITY_MARGIN
+            out["ambiguous"] = contender and not _bboxes_overlap(cands[0]["bbox"], cands[1]["bbox"])
+    out["candidates"] = cands
+    if matched != query or others or out.get("ambiguous"):
         out["geocode_note"] = (
             f"matched {matched!r}"
             + (f" after simplifying {query!r}" if matched != query else "")
             + (f"; other places share it: {' / '.join(others)}" if others else "")
             + ". Pass a state or country if another was meant"
+            + (". ambiguous: pass the fuller name or a bbox" if out.get("ambiguous") else "")
         )
     # Nominatim returns a NODE for peaks and landmarks, so the bbox collapses to
     # a point (Mount Rainier came back 0.0001 deg wide). A degenerate bbox makes
@@ -3039,6 +3086,8 @@ def compare_dates(
         g = geocode(place)
         if "error" in g:
             return g
+        if g.get("ambiguous"):
+            return _ambiguous_error(place, g)
         bbox, geocoded = g["bbox"], g["source"]  # the panel credits the geocoder that answered
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
