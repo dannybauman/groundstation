@@ -2334,6 +2334,8 @@ __BRAND__
   @media (max-width: 500px) { #panel { box-sizing: border-box; max-width: calc(100vw - 150px); } }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
     color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
+  /* no lift: notes, side labels and the scrubber share that corner and the attribution bar's height varies */
+  @media (max-width: 500px) { #credit { display: none; } }
   #mapL { position: absolute; inset: 0; z-index: 1; }
   #divider { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: var(--ink);
     z-index: 3; cursor: ew-resize; touch-action: none; }
@@ -2370,8 +2372,10 @@ const BBOX = __BBOX__;
 // watermark tiles under every artifact. OpenFreeMap needs no key and its
 // positron style is the same light look; raster layers stack on it unchanged
 const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
+// ponytail: on a phone the credit folds behind the (i) with the data credits after the first drag, and shows in clean screenshots there
+const PHONE_ATTRIB = innerWidth <= 500 ? { attributionControl: { customAttribution: document.getElementById("credit").textContent } } : {};
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
-  fitBoundsOptions: { padding: 40 } };
+  fitBoundsOptions: { padding: 40 }, ...PHONE_ATTRIB };
 
 // CloudFront on titiler.xyz caches the CORS header with the tile and does not
 // vary by origin, so the URL must differ per origin or a cached tile is refused
@@ -3358,6 +3362,8 @@ __BRAND__
   #panel button:disabled { background: var(--mid); cursor: default; }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
     color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
+  /* no lift: notes, side labels and the scrubber share that corner and the attribution bar's height varies */
+  @media (max-width: 500px) { #credit { display: none; } }
   .clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack,
   .clean .maplibregl-ctrl-top-right { display: none !important; }
 </style>
@@ -3383,8 +3389,10 @@ const CENTER = [(BBOX[0] + BBOX[2]) / 2, (BBOX[1] + BBOX[3]) / 2];
 const BOUNDS = [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]];
 let exaggeration = __EXAGGERATION__;
 
+// ponytail: on a phone the credit folds behind the (i) with the data credits after the first drag, and shows in clean screenshots there
+const PHONE_ATTRIB = innerWidth <= 500 ? { attributionControl: { customAttribution: document.getElementById("credit").textContent } } : {};
 const map = new maplibregl.Map({ container: "map", style: STYLE, bounds: BOUNDS,
-  fitBoundsOptions: { padding: 40 }, maxPitch: 85 });
+  fitBoundsOptions: { padding: 40 }, maxPitch: 85, ...PHONE_ATTRIB });
 window.gsMaps = [map];  // exposed for scripted screenshots and checks
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
 map.on("load", () => {
