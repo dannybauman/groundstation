@@ -29,12 +29,12 @@ The fix already existed in this codebase several times over. `next_pass` returns
 | `search_imagery` | ranking | `recommended` with a reason, `covers_aoi_pct` on every item, `read_note` on an item the tiler cannot read (never recommended, never in a coverage set) |
 | `compute_statistics` | mean and friends | `extent_note` when unclipped; `error` naming the cause when the scene has no readable pixels |
 | `compare_dates` | delta, delta_pct | `caveat` list: cloud on either scene, near-zero baseline |
-| `render_map`, `render_map_3d` | coverage_pct | `coverage_note` below `PARTIAL_COVERAGE_PCT`, or when no imagery layer exists |
+| `render_map`, `render_map_3d`, `render_postcard` | coverage_pct | `coverage_note` below `PARTIAL_COVERAGE_PCT` (maps also when no imagery layer exists), with `uncovered_pct` and `uncovered_side`; the same wedge sentence is printed on the postcard caption and the map and 3D subtitles |
 | `next_pass` | pass times | `note`: swath geometry from TLEs, a pass is a possible capture |
 | `conditions_brief` | signals | `note`: conditions from live sources, not a prediction |
 | `smoke_forecast` | smoke µg/m³, now and ahead | `caveat` list: model guidance not observation, 3 km grid, CONUS only, an earlier-than-asked frame, an empty reading |
 | `weather_summary` | none, passthrough | exempt; `elevation_note` only when the grid cell sits high |
-| `preview_item`, `tile_url_template`, `render_postcard`, `active_events`, `list_catalogs`, `describe_collection` | none | exempt, no derived number |
+| `preview_item`, `tile_url_template`, `active_events`, `list_catalogs`, `describe_collection` | none | exempt, no derived number |
 
 ## Consequences
 

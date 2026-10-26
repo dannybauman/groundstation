@@ -2233,7 +2233,7 @@ def t_geoparquet_archive_searches_like_a_catalog():
             assert [i["id"] for i in wrap["items"]] == ["w"]
             assert "'earth-search'" in out["archive"]["note"]
             noc = tools._recommend([{"id": "x", "cloud_cover": None, "covers_aoi_pct": 50.0, "datetime": "d"}, {"id": "y", "cloud_cover": 5.0, "covers_aoi_pct": 50.0, "datetime": "c"}])
-            assert noc["id"] == "x"  # a None cloud value must not crash the reason text
+            assert noc["id"] == "y" and isinstance(noc["reason"], str)  # a None cloud value must not crash the reason text, and reads as the worst
             err = tools.write_archive("earth-search", ["c"], bbox=[0, 0, 1, 1], out_path=str(Path(d) / "a.txt"))
             assert "error" in err and not (Path(d) / "a.txt").exists()
     finally:
@@ -2878,6 +2878,55 @@ def t_stack_facts_geocoded_is_the_tools_alone():
 
 def t_geocode_accent_strip_matches_zurich():
     assert tools._names_the_ask("Zürich", "Zurich") and not tools._names_the_ask("Le Moule", "Portland")
+
+
+def t_one_scene_key_in_recommended():
+    # Casco Bay: a 100% scene at 23% cloud and a newer 68% scene at 5%. Coverage is outside the
+    # tie band of the 100% one, so the key decides, not recency
+    full = {"id": "full", "datetime": "2026-10-10T15:00:00Z", "cloud_cover": 23.0, "covers_aoi_pct": 100.0}
+    part = {"id": "part", "datetime": "2026-10-21T15:00:00Z", "cloud_cover": 5.0, "covers_aoi_pct": 68.0}
+    assert tools._recommend([part, full])["id"] == "full"
+    # inside the tie bands and the recency band, _scene_key picks: the newer scene is no better on it
+    a = {"id": "a", "datetime": "2026-10-10T15:00:00Z", "cloud_cover": 6.0, "covers_aoi_pct": 99.0}
+    b = {"id": "b", "datetime": "2026-10-13T15:00:00Z", "cloud_cover": 3.0, "covers_aoi_pct": 97.0}
+    rec = tools._recommend([a, b])
+    assert rec["id"] == "a" and "and newest of" not in rec["reason"] and "best on coverage, then cloud, of 2 near-equal scenes within 7 days of the newest" in rec["reason"], rec
+    # outside the recency band the newer look still wins the tie, as stop 8 set it
+    c = {**b, "id": "c", "datetime": "2026-10-25T15:00:00Z"}
+    rec = tools._recommend([a, c])
+    assert rec["id"] == "c", rec
+    # an archive with no cloud figures: a dead tie keeps the newest, not the id as text
+    old = {"id": "a", "datetime": "2026-10-10T15:00:00Z", "cloud_cover": None, "covers_aoi_pct": 90.0}
+    new = {"id": "z", "datetime": "2026-10-12T15:00:00Z", "cloud_cover": None, "covers_aoi_pct": 90.0}
+    assert tools._recommend([old, new])["id"] == "z"
+
+
+def t_postcard_prints_the_uncovered_wedge_on_the_card():
+    saved = tools._client.get, tools._get_json
+    tools._client.get = lambda url, **k: _ImgResp(200)
+    tools._get_json = lambda url, **k: {"bbox": [-71, 43, -69, 44.5], "geometry": _SLANT, "license": "x"}
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            p = str(Path(d) / "c.html")
+            out = tools.render_postcard("planetary-computer", "landsat-c2-l2", "I", "P", "2026-10-21",
+                                        caption="Casco Bay", out_path=p, bbox=_CASCO)
+            html = Path(p).read_text()
+    finally:
+        tools._client.get, tools._get_json = saved
+    want = f"{out['uncovered_pct']:.1f}% of the box uncovered, mostly {out['uncovered_side']}"
+    assert want in html and "Casco Bay" in html, (want, out)
+
+
+def t_map_subtitle_prints_the_uncovered_wedge():
+    lay = [{"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 4]}]
+    with tempfile.TemporaryDirectory() as d:
+        p = str(Path(d) / "m.html")
+        out = tools.render_map("t", [0, 0, 10, 10], lay, subtitle="hello", out_path=p)
+        html = Path(p).read_text()
+        assert f"{out['state']['uncovered_pct']:.1f}% of the box uncovered, mostly north" in html and "hello" in html, out
+        full = [{**lay[0], "bounds": [0, 0, 10, 10]}]
+        tools.render_map("t", [0, 0, 10, 10], full, out_path=p)
+        assert "uncovered" not in Path(p).read_text()
 
 
 def t_versions_agree():

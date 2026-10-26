@@ -349,6 +349,14 @@ def _uncovered_side(aoi: list[float], shapes: list[Any]) -> tuple[float, str]:
     return round(100.0 * cnt / COVER_GRID**2, 1), where
 
 
+def _with_wedge(text: str, unc: tuple[float, str] | None) -> str:
+    """Append the uncovered-wedge sentence to a card caption or map subtitle, so the
+    reader of the artifact sees what the result's uncovered_pct says"""
+    if not unc or not unc[0]:
+        return text
+    return " · ".join(x for x in (text, f"{unc[0]:.1f}% of the box uncovered, mostly {unc[1]}") if x)
+
+
 def _item_shape(it: dict[str, Any]) -> Any:
     """The scene's footprint polygon when the catalog gave one, else its bbox."""
     return it.get("footprint") or it.get("bbox")
@@ -1347,9 +1355,11 @@ def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float
 RECOMMEND_MAX_CLOUD = 30.0  # above this a scene is only recommended when nothing cleaner exists
 # Field test No.8: a strict max on coverage took a 49.7% scene at 19% cloud over a
 # 48.9% scene at 0.6%, and a strict min on cloud took a 25-day-older scene for 0.4
-# points. Within these bands the axes are a tie and the newest scene wins
+# points. Within these bands the axes are a tie; a recency band then keeps the
+# scenes that are one look, and _scene_key (newest on a dead tie) picks among them
 RECOMMEND_COVERAGE_TIE = 5.0
 RECOMMEND_CLOUD_TIE = 5.0
+RECOMMEND_RECENCY_DAYS = 7  # scenes this close to the newest near-equal one are the same look; _scene_key picks among them
 
 
 def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -1372,7 +1382,23 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     least = min((cloud(it) for it in near if cloud(it) is not None), default=None)
     if least is not None:
         near = [it for it in near if cloud(it) is None or cloud(it) <= least + RECOMMEND_CLOUD_TIE]
-    best = max(near, key=lambda it: (it.get("datetime") or "", cov(it), -(cloud(it) or 0.0), it["id"]))
+    def day(it: dict[str, Any]) -> dt.date | None:
+        try:
+            return dt.date.fromisoformat((it.get("datetime") or "")[:10])
+        except ValueError:
+            return None
+
+    days = [d for d in map(day, near) if d]
+    band = [it for it in near if not days or (day(it) or dt.date.min) >= max(days) - dt.timedelta(days=RECOMMEND_RECENCY_DAYS)]
+    band.sort(key=lambda it: it.get("datetime") or "", reverse=True)
+    # newest first, and min keeps the first of equal keys, so a dead tie (an archive with no cloud
+    # figures) goes to the newest instead of falling to the id as text
+    best = min(band, key=lambda it: _scene_key(it)[:2])
+    is_newest = not days or day(best) == max(days)
+    pick = (
+        f"newest of {len(near)} near-equal scenes" if is_newest
+        else f"best on coverage, then cloud, of {len(band)} near-equal scenes within {RECOMMEND_RECENCY_DAYS} days of the newest"
+    )
     with_cloud = [it for it in items if cloud(it) is not None]
     clearest = min(with_cloud, key=lambda it: cloud(it) or 0.0) if with_cloud else None
     bc = cloud(best)
@@ -1383,7 +1409,7 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     elif cov(clearest) >= cov(best) - RECOMMEND_COVERAGE_TIE and len(near) > 1:
         # the clearest scene is inside both tie bands, so freshness decided
         reason = (
-            f"{'no cloud figure' if bc is None else f'{bc:.1f}% cloud'}, covers {cov(best):.1f}% of the area, and newest of {len(near)} near-equal scenes; "
+            f"{'no cloud figure' if bc is None else f'{bc:.1f}% cloud'}, covers {cov(best):.1f}% of the area, and {pick}; "
             f"the clearest ({cloud(clearest):.1f}% cloud) is from {(clearest.get('datetime') or '')[:10]}"
         )
     else:
@@ -2946,6 +2972,10 @@ def render_map(
     legends = _legends_for(layers)
     first = next((l for l in layers if l.get("type") == "item"), None)
     stac_map_url = first and stac_map_link(first["catalog"], first["collection_id"], first["item_id"])
+    _boxes = [_layer_shape(l) for l in resolved if l.get("type") == "raster" and l.get("bounds")]
+    _cov = _union_coverage_pct(bbox, _boxes) if _boxes else None
+    _unc = _uncovered_side(bbox, _boxes) if _boxes and _cov < PARTIAL_COVERAGE_PCT else None
+    subtitle = _with_wedge(subtitle, _unc)
     html = (
         _fill(_MAP_TEMPLATE, {
             "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
@@ -2999,12 +3029,10 @@ def render_map(
             "no imagery layer on this map, so it renders as vectors on a blank background. "
             "Add a scene, or say plainly that none is available for this area"
         )
-    _boxes = [_layer_shape(l) for l in resolved if l.get("type") == "raster" and l.get("bounds")]
     if _boxes:
-        _cov = _union_coverage_pct(bbox, _boxes)
         out["state"]["coverage_pct"] = _cov
-        if _cov < PARTIAL_COVERAGE_PCT:
-            out["state"]["uncovered_pct"], out["state"]["uncovered_side"] = _uncovered_side(bbox, _boxes)
+        if _unc:
+            out["state"]["uncovered_pct"], out["state"]["uncovered_side"] = _unc
             out["coverage_note"] = (
                 f"layers cover {_cov:.0f}% of the requested view ({_hole_text(bbox, _boxes)}), so the rest renders blank. "
                 "Pass the whole full_coverage_set from search_imagery, or tighten bbox to what you have"
@@ -3329,6 +3357,10 @@ def render_map_3d(
         stack_html = _stack_chunk_for([resolved, *siblings, *extras], [layer, *sibling_specs, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True}, notes, bbox)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
+    _drape = [_layer_shape(resolved), *(_layer_shape(s) for s in siblings if s.get("bounds"))] if resolved.get("bounds") else []
+    _cov = _union_coverage_pct(bbox, _drape) if _drape else None
+    _unc = _uncovered_side(bbox, _drape) if _drape and _cov < PARTIAL_COVERAGE_PCT else None
+    subtitle = _with_wedge(subtitle, _unc)
     html = (
         _fill(_MAP3D_TEMPLATE, {
             "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
@@ -3363,11 +3395,9 @@ def render_map_3d(
     # area shows terrain with no imagery rather than blank. So report what the
     # viewer actually gets first, and what the button would add.
     if resolved.get("bounds"):
-        _drape = [_layer_shape(resolved), *(_layer_shape(s) for s in siblings if s.get("bounds"))]
-        _cov = _union_coverage_pct(bbox, _drape)
         out["state"]["coverage_pct"] = _cov
-        if _cov < PARTIAL_COVERAGE_PCT:
-            out["state"]["uncovered_pct"], out["state"]["uncovered_side"] = _uncovered_side(bbox, _drape)
+        if _unc:
+            out["state"]["uncovered_pct"], out["state"]["uncovered_side"] = _unc
             _extra_boxes = [_layer_shape(e) for e in extras if e.get("bounds")]
             if _extra_boxes:
                 _full = _union_coverage_pct(bbox, [*_drape, *_extra_boxes])
@@ -3714,6 +3744,13 @@ def render_postcard(
         if stack_html is None:
             stack_note = "stack listing skipped: docs/stack.md missing, malformed, or nothing to attribute"
     legends = _legends_for([], colormap_name)
+    used = [shapes[i] for i in ([item_id, *fill_item_ids] if mosaic_scenes else [item_id]) if i in shapes]
+    cov_pct = pct = where = None
+    if bbox is not None and used:
+        pct, where = _uncovered_side(bbox, used)
+        cov_pct = round(100.0 - pct, 1)
+        if cov_pct < PARTIAL_COVERAGE_PCT:
+            caption = _with_wedge(caption, (pct, where))
     html = _postcard_html(
         png, place, date, collection_id,
         _catalog_source(catalog, collection_id), caption, license_, stack_html,
@@ -3738,10 +3775,8 @@ def render_postcard(
         out["note"] = notes
     # the scene's footprint, not its bbox, decides what the frame holds: a slanted
     # swath edge leaves a nodata wedge inside a box the bbox says is covered
-    used = [shapes[i] for i in ([item_id, *fill_item_ids] if mosaic_scenes else [item_id]) if i in shapes]
-    if bbox is not None and used:
-        pct, where = _uncovered_side(bbox, used)
-        out["coverage_pct"] = round(100.0 - pct, 1)
+    if cov_pct is not None:
+        out["coverage_pct"] = cov_pct
         if out["coverage_pct"] < PARTIAL_COVERAGE_PCT:
             out["uncovered_pct"], out["uncovered_side"] = pct, where
             why = ""
@@ -4640,12 +4675,9 @@ def conditions_brief(
         items = img_res.get("items", [])
         latest_look = None
         if items:
-            # Find the newest item with cloud_cover <= 20.0, or fall back to lowest cloud
-            low_cloud_items = [it for it in items if it.get("cloud_cover") is not None and it["cloud_cover"] <= 20.0]
-            if low_cloud_items:
-                best_item = low_cloud_items[0]
-            else:
-                best_item = min(items, key=lambda it: it.get("cloud_cover") or 100.0)
+            # the pick search_imagery already made (coverage, cloud, recency band), else the same key over the window
+            rec_id = (img_res.get("recommended") or {}).get("id")
+            best_item = next((it for it in items if it["id"] == rec_id), None) or min(items, key=_scene_key)
 
             latest_look = {
                 "id": best_item["id"],
