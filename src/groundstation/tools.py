@@ -1794,7 +1794,7 @@ function addLayerTo(m, l, i) {
     m.on("click", id + "-fill", (e) => {
       const p = e.features[0].properties;
       new maplibregl.Popup().setLngLat(e.lngLat)
-        .setHTML("<b>" + esc(p.title || p.name || "") + "</b><br>" + (p.description || p.date || ""))
+        .setHTML("<b>" + esc(p.title || p.name || "") + "</b><br>" + esc(p.description || p.date || ""))
         .addTo(m);
     });
   }
@@ -2088,11 +2088,24 @@ def _artifact_path(out_path: str | None, prefix: str, title: str) -> str:
     if dest.is_symlink():
         raise ValueError("out_path is a symlink; refusing to write through it")
     # GROUNDSTATION_OUT is where the console writes; the cwd tree is where the
-    # field-test scripts write (docs/img). Either is fine, anything else is not
-    roots = [out_dir.resolve(), Path.cwd().resolve()]
+    # field-test scripts write (docs/img), and it counts only when cwd is a
+    # repository checkout: a server started from a home folder or / must not
+    # make the whole disk a legal destination
+    cwd = Path.cwd().resolve()
+    roots = [out_dir.resolve()] + ([cwd] if (cwd / ".git").exists() else [])
     if not any(dest.resolve().is_relative_to(r) for r in roots):
-        raise ValueError("out_path must sit under GROUNDSTATION_OUT or the working directory")
+        raise ValueError("out_path must sit under GROUNDSTATION_OUT or a repository checkout you are working in")
     return str(dest)
+
+
+def _write_artifact(path: str, html: str) -> None:
+    """Write through a temp file and rename, so a symlink swapped in after the
+    check cannot redirect the write (rename replaces the link, never follows it)."""
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
+    tmp.write_text(html, encoding="utf-8")
+    os.replace(tmp, dest)
 
 
 # standard card shapes (name -> height/width). A card is a deliberate
@@ -2336,7 +2349,7 @@ def _artifact_postcard(
         card_path = _artifact_path(postcard.get("out_path"), "postcard", postcard["place"])
     except ValueError as e:
         return None, f"postcard skipped: {e}"
-    Path(card_path).write_text(html, encoding="utf-8")
+    _write_artifact(card_path, html)
     return card_path, None
 
 
@@ -2432,7 +2445,7 @@ def render_map(
         out_path = _artifact_path(out_path, "map", title)
     except ValueError as e:
         return {"error": str(e)}
-    Path(out_path).write_text(html, encoding="utf-8")
+    _write_artifact(out_path, html)
     out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
     # The map's contents were previously legible only to a human opening the
     # file, so every rendering bug this repo has shipped was caught by eye and
@@ -2540,7 +2553,7 @@ def render_timelapse(
         out_path = _artifact_path(out_path, "timelapse", title)
     except ValueError as e:
         return {"error": str(e)}
-    Path(out_path).write_text(html, encoding="utf-8")
+    _write_artifact(out_path, html)
     return {
         "map_path": out_path,
         "frames": len(resolved),
@@ -2771,7 +2784,7 @@ def render_map_3d(
         out_path = _artifact_path(out_path, "map3d", title)
     except ValueError as e:
         return {"error": str(e)}
-    Path(out_path).write_text(html, encoding="utf-8")
+    _write_artifact(out_path, html)
     out = {"path": out_path, "title": title}
     # Same reasoning as render_map's state, with 3D's own facts: the vertical
     # stretch actually rendered (the template rounds it, so report the rounded
@@ -3129,7 +3142,7 @@ def render_postcard(
         out_path = _artifact_path(out_path, "postcard", f"{place}-{date}")
     except ValueError as e:
         return {"error": str(e)}
-    Path(out_path).write_text(html, encoding="utf-8")
+    _write_artifact(out_path, html)
     out = {"path": out_path}
     if mosaic_scenes:
         out["mosaic_scenes"] = mosaic_scenes
