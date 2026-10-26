@@ -101,10 +101,14 @@ const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 
+// CloudFront on titiler.xyz caches the CORS header with the tile and does not
+// vary by origin, so the URL must differ per origin or a cached tile is refused
+const originKey = (u) => u + (u.includes("?") ? "&" : "?") + "o=" + (location.origin === "null" ? "sandbox" : location.origin.replace(/[^a-z0-9]/gi, "").slice(-16));
+
 function addLayerTo(m, l, i) {
   const id = "layer" + i;
   if (l.type === "raster") {
-    m.addSource(id, { type: "raster", tiles: [l.tiles], tileSize: 256,
+    m.addSource(id, { type: "raster", tiles: [originKey(l.tiles)], tileSize: 256,
       ...(l.bounds ? { bounds: l.bounds } : {}) });
     m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": l.opacity ?? 1 } });
     if (l.fallback_tiles) {
@@ -116,7 +120,7 @@ function addLayerTo(m, l, i) {
         const s = e.error.status;
         if (s !== 429 && s !== 0 && s !== undefined) return console.error(e.error);
         swapped = true;
-        m.getSource(id).setTiles([l.fallback_tiles]);
+        m.getSource(id).setTiles([originKey(l.fallback_tiles)]);
         const lab = document.getElementById("lbl" + id);
         if (lab) lab.textContent += " (via raster.eoapi.dev)";
       });

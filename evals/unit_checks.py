@@ -350,6 +350,15 @@ def t_state_never_changes_the_file():
         assert r1["map_path"] != r2["map_path"]  # only the path differs
 
 
+def t_render_map_tiles_carry_origin_key():
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        tools.render_map("t", [0, 0, 1, 1], [{"type": "raster", "name": "A", "tiles": "https://x/{z}/{x}/{y}.png"}], out_path=out)
+        html = Path(out).read_text(encoding="utf-8")
+        assert "const originKey = (u) =>" in html
+        assert "tiles: [originKey(l.tiles)]" in html and "setTiles([originKey(l.fallback_tiles)])" in html
+
+
 def t_render_map_compare_mode():
     with tempfile.TemporaryDirectory() as d:
         out = str(Path(d) / "m.html")

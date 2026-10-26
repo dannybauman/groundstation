@@ -1702,10 +1702,14 @@ const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
   fitBoundsOptions: { padding: 40 } };
 
+// CloudFront on titiler.xyz caches the CORS header with the tile and does not
+// vary by origin, so the URL must differ per origin or a cached tile is refused
+const originKey = (u) => u + (u.includes("?") ? "&" : "?") + "o=" + (location.origin === "null" ? "sandbox" : location.origin.replace(/[^a-z0-9]/gi, "").slice(-16));
+
 function addLayerTo(m, l, i) {
   const id = "layer" + i;
   if (l.type === "raster") {
-    m.addSource(id, { type: "raster", tiles: [l.tiles], tileSize: 256,
+    m.addSource(id, { type: "raster", tiles: [originKey(l.tiles)], tileSize: 256,
       ...(l.bounds ? { bounds: l.bounds } : {}) });
     m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": l.opacity ?? 1 } });
     if (l.fallback_tiles) {
@@ -1717,7 +1721,7 @@ function addLayerTo(m, l, i) {
         const s = e.error.status;
         if (s !== 429 && s !== 0 && s !== undefined) return console.error(e.error);
         swapped = true;
-        m.getSource(id).setTiles([l.fallback_tiles]);
+        m.getSource(id).setTiles([originKey(l.fallback_tiles)]);
         const lab = document.getElementById("lbl" + id);
         if (lab) lab.textContent += " (via raster.eoapi.dev)";
       });
@@ -2389,7 +2393,7 @@ _EXTRA_CHUNK = """<button id="loadmore">Load full coverage (__N__ more)</button>
     btn.textContent = "Loading " + EXTRAS.length + " scene" + (EXTRAS.length > 1 ? "s" : "") + "…";
     EXTRAS.forEach((e, i) => {
       const id = "extra" + i;
-      map.addSource(id, { type: "raster", tiles: [e.tiles], tileSize: 256,
+      map.addSource(id, { type: "raster", tiles: [originKey(e.tiles)], tileSize: 256,
         ...(e.bounds ? { bounds: e.bounds } : {}) });
       // beneath the main drape: gap fillers must never cover the best scene
       map.addLayer({ id, type: "raster", source: id,
@@ -2451,6 +2455,10 @@ __EXTRA__
 __STACK__
 <script>
 const STYLE = __STYLE__;
+// CloudFront on titiler.xyz caches the CORS header with the tile and does not
+// vary by origin, so the URL must differ per origin or a cached tile is refused
+const originKey = (u) => u + (u.includes("?") ? "&" : "?") + "o=" + (location.origin === "null" ? "sandbox" : location.origin.replace(/[^a-z0-9]/gi, "").slice(-16));
+STYLE.sources.imagery.tiles = STYLE.sources.imagery.tiles.map(originKey);
 const BBOX = __BBOX__;
 const CENTER = [(BBOX[0] + BBOX[2]) / 2, (BBOX[1] + BBOX[3]) / 2];
 const BOUNDS = [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]];
