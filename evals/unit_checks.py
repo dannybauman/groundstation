@@ -2225,9 +2225,14 @@ def t_artifact_path_confined():
                     assert "error" in r and "map_path" not in r, (p, r)
                 assert not list(Path(elsewhere).iterdir())
             (Path(d) / "docs").mkdir()
+            # a plain cwd is not a root: only GROUNDSTATION_OUT counts until cwd is a checkout
+            r = tools.render_map("t", [0, 0, 1, 1], [main], out_path=str(Path(d) / "docs" / "no.html"))
+            assert "error" in r and not (Path(d) / "docs" / "no.html").exists(), r
+            (Path(d) / ".git").mkdir()
             for p in (Path(d) / "docs" / "ok.html", Path(out) / "ok.html"):
                 ok = tools.render_map("t", [0, 0, 1, 1], [main], out_path=str(p))
                 assert Path(ok["map_path"]).exists(), ok
+            assert not [f for f in (Path(d) / "docs").iterdir() if f.name.endswith(".tmp")]
         finally:
             os.chdir(old_cwd)
             os.environ["GROUNDSTATION_OUT"] = old_out
