@@ -211,6 +211,7 @@ def t_coverage_set_nameless_reads_collection_and_date():
         fcs = {"date": date, "items": [{"catalog": "planetary-computer", "collection": coll, "id": "T1", "bbox": [0, 0, 1, 1]}]}
         return [(l["name"], l["detail"]) for l in tools._expand_coverage_set({"type": "coverage_set", "set": fcs, **kw})]
     assert names("esa-worldcover", "2021-01-01") == [("ESA WorldCover 2021", "T1")]
+    assert names("esa-worldcover", "2020-01-01") == [("ESA WorldCover 2020", "T1")]
     assert names("esa-worldcover", "2021-01-01", name="Mine") == [("Mine", "T1")]
     assert names("sentinel-2-l2a", "2024-05-01") == [("sentinel-2-l2a 2024-05-01", "T1")]
 

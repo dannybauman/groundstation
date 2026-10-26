@@ -2591,8 +2591,8 @@ def _hole_text(aoi: list[float], shapes: list[Any]) -> str:
 
 
 def _dated_name(collection: str, date: str) -> str:
-    title = LEGENDS.get(collection, {}).get("title") or collection
-    return title if title.endswith(date[:4]) else f"{title} {date}"
+    t = LEGENDS.get(collection, {}).get("title") or ""
+    return f"{t[:-4]}{date[:4]}" if t[-4:].isdigit() else f"{t or collection} {date}"
 
 
 def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[str, Any]:
