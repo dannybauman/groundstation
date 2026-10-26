@@ -139,6 +139,7 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - speaks-to: STAC, Earth Search
 - link: https://github.com/stac-utils/rustac-py
 - when: catalog=geoparquet
+<!-- archive layers carry no catalog fact yet: this never fires until stack_facts names one -->
 
 ## stac-geoparquet
 - stage: catalog
@@ -149,6 +150,7 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - speaks-to: STAC, rustac
 - link: https://github.com/stac-utils/stac-geoparquet
 - when: catalog=geoparquet
+<!-- archive layers carry no catalog fact yet: this never fires until stack_facts names one -->
 
 ## stac-server
 - stage: catalog

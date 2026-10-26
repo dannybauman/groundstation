@@ -2,7 +2,7 @@
 
 Thirty prompts across three rounds were run through the real agent path (headless Claude + the groundstation MCP server + the earth-data skill) on 2026-07-09. **30/30 produced correct answers and working maps.** Each round's misses became fixes the same day — the field test is the product loop.
 
-There's a visual walkthrough of all twenty at [`field-test.html`](field-test.html) (serve the console and open `/docs/field-test.html`).
+There's a visual walkthrough of all thirty at [`field-test.html`](field-test.html) (serve the console and open `/docs/field-test.html`).
 
 ## Round 1: the core workflows
 
@@ -26,7 +26,7 @@ Deliberately different shapes — other spectral indices, global triage, claim v
 | # | Prompt (short) | What happened | What it demonstrates |
 |---|---|---|---|
 | 11 | Snow left in the North Cascades vs early May (NDSI) | Snow-covered fraction via the standard 0.4 threshold: 27.6% → 5.9% ("a 4.7× drop"), and explained May's lower valid-pixel share as terrain shadow from low sun angle | derived metrics, not just means |
-| 12 | Most severe disaster alerts worldwide right now | Found GDACS's only Red alert (Super Typhoon Bavi), mapped today's Sentinel-2 through the typhoon itself, demoted a chronic drought below fast-moving events | global triage without an AOI |
+| 12 | Most severe disaster alerts worldwide right now (2026-07-09) | Found GDACS's only Red alert (Super Typhoon Bavi), mapped today's Sentinel-2 through the typhoon itself, demoted a chronic drought below fast-moving events | global triage without an AOI |
 | 13 | Wadden Sea flats — what can one scene say about tide state? | Textbook honesty: flats were exposed at 11:06 UTC, but one scene has "no time derivative and no absolute datum" — named Rijkswaterstaat gauges as the missing reference | knowing the limits of the data |
 | 14 | Jakarta's coastline, 2019 vs now, with Landsat | Hit AccessDenied on earth-search's requester-pays Landsat bucket, recovered by switching to Planetary Computer's copy, then spotted the Tanjung Priok port expansion in the swipe | graceful failure + real change found |
 | 15 | Verify a client's "significant greening" claim near Ouarzazate | +0.008 NDVI spread uniformly across the whole distribution including bare rock, 98th percentile flat: "more consistent with interannual variability… the data don't support 'greened significantly'" | evidence-based claim verification |
@@ -36,7 +36,7 @@ Deliberately different shapes — other spectral indices, global triage, claim v
 | 19 | Burn severity for the Navarre Coulee fire (NBR) | Pre/post dNBR with the area-wide dilution explained, smoke-vs-cloud caveat, and "the burn may still be spreading past what this scene captures" | post-fire assessment, honestly caveated |
 | 20 | Same Munich scene in two catalogs — do they agree? | Exact agreement (0.606% cloud both), explained the differing ID conventions trace to the same ESA product | cross-catalog metadata trust |
 
-## Round 3: this month, and the map we hadn't touched
+## Round 3: this month (2026-07-09), and the map we hadn't touched
 
 New continents (South America, the Arctic, South Asia, the Sahel, the Caribbean), new sources (GOES geostationary, MODIS LST, JRC Global Surface Water, HREA), and July-2026 dynamics (Amazon clearing season, Greenland peak melt, Bangladesh monsoon, austral-winter snowpack, Baltic bloom season, early hurricane season). These runs also exercised the self-hosted tiler option end to end.
 

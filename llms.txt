@@ -23,4 +23,4 @@ A Development Seed labs prototype. Ask about any place on Earth and it finds fre
 ## Optional
 
 - [Plan, October 2026](https://github.com/dannybauman/groundstation/blob/main/docs/plan-2026-10-devseed-stack.md): what ships next
-- [Field test, September 2026](https://github.com/dannybauman/groundstation/blob/main/docs/field-test-2026-09-02.html): the latest showcase run
+- [Field test №10, October 2026](https://github.com/dannybauman/groundstation/blob/main/docs/field-test-2026-10-25-no10.html): the latest showcase run
