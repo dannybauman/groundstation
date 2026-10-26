@@ -2300,6 +2300,8 @@ __BRAND__
   #panel p { margin: 4px 0 8px; color: var(--mid); }
   #panel label { display: block; margin: 2px 0; cursor: pointer; }
   #panel summary { cursor: pointer; font-weight: 700; }
+  /* a timelapse never fills the toggles, and an empty fold is a heading over nothing */
+  #panel details:has(#toggles:empty) { display: none; }
   #panel small { display: block; margin-left: 22px; color: var(--mid); font-size: 11px; overflow-wrap: anywhere; }
   /* the STACK button sits top-right, so a phone panel stops short of it */
   @media (max-width: 500px) { #panel { box-sizing: border-box; max-width: calc(100vw - 150px); } }
@@ -2648,6 +2650,7 @@ def _layer_state(l: dict[str, Any], deferred: bool = False) -> dict[str, Any]:
     """
     return {
         "name": l.get("name"),
+        **({"detail": l["detail"]} if l.get("detail") else {}),
         "kind": l.get("type"),
         **({"bounds": l["bounds"]} if l.get("bounds") else {}),
         **({"tiles": l["tiles"]} if l.get("tiles") else {}),
@@ -3131,7 +3134,9 @@ def render_map(
     except ValueError as e:
         return {"error": str(e)}
     _write_artifact(out_path, html)
-    out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
+    # the scenes of one set share a name, so the caller's list carries the id too
+    label = lambda l: f'{l["name"]} · {l["detail"]}' if l.get("detail") else l["name"]
+    out = {"map_path": out_path, "layers": [label(l) for l in resolved]}
     # The map's contents were previously legible only to a human opening the
     # file, so every rendering bug this repo has shipped was caught by eye and
     # not by a check. `state` is the same thing the HTML was built from, in a
@@ -3152,7 +3157,7 @@ def render_map(
     if stack_note:
         out["note"] = stack_note
     _notes_result(out, notes, stack_facts, bbox)
-    fb = [l["name"] for l in resolved if l.get("pc_fallback")]
+    fb = [label(l) for l in resolved if l.get("pc_fallback")]
     if fb:
         out["note"] = (out["note"] + ". " if out.get("note") else "") + (
             f"Planetary Computer mosaic registration timed out for {', '.join(fb)}; item tiles are used "
