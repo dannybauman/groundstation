@@ -87,6 +87,15 @@ _FEATURE_KINDS = {
 }
 
 
+# a point candidate's half-width in km by kind. Nominatim pads its own place
+# nodes (a town node came back 0.08 deg), so city and town here are for a source that does not
+_KIND_HALF_KM = {
+    **dict.fromkeys(("bay", "marina", "harbour", "beach", "village", "hamlet", "mine", "pit"), 2.0),
+    **dict.fromkeys(("town", "volcano", "mountain", "peak", "lake", "reservoir", "water"), 5.0),
+    "city": 10.0,
+}
+
+
 _PHYSICAL_KINDS = set().union(*_FEATURE_KINDS.values())
 
 
@@ -111,6 +120,9 @@ def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
     both bonuses, the Shasta Lake reservoir at 0.34 beats the town at 0.44
     with them, and the Kilauea volcano at 0.48 clears the village at 0.35
     by more than AMBIGUITY_MARGIN without a feature word
+
+    extent_basis says where the box comes from: own, or for a point (extent
+    under POINT_DEG) kind when _KIND_HALF_KM sizes it, else default (the 0.3 deg square)
     """
     w, s, e, n = bbox
     width, height = e - w + (360 if e < w else 0), n - s  # west > east crosses the dateline
@@ -118,8 +130,10 @@ def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
     score = (importance or 0.0) + 0.03 * math.log10(max(km2, 1.0))
     if kind in _PHYSICAL_KINDS:
         score += 0.1 + (0.2 if kind in want else 0.0)
+    basis = "own" if max(width, height) >= POINT_DEG else "kind" if kind in _KIND_HALF_KM else "default"
     return dict(name=name, bbox=bbox, source=source, where=where, kind=kind,
-                extent=[round(width, 4), round(height, 4)], importance=importance, score=round(score, 3))
+                extent=[round(width, 4), round(height, 4)], importance=importance, score=round(score, 3),
+                extent_basis=basis)
 
 
 # the boxes geocode returned, with the source that answered, so a caller's stack_facts can claim a geocode
@@ -543,7 +557,10 @@ def geocode(query: str) -> dict[str, Any]:
     physical-feature kind, and a feature word in the query (lake, volcano,
     river, peak...) that names the candidate's kind. Lake, reservoir and water
     count as one kind. The top score is the result; its bbox is the
-    candidate's own however small, widened only when it is a point. ambiguous
+    candidate's own however small, widened only when it is a point: by
+    its kind's half-width (a bay 2 km, a town or volcano 5, a city 10),
+    or the 0.3 deg square when the kind is unknown. extent_basis on the result
+    and each candidate says which: own, kind or default. ambiguous
     is true when a candidate in another place scores within AMBIGUITY_MARGIN
     of the top; each candidate's where then names its state and country, and
     the place-taking tools refuse the name until a fuller name or bbox is passed.
@@ -711,12 +728,16 @@ def _settle(out: dict[str, Any], cands: list[dict[str, Any]]) -> bool:
     # a point (Mount Rainier came back 0.0001 deg wide). A degenerate bbox makes
     # a useless imagery search and an empty 3D scene, so widen it and say so. A
     # real extent stays however small: the Berkeley Pit is 0.024 by 0.013 deg
-    if max(top["extent"]) < POINT_DEG:
-        d = 0.15
-        out["bbox"] = [out["lon"] - d, out["lat"] - d, out["lon"] + d, out["lat"] + d]
+    out["extent_basis"] = top["extent_basis"]
+    if top["extent_basis"] != "own":
+        half_km = _KIND_HALF_KM.get(top["kind"]) if top["extent_basis"] == "kind" else None
+        dlat = half_km / 111.32 if half_km else 0.15
+        dlon = min(dlat / max(math.cos(math.radians(out["lat"])), 0.01), 180.0) if half_km else 0.15
+        out["bbox"] = [out["lon"] - dlon, max(out["lat"] - dlat, -90.0), out["lon"] + dlon, min(out["lat"] + dlat, 90.0)]
         out["bbox_note"] = (
-            "geocoder returned a point, not an extent — widened to a "
-            f"{2 * d:g} deg box around it. Pass your own bbox if the subject is bigger"
+            "geocoder returned a point, not an extent — widened to "
+            + (f"{2 * half_km:g} km across for a {top['kind']}" if half_km else "a 0.3 deg box")
+            + " around it. Pass your own bbox if the subject is bigger"
         )
     return ambiguous
 
@@ -2299,6 +2320,12 @@ __BRAND__
   #panel h1 { font: 700 15px/1.25 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 4px; }
   #panel p { margin: 4px 0 8px; color: var(--mid); }
   #panel label { display: block; margin: 2px 0; cursor: pointer; }
+  #panel summary { cursor: pointer; font-weight: 700; }
+  /* a timelapse never fills the toggles, and an empty fold is a heading over nothing */
+  #panel details:has(#toggles:empty) { display: none; }
+  #panel small { display: block; margin-left: 22px; color: var(--mid); font-size: 11px; overflow-wrap: anywhere; }
+  /* the STACK button sits top-right, so a phone panel stops short of it */
+  @media (max-width: 500px) { #panel { box-sizing: border-box; max-width: calc(100vw - 150px); } }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
     color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
   #mapL { position: absolute; inset: 0; z-index: 1; }
@@ -2324,11 +2351,12 @@ __BRAND__
 </head><body>
 <div id="map"></div>
 __TLBAR__
-<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div>__STACMAP__</div>
+<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><details class="fold" open><summary>Layers</summary><div id="toggles"></div></details>__STACMAP__</div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
 __STACK__
 __LEGEND__
 <script>
+if (innerWidth <= 500) document.querySelectorAll("#panel details").forEach(d => d.removeAttribute("open"));
 const esc = s => String(s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
 const LAYERS = __LAYERS__;
 const BBOX = __BBOX__;
@@ -2473,6 +2501,7 @@ if (COMPARE && rasters.length === 2) {
       const lab = document.createElement("span");
       lab.id = "lbl" + id; lab.textContent = " " + l.name;
       row.appendChild(cb); row.appendChild(lab);
+      if (l.detail) { const d = document.createElement("small"); d.textContent = l.detail; row.title = l.detail; row.appendChild(d); }
       toggles.appendChild(row);
     });
     window.gsPending--;
@@ -2591,6 +2620,7 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
     return {
         "type": "raster",
         "name": l.get("name") or l["item_id"],
+        **({"detail": l["detail"]} if l.get("detail") else {}),
         "tiles": tiles,
         "opacity": l.get("opacity", 1),
         **({"bounds": item_bounds} if item_bounds else {}),
@@ -2616,14 +2646,11 @@ def _expand_coverage_set(layer: dict[str, Any]) -> list[dict[str, Any]]:
     prefix = layer.get("name") or (layer.get("set") or {}).get("date") or "coverage"
     params = {k: layer[k] for k in ("assets", "expression", "colormap_name", "rescale", "opacity") if k in layer}
     out = []
-    tags = [it["id"].split("_")[1] if "_" in it["id"] else it["id"] for it in items]
-    # a collection whose ids share their second segment (WorldCover) would name every layer alike
-    if len(set(tags)) < len(tags):
-        tags = [it["id"] for it in items]
-    for it, tag in zip(items, tags):
+    for it in items:
         out.append({
             "type": "item",
-            "name": f"{prefix} · {tag}",
+            "name": prefix,
+            "detail": it["id"],
             "catalog": it["catalog"],
             "collection_id": it["collection"],
             "item_id": it["id"],
@@ -2644,6 +2671,7 @@ def _layer_state(l: dict[str, Any], deferred: bool = False) -> dict[str, Any]:
     """
     return {
         "name": l.get("name"),
+        **({"detail": l["detail"]} if l.get("detail") else {}),
         "kind": l.get("type"),
         **({"bounds": l["bounds"]} if l.get("bounds") else {}),
         **({"tiles": l["tiles"]} if l.get("tiles") else {}),
@@ -3127,7 +3155,9 @@ def render_map(
     except ValueError as e:
         return {"error": str(e)}
     _write_artifact(out_path, html)
-    out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
+    # the scenes of one set share a name, so the caller's list carries the id too
+    label = lambda l: f'{l["name"]} · {l["detail"]}' if l.get("detail") else l["name"]
+    out = {"map_path": out_path, "layers": [label(l) for l in resolved]}
     # The map's contents were previously legible only to a human opening the
     # file, so every rendering bug this repo has shipped was caught by eye and
     # not by a check. `state` is the same thing the HTML was built from, in a
@@ -3148,7 +3178,7 @@ def render_map(
     if stack_note:
         out["note"] = stack_note
     _notes_result(out, notes, stack_facts, bbox)
-    fb = [l["name"] for l in resolved if l.get("pc_fallback")]
+    fb = [label(l) for l in resolved if l.get("pc_fallback")]
     if fb:
         out["note"] = (out["note"] + ". " if out.get("note") else "") + (
             f"Planetary Computer mosaic registration timed out for {', '.join(fb)}; item tiles are used "
