@@ -476,7 +476,13 @@ def _pc_mosaic_id(collection_id: str, item_id: str) -> str:
             timeout=PC_REGISTER_TIMEOUT_S,
         )
         r.raise_for_status()
-        _pc_mosaic_cache[key] = r.json()["id"]
+        # the register reply carried "id" until 2026-10; it is "searchid" now
+        # (field test 16), and a missing key is the fallback's job, not a crash
+        j = r.json()
+        mid = j.get("searchid") or j.get("id")
+        if not mid:
+            raise httpx.HTTPError(f"mosaic register reply carries no id: {sorted(j)}")
+        _pc_mosaic_cache[key] = mid
     return _pc_mosaic_cache[key]
 
 
