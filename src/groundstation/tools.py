@@ -1728,7 +1728,7 @@ __BRAND__
     display: flex; align-items: center; justify-content: center; font: 13px system-ui; }
   .side-label { position: absolute; bottom: 52px; z-index: 2; background: rgba(247,244,239,.96); color: var(--ink);
     padding: 4px 11px; border-radius: 6px; font: 12px "Roboto", system-ui, sans-serif; box-shadow: 0 1px 5px rgba(0,0,0,.15); }
-  #tl { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 3;
+  #tl { position: absolute; bottom: 64px; left: 50%; transform: translateX(-50%); z-index: 3;
     display: flex; align-items: center; gap: 8px; background: rgba(247,244,239,.96); color: var(--ink);
     padding: 6px 12px; border-radius: 8px; font: 14px "Roboto", system-ui, sans-serif; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
   #tl button { font: inherit; color: inherit; background: none; border: 1px solid var(--mid); border-radius: 6px;
