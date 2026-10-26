@@ -1697,7 +1697,25 @@ def t_statistics_have_one_shape_clipped_or_not():
         tools._client.post, tools._get_json = saved_post, saved_json
     assert out["vv"]["percentile_98"] == 400.0 and "histogram" not in out["vv"], out
     assert out["clipped_to"] == [0.2, 0.2, 0.8, 0.8] and "extent_note" not in out, out
-    assert out["band_scaling"] == [{"scale": 1.0, "unit": "DN"}], "scaling travels on the clipped path too"
+    assert out["band_scaling"] == [{"scale": 1.0, "unit": "DN", "bands": ["vv"]}], "scaling travels on the clipped path too"
+    assert "scaling_note" not in out, "scale 1 offset 0 is not a caveat"
+
+
+def t_statistics_say_when_scale_and_offset_are_unapplied():
+    # Field test No.12: Sentinel-2 stats were raw DN and nothing said so in words.
+    feature = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
+               "properties": {"statistics": {"b1": {"min": 1.0, "max": 9.0, "mean": 5.0, "percentile_2": 2.0, "percentile_98": 8.0, "histogram": [1, 2]}}}}
+    band = [{"scale": 0.0001, "offset": -0.1}]
+    item = {"bbox": [0, 0, 1, 1], "assets": {k: {"raster:bands": band} for k in ("green", "swir16", "nir")}}
+    saved_post, saved_json = tools._client.post, tools._get_json
+    tools._client.post = lambda url, **kw: _FakeResp(feature)
+    tools._get_json = lambda url, **kw: item
+    try:
+        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "S2X", assets=["green"], bbox=[0.2, 0.2, 0.8, 0.8])
+    finally:
+        tools._client.post, tools._get_json = saved_post, saved_json
+    assert len(out["band_scaling"]) == 1 and len(out["band_scaling"][0]["bands"]) == 3, out["band_scaling"]
+    assert "0.0001" in out["scaling_note"] and "-0.1" in out["scaling_note"] and "3 bands" in out["scaling_note"], out
 
 
 def t_nominatim_fallback_says_what_it_matched():
