@@ -561,9 +561,11 @@ def t_compare_dates_clips_means_to_bbox():
         return {"nd": {"mean": 0.5}, "clipped_to": kw.get("bbox")}
 
     tools.compute_statistics = fake_stats
-    tools.render_map = lambda **kw: {"map_path": "x.html"}
+    maps = []
+    tools.render_map = lambda **kw: maps.append(kw) or {"map_path": "x.html"}
     try:
-        out = tools.compare_dates(bbox=box, window_before="a/b", window_after="c/d")
+        out = tools.compare_dates(bbox=box, window_before="a/b", window_after="c/d", stack_facts={"terrain": True})
+        assert maps[0]["stack_facts"] == {"geocoded": False, "terrain": True}, maps[0]["stack_facts"]
         assert seen == [box, box], seen
         assert out["clipped_to"] == box and "extent_note" not in out
     finally:
@@ -2113,7 +2115,9 @@ def t_write_archive_paging_get_merge():
     try:
         with tempfile.TemporaryDirectory() as d:
             out_p = str(Path(d) / "paged.parquet")
-            res = tools.write_archive("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1], out_path=out_p, limit=5)
+            res = tools.write_archive("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1], out_path=out_p, limit=5, max_cloud_cover=20)
+            assert calls[0][2]["query"] == {"eo:cloud_cover": {"lte": 20}}
+            assert res["written"] == dt.datetime.now(dt.timezone.utc).date().isoformat()
             assert res["count"] == 2
             assert Path(out_p).exists()
             assert len(calls) == 2
@@ -2236,6 +2240,14 @@ def t_artifact_path_confined():
         finally:
             os.chdir(old_cwd)
             os.environ["GROUNDSTATION_OUT"] = old_out
+
+
+def t_zarr_tile_time_outside_range_refused():
+    # field test 12 card 4: a 2026 ask was served 2023 data without a word
+    out = tools.tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel={"time": "2026-10-25T12:00"})
+    assert "outside" in out and "2023-01-10" in out and "{z}" not in out, out
+    ok = tools.tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel={"time": "2023-01-10T12:00"})
+    assert "{z}" in ok, ok
 
 
 def t_versions_agree():

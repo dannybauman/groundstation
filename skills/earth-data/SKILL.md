@@ -107,7 +107,7 @@ A field test is a showcase page: a set of prompts run live, each with its output
 
 `smoke_forecast(lat, lon, hours_ahead)` gives NOAA HRRR near-surface smoke now and hours ahead for a point in the contiguous US; it is model guidance, so quote its caveats.
 
-`write_archive(catalog, collections, ...)` caches a live STAC search as a stac-geoparquet file; pass its path as `catalog` to `search_imagery` to search the snapshot offline.
+`write_archive(catalog, collections, ...)` caches a live STAC search as a stac-geoparquet file; pass its path as `catalog` to `search_imagery` to search the snapshot offline. It takes `max_cloud_cover` like `search_imagery`, and its `written` date is UTC. `tile_url_template` on a Zarr store answers a `sel` time outside the store's range with a message naming the range, never a tile URL.
 
 Reach for `conditions_brief` when a user wants a summary of current conditions around a location—specifically for disaster risk, insurance, or emergency response context (dryness, wind, nearby active events, latest imagery, and upcoming passes).
 
