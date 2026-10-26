@@ -4168,18 +4168,12 @@ def compare_dates(
 
 
 def _applied_scaling_words(dated: list[tuple[str, list[dict[str, Any]]]]) -> str:
-    big = [(d, max(gs, key=lambda g: len(g["bands"]))) for d, gs in dated]
-    key = lambda g: (g.get("scale"), g.get("declared_offset", g.get("offset")), len(g["bands"]))
-    same = len({key(g) for _, g in big}) == 1
     parts = []
-    for dates, g in [(" and ".join(d for d, _ in big), big[0][1])] if same else [(d, g) for d, g in big]:
-        off = g.get("declared_offset", g.get("offset"))
-        parts.append(f"scale {g.get('scale')} and offset {off} applied on {len(g['bands'])} bands for {dates}")
-    done = "; ".join(parts)
-    for d, g in big:
-        if "declared_offset" in g:
-            done += f" (Earth Search already took the {g['declared_offset']} offset out of the {d} pixels, so 0 was added there)"
-    return done
+    for d, gs in dated:
+        g = max(gs, key=lambda g: len(g["bands"]))
+        took = f" (Earth Search already took the {g['declared_offset']} offset out of its pixels)" if "declared_offset" in g else ""
+        parts.append(f"scale {g.get('scale')} and offset {g.get('offset')} applied for {d}{took}")
+    return "; ".join(parts)
 
 
 # ---------------------------------------------------------------- monitoring

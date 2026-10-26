@@ -631,8 +631,7 @@ def t_compare_dates_carries_band_scaling_and_names_factors():
         out = tools.compare_dates(bbox=[-121.5, 39.4, -121.4, 39.5], window_before="a/b", window_after="c/d")
         assert out["after"]["band_scaling"][0]["declared_offset"] == -0.1 and out["before"]["band_scaling"][0]["offset"] == -0.1
         n = out["scaling_note"]
-        assert "scale 0.0001 and offset -0.1 applied on 13 bands for 2023-03-28 and 2021-02-03" in n, n
-        assert "Earth Search already took the -0.1 offset out of the 2023-03-28 pixels" in n, n
+        assert "offset -0.1 applied for 2021-02-03" in n and "offset 0 applied for 2023-03-28 (Earth Search already took the -0.1 offset out of its pixels)" in n, n
     finally:
         tools.search_imagery, tools.compute_statistics, tools.render_map = saved
 
