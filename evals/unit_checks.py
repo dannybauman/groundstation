@@ -3148,6 +3148,33 @@ def t_stretch_one_range_across_a_coverage_set():
         restore()
 
 
+def t_pc_mosaic_register_reads_searchid_or_id():
+    # field test 16: Planetary Computer's register reply switched "id" to
+    # "searchid" and every WorldCover map died on KeyError; both keys serve
+    class R:
+        def __init__(self, j): self._j = j
+        def raise_for_status(self): pass
+        def json(self): return self._j
+    saved_post = tools._client.post
+    try:
+        tools._client.post = lambda url, **kw: R({"searchid": "pc1-new"})
+        tools._pc_mosaic_cache.pop("esa-worldcover:A", None)
+        assert tools._pc_mosaic_id("esa-worldcover", "A") == "pc1-new"
+        tools._client.post = lambda url, **kw: R({"id": "old-style"})
+        tools._pc_mosaic_cache.pop("esa-worldcover:B", None)
+        assert tools._pc_mosaic_id("esa-worldcover", "B") == "old-style"
+        tools._client.post = lambda url, **kw: R({"links": []})
+        tools._pc_mosaic_cache.pop("esa-worldcover:C", None)
+        import httpx as _hx
+        try:
+            tools._pc_mosaic_id("esa-worldcover", "C")
+            assert False, "no id should raise the HTTPError the fallback catches"
+        except _hx.HTTPError:
+            pass
+    finally:
+        tools._client.post = saved_post
+
+
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files
