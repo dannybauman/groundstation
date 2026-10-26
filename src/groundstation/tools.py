@@ -170,9 +170,111 @@ FULL_COVERAGE_PCT = 99.0
 PARTIAL_COVERAGE_PCT = 95.0
 
 
-def _union_coverage_pct(aoi: list[float], boxes: list[list[float]]) -> float:
-    """Union coverage of the AOI by several bboxes — exact for axis-aligned
-    rectangles (coordinate-sweep grid), so overlapping tiles never double-count."""
+# ponytail: footprints are sampled on a 64x64 grid of AOI cell centres, so a
+# footprint edge is only resolved to 1/64 of the box (about 1.6 points of
+# coverage). A footprint thinner than a cell can read 0; raise the grid if it matters
+COVER_GRID = 64
+
+
+def _shape_polys(shape: Any) -> list[list[list[list[float]]]]:
+    """A bbox [w,s,e,n] or a GeoJSON Polygon/MultiPolygon as a list of polygons
+    (each a list of rings). Anything else is no shape."""
+    if isinstance(shape, dict):
+        c = shape.get("coordinates")
+        if shape.get("type") == "Polygon" and c:
+            return [c]
+        if shape.get("type") == "MultiPolygon" and c:
+            return list(c)
+        return []
+    if isinstance(shape, (list, tuple)) and len(shape) >= 4:
+        return [[[[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]] for b in _split_antimeridian(list(shape)[:4])]
+    return []
+
+
+def _in_polys(x: float, y: float, polys: list) -> bool:
+    for poly in polys:
+        inside = False  # even-odd over every ring, so a hole flips the point back out
+        for ring in poly:
+            j = len(ring) - 1
+            for i in range(len(ring)):
+                xi, yi, xj, yj = ring[i][0], ring[i][1], ring[j][0], ring[j][1]
+                if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                    inside = not inside
+                j = i
+        if inside:
+            return True
+    return False
+
+
+def _cover_mask(aoi: list[float], shape: Any) -> int:
+    """Bit k set when AOI grid point k lies inside the shape."""
+    polys = _shape_polys(shape)
+    if not polys:
+        return 0
+    w, s, e, n = aoi
+    span = (e - w) % 360 if w > e else e - w
+    mask, k = 0, 0
+    for r in range(COVER_GRID):
+        y = s + (n - s) * (r + 0.5) / COVER_GRID
+        for c in range(COVER_GRID):
+            x = w + span * (c + 0.5) / COVER_GRID
+            # footprints that cross the antimeridian come as lon beyond 180 or below -180
+            if any(_in_polys(x + d, y, polys) for d in (0, 360, -360)):
+                mask |= 1 << k
+            k += 1
+    return mask
+
+
+def _is_bbox(shape: Any) -> bool:
+    return isinstance(shape, (list, tuple)) and len(shape) >= 4
+
+
+def _union_coverage_pct(aoi: list[float], shapes: list[Any]) -> float:
+    """Union coverage of the AOI by several scene shapes, bboxes or footprints.
+
+    All bboxes: exact coordinate sweep. Any footprint polygon: the sampled grid
+    above, so holes, multipolygons and overlap all come out of one rule."""
+    if any(not _is_bbox(sh) for sh in shapes):
+        if not aoi or len(aoi) < 4 or aoi[3] <= aoi[1]:
+            return 0.0
+        m = 0
+        for sh in shapes:
+            m |= _cover_mask(aoi, sh)
+        return round(100.0 * bin(m).count("1") / COVER_GRID**2, 1)
+    return _union_bbox_coverage_pct(aoi, shapes)
+
+
+def _uncovered_side(aoi: list[float], shapes: list[Any]) -> tuple[float, str]:
+    """(percent of the AOI no shape covers, where it sits: 'south', 'the northwest corner'...)."""
+    m = 0
+    for sh in shapes:
+        m |= _cover_mask(aoi, sh)
+    xs = ys = cnt = 0
+    for k in range(COVER_GRID**2):
+        if not m >> k & 1:
+            r, c = divmod(k, COVER_GRID)
+            xs += (c + 0.5) / COVER_GRID * 2 - 1
+            ys += (r + 0.5) / COVER_GRID * 2 - 1
+            cnt += 1
+    if not cnt:
+        return 0.0, ""
+    dx, dy = xs / cnt, ys / cnt
+    ns = "north" if dy > 0.25 else "south" if dy < -0.25 else ""
+    ew = "east" if dx > 0.25 else "west" if dx < -0.25 else ""
+    where = ns + ew or "the middle"
+    if ns and ew and abs(dx) > 0.5 and abs(dy) > 0.5:
+        where = f"the {where} corner"
+    return round(100.0 * cnt / COVER_GRID**2, 1), where
+
+
+def _item_shape(it: dict[str, Any]) -> Any:
+    """The scene's footprint polygon when the catalog gave one, else its bbox."""
+    return it.get("footprint") or it.get("bbox")
+
+
+def _union_bbox_coverage_pct(aoi: list[float], boxes: list[list[float]]) -> float:
+    """Exact union coverage by axis-aligned rectangles (coordinate sweep), so
+    overlapping tiles never double-count."""
     aoi_parts = _split_antimeridian(aoi)
     aoi_area = sum((part[2] - part[0]) * (part[3] - part[1]) for part in aoi_parts)
     if aoi_area <= 0:
@@ -224,23 +326,23 @@ def find_full_coverage_set(
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for it in items:
         day = (it.get("datetime") or "")[:10]
-        if day and it.get("bbox") and it.get("collection"):
+        if day and _item_shape(it) and it.get("collection"):
             groups.setdefault((it["collection"], day), []).append(it)
     for coll, day in sorted(groups, key=lambda k: k[1], reverse=True):
         remaining = list(groups[(coll, day)])
         chosen: list[dict[str, Any]] = []
-        boxes: list[list[float]] = []
+        boxes: list[Any] = []
         covered = 0.0
         while remaining:
             best, best_gain = None, 0.05  # require a real gain, not float noise
             for it in remaining:
-                gain = _union_coverage_pct(aoi_bbox, boxes + [it["bbox"]]) - covered
+                gain = _union_coverage_pct(aoi_bbox, boxes + [_item_shape(it)]) - covered
                 if gain > best_gain:
                     best, best_gain = it, gain
             if best is None:
                 break
             chosen.append(best)
-            boxes.append(best["bbox"])
+            boxes.append(_item_shape(best))
             covered = _union_coverage_pct(aoi_bbox, boxes)
             remaining.remove(best)
             if covered >= threshold:
@@ -1126,6 +1228,7 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
         "datetime": props.get("datetime") or props.get("start_datetime"),
         "cloud_cover": props.get("eo:cloud_cover"),
         "bbox": item.get("bbox"),
+        **({"footprint": item["geometry"]} if (item.get("geometry") or {}).get("type") in ("Polygon", "MultiPolygon") else {}),
         "assets": sorted(item.get("assets", {}).keys()),
         "self_url": self_url,
         # SAR backscatter is only comparable between passes of the same
@@ -1139,9 +1242,8 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float | None:
-    # ponytail: bbox-overlap approximation — a tilted scene footprint covers
-    # less than its bbox suggests; split-at-180 handles antimeridian crossing,
-    # swap in real footprint geometry if it matters.
+    # the fallback for an item with no geometry: a tilted footprint covers less
+    # than its bbox suggests, which is why search_imagery prefers the footprint
     if not item_bbox or len(item_bbox) < 4:
         return None
     aoi_parts = _split_antimeridian(aoi)
@@ -1340,7 +1442,8 @@ def search_imagery(
     datetime_range is RFC3339, e.g. "2026-06-01T00:00:00Z/2026-07-09T00:00:00Z".
     Returns compact items sorted newest first; feed self_url/ids into
     preview_item, compute_statistics, or render_map. Each item carries
-    covers_aoi_pct — how much of the searched area its bbox covers (100 =
+    covers_aoi_pct — how much of the searched area its footprint covers
+    (coverage_basis says footprint, or bbox when the item has no geometry; 100 =
     full coverage; a low value means the scene only clips the area, so say
     so or pick a fuller scene). When no single scene covers the AOI, the
     response also carries full_coverage_set: the newest same-day scene set
@@ -1381,7 +1484,12 @@ def search_imagery(
         feats = r.json().get("features", [])
     items = [_compact_item(catalog, f) for f in feats]
     for it in items:
-        it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
+        if it.get("footprint"):
+            it["covers_aoi_pct"] = _union_coverage_pct(bbox, [it["footprint"]])
+            it["coverage_basis"] = "footprint"
+        else:
+            it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
+            it["coverage_basis"] = "bbox"
     result = {"bbox": bbox, "count": len(feats), "items": items}
     if archive:
         result["archive"] = archive
@@ -1394,6 +1502,16 @@ def search_imagery(
         full = find_full_coverage_set(readable, bbox)
         if full and len(full["items"]) > 1:
             result["full_coverage_set"] = full
+            # no single scene covers the box, so the set is the answer: name its
+            # scenes, not a lone one that only clips it
+            ids = [it["id"] for it in full["items"]]
+            result["recommended"] = {
+                "id": ids[0], "scene_ids": ids, "covers_aoi_pct": full["union_covers_aoi_pct"],
+                "cloud_cover": full["items"][0].get("cloud_cover"),
+                "reason": f"no single scene covers this area; these {len(ids)} from {full['date']} together cover "
+                          f"{full['union_covers_aoi_pct']:.1f}% of it (full_coverage_set). "
+                          f"The best single scene covers {best_single:.1f}%",
+            }
         elif rec:
             # Field test No.8: over a county or a province the best single scene
             # is a fraction of the area, and the same-day set that would cover it
@@ -2195,6 +2313,21 @@ def _fallback_tiles(l: dict[str, Any]) -> str | None:
     return f"{EOAPI}/external/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + str(httpx.QueryParams(params))
 
 
+# resolved layers are serialised straight into the page's JS, so the footprint
+# lives beside them keyed by tile URL instead of riding along as another field
+_LAYER_FOOTPRINTS: dict[str, Any] = {}
+
+
+def _layer_shape(l: dict[str, Any]) -> Any:
+    """The footprint of a resolved raster layer, else its bounds."""
+    return _LAYER_FOOTPRINTS.get(l.get("tiles")) or l.get("bounds")
+
+
+def _hole_text(aoi: list[float], shapes: list[Any]) -> str:
+    pct, where = _uncovered_side(aoi, shapes)
+    return f"{pct:.0f}% of the view is uncovered, mostly {where}"
+
+
 def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
     """An {"type": "item"} layer becomes a raster layer with tiles + scene bounds."""
     if l.get("type") != "item":
@@ -2205,18 +2338,23 @@ def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
         # serving 404s for) every out-of-footprint tile in the viewport
         item_bounds = (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("bbox")
     fallback = _fallback_tiles(l)
+    tiles = tile_url_template(
+        l["catalog"],
+        l["collection_id"],
+        l["item_id"],
+        l.get("assets"),
+        l.get("rescale"),
+        l.get("colormap_name"),
+        l.get("expression"),
+    )
+    # a caller who passed bbox wants no fetch at all, so only the bbox-less path reads the item
+    geom = l.get("footprint") or (None if l.get("bbox") else (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("geometry"))
+    if isinstance(geom, dict) and geom.get("type") in ("Polygon", "MultiPolygon"):
+        _LAYER_FOOTPRINTS[tiles] = geom
     return {
         "type": "raster",
         "name": l.get("name") or l["item_id"],
-        "tiles": tile_url_template(
-            l["catalog"],
-            l["collection_id"],
-            l["item_id"],
-            l.get("assets"),
-            l.get("rescale"),
-            l.get("colormap_name"),
-            l.get("expression"),
-        ),
+        "tiles": tiles,
         "opacity": l.get("opacity", 1),
         **({"bounds": item_bounds} if item_bounds else {}),
         **({"pc_fallback": True} if l.get("item_id") in _PC_FALLBACKS else {}),
@@ -2252,6 +2390,7 @@ def _expand_coverage_set(layer: dict[str, Any]) -> list[dict[str, Any]]:
             "collection_id": it["collection"],
             "item_id": it["id"],
             "bbox": it.get("bbox"),
+            **({"footprint": it["footprint"]} if it.get("footprint") else {}),
             **params,
         })
     return out
@@ -2725,13 +2864,14 @@ def render_map(
             "no imagery layer on this map, so it renders as vectors on a blank background. "
             "Add a scene, or say plainly that none is available for this area"
         )
-    _boxes = [l["bounds"] for l in resolved if l.get("type") == "raster" and l.get("bounds")]
+    _boxes = [_layer_shape(l) for l in resolved if l.get("type") == "raster" and l.get("bounds")]
     if _boxes:
         _cov = _union_coverage_pct(bbox, _boxes)
         out["state"]["coverage_pct"] = _cov
         if _cov < PARTIAL_COVERAGE_PCT:
+            out["state"]["uncovered_pct"], out["state"]["uncovered_side"] = _uncovered_side(bbox, _boxes)
             out["coverage_note"] = (
-                f"layers cover {_cov:.0f}% of the requested view, so the rest renders blank. "
+                f"layers cover {_cov:.0f}% of the requested view ({_hole_text(bbox, _boxes)}), so the rest renders blank. "
                 "Pass the whole full_coverage_set from search_imagery, or tighten bbox to what you have"
             )
     if postcard:
@@ -2979,7 +3119,7 @@ def render_map_3d(
     sibling_specs: list[dict[str, Any]] = []
     if (fill_coverage and not extra_layers and layer.get("type") == "item"
             and resolved.get("bounds")
-            and _union_coverage_pct(bbox, [resolved["bounds"]]) < PARTIAL_COVERAGE_PCT):
+            and _union_coverage_pct(bbox, [_layer_shape(resolved)]) < PARTIAL_COVERAGE_PCT):
         try:
             cat, coll = layer["catalog"], layer["collection_id"]
             day = ((_item(cat, coll, layer["item_id"]) or {}).get("properties", {}).get("datetime") or "")[:10]
@@ -2988,7 +3128,8 @@ def render_map_3d(
             fcs = find_full_coverage_set(found.get("items") or [], bbox, threshold=PARTIAL_COVERAGE_PCT)
             for it in (fcs or {}).get("items", []):
                 if it["id"] != layer["item_id"]:
-                    spec = {**layer, "name": it["id"], "item_id": it["id"], "bbox": it.get("bbox")}
+                    spec = {**layer, "name": it["id"], "item_id": it["id"], "bbox": it.get("bbox"),
+                            **({"footprint": it["footprint"]} if it.get("footprint") else {})}
                     sibling_specs.append(spec)
                     siblings.append({**_resolve_layer(spec), "reason": "same-day sibling filling the view"})
         except Exception:
@@ -3082,20 +3223,22 @@ def render_map_3d(
     # area shows terrain with no imagery rather than blank. So report what the
     # viewer actually gets first, and what the button would add.
     if resolved.get("bounds"):
-        _cov = _union_coverage_pct(bbox, [resolved["bounds"], *(s["bounds"] for s in siblings if s.get("bounds"))])
+        _drape = [_layer_shape(resolved), *(_layer_shape(s) for s in siblings if s.get("bounds"))]
+        _cov = _union_coverage_pct(bbox, _drape)
         out["state"]["coverage_pct"] = _cov
         if _cov < PARTIAL_COVERAGE_PCT:
-            _extra_boxes = [e["bounds"] for e in extras if e.get("bounds")]
+            out["state"]["uncovered_pct"], out["state"]["uncovered_side"] = _uncovered_side(bbox, _drape)
+            _extra_boxes = [_layer_shape(e) for e in extras if e.get("bounds")]
             if _extra_boxes:
-                _full = _union_coverage_pct(bbox, [resolved["bounds"], *_extra_boxes])
+                _full = _union_coverage_pct(bbox, [*_drape, *_extra_boxes])
                 out["state"]["coverage_pct_loaded"] = _full
                 out["coverage_note"] = (
-                    f"the drape covers {_cov:.0f}% of the view on load, the rest is terrain with no "
+                    f"the drape covers {_cov:.0f}% of the view on load ({_hole_text(bbox, _drape)}), the rest is terrain with no "
                     f"imagery until someone clicks Load full coverage, which takes it to {_full:.0f}%"
                 )
             else:
                 out["coverage_note"] = (
-                    f"the drape covers {_cov:.0f}% of the view, the rest renders as terrain with no "
+                    f"the drape covers {_cov:.0f}% of the view ({_hole_text(bbox, _drape)}), the rest renders as terrain with no "
                     "imagery. Pass the rest of a same-day full_coverage_set as extra_layers"
                 )
     if stack_note:
@@ -3361,18 +3504,20 @@ def render_postcard(
     scenes overlap. Same-day fills keep the seam invisible. Needs bbox;
     earth-search-style catalogs only (PC/VEDA fall back to single scene, named in `dropped`).
     """
+    shapes: dict[str, Any] = {}
     if bbox is not None:
         # clamp to the scenes' union bbox so an AOI hanging off the data
         # can't print a nodata band — center-preserving, so the subject
         # stays in the middle of the frame. ponytail: bbox math only — a
         # diagonal swath edge (footprint != bbox) can still clip a corner
-        # on single-scene cards; fills exist for exactly that case
+        # on single-scene cards; the result's coverage_note says so, fills fix it
         try:
             boxes = []
             for i in (item_id, *(fill_item_ids or [])):
                 item = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{i}")
                 if item.get("bbox"):
                     boxes.append(item["bbox"])
+                    shapes[i] = item.get("geometry") if (item.get("geometry") or {}).get("type") in ("Polygon", "MultiPolygon") else item["bbox"]
             if boxes:
                 union = [min(b[0] for b in boxes), min(b[1] for b in boxes),
                          max(b[2] for b in boxes), max(b[3] for b in boxes)]
@@ -3450,6 +3595,24 @@ def render_postcard(
     notes = "; ".join(n for n in (mosaic_note, stack_note) if n)
     if notes:
         out["note"] = notes
+    # the scene's footprint, not its bbox, decides what the frame holds: a slanted
+    # swath edge leaves a nodata wedge inside a box the bbox says is covered
+    used = [shapes[i] for i in ([item_id, *fill_item_ids] if mosaic_scenes else [item_id]) if i in shapes]
+    if bbox is not None and used:
+        pct, where = _uncovered_side(bbox, used)
+        out["coverage_pct"] = round(100.0 - pct, 1)
+        if out["coverage_pct"] < PARTIAL_COVERAGE_PCT:
+            out["uncovered_pct"], out["uncovered_side"] = pct, where
+            why = ""
+            if not mosaic_scenes:
+                if dropped:
+                    cause = dropped[0]["why"]
+                elif CATALOGS[catalog]["raster"] != "titiler-xyz":
+                    cause = f"mosaic cards need direct COG access, which {catalog} does not offer"
+                else:
+                    cause = "pass the rest of a same-day full_coverage_set as fill_item_ids"
+                why = f"; no same-day sibling fills it: {cause}"
+            out["coverage_note"] = f"the scene footprint leaves {pct:.0f}% of the card uncovered, mostly {where}, printed as black no-data{why}"
     return out
 
 
