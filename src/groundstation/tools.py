@@ -730,6 +730,7 @@ ZARR_STORES: dict[str, dict[str, Any]] = {
             "total_cloud_cover_atmosphere": {"description": "total cloud cover", "units": "percent"},
         },
         "sel": "valid_time (when the forecast is for, UTC; picks the latest run and its lead time), or init_time and lead_time",
+        "time_range_note": "the range is rolling: the store holds the newest run only, up to 384 h ahead, and past dates are not in this store",
         "coverage": "global, 0.25 degrees (~20 km); runs every 6 h, lead 0-384 h (hourly to 120 h, then 3-hourly)",
         "chunks": "1 run x 210 lead steps x 726 x 726 per chunk: one point costs a quarter-globe chunk",
         "stats": False,
@@ -745,6 +746,7 @@ ZARR_STORES: dict[str, dict[str, Any]] = {
         "region": "us-west-1",
         "variables": {"TMP": {"description": "air temperature 2 m above ground", "units": "K"}},
         "sel": "valid_time (UTC); the newest 00/06/12/18z run is used, up to 48 h ahead",
+        "time_range_note": "the range is rolling: the store holds the newest run only, up to 48 h ahead, and past dates are not in this store",
         "coverage": "CONUS only, 3 km Lambert conformal grid",
         "chunks": "48 steps x 150 x 150 per chunk",
         "stats": True,
@@ -761,14 +763,25 @@ ZARR_STORES: dict[str, dict[str, Any]] = {
         "coverage": "global ocean, 0.01 degrees",
         "chunks": "5 days x 1799 x 3600 per chunk, about 123 MB: one cell costs a whole chunk",
         "stats": False,
+        "stats_note": "the record ends 2020-01-20, and one cell costs a 123 MB chunk read, so statistics are not offered",
+        "time_dim": "time",
+        "time_range": ["2002-06-01", "2020-01-20"],
         "tiles": False,
-        "tiles_note": "titiler.xyz is denied at this bucket, and a 123 MB chunk makes a tile read slow",
+        "tiles_note": "titiler.xyz does not reach this bucket, and a 123 MB chunk makes a tile read slow",
         "source": "NASA JPL MUR SST on AWS Open Data (metadata only here)",
     },
     "weatherbench2-era5": {
         "title": "ERA5 reanalysis, 1959 to 2023-01-10, 6-hourly, 1.5 degrees (WeatherBench 2)",
         "url": "https://storage.googleapis.com/weatherbench2/datasets/era5/1959-2023_01_10-6h-240x121_equiangular_with_poles_conservative.zarr",
-        "variables": {"2m_temperature": {"description": "air temperature 2 m above ground", "units": "K", "rescale": "220,320", "colormap_name": "inferno"}},
+        "variables": {
+            "2m_temperature": {"description": "air temperature 2 m above ground", "units": "K", "rescale": "220,320", "colormap_name": "inferno"},
+            "2m_dewpoint_temperature": {"description": "dewpoint temperature 2 m above ground", "units": "K", "rescale": "220,310", "colormap_name": "inferno"},
+            "10m_wind_speed": {"description": "wind speed 10 m above ground", "units": "m s-1", "rescale": "0,25", "colormap_name": "viridis"},
+            "total_precipitation_6hr": {"description": "total precipitation over the 6 h ending at the step", "units": "m", "rescale": "0,0.02", "colormap_name": "blues"},
+            "mean_sea_level_pressure": {"description": "air pressure reduced to mean sea level", "units": "Pa", "rescale": "95000,105000", "colormap_name": "viridis"},
+            "sea_surface_temperature": {"description": "sea surface temperature (NaN over land)", "units": "K", "rescale": "270,305", "colormap_name": "inferno"},
+        },
+        "variables_note": "the store holds 62 variables; compute_statistics accepts any of them by its store name, and the ones listed here are the ones groundstation has checked and can draw",
         "sel": "time (UTC, 6-hourly, ends 2023-01-10): history, not a forecast",
         "coverage": "global, 1.5 degrees (~165 km), longitudes 0 to 360",
         "chunks": "small time-sliced chunks",
@@ -928,6 +941,11 @@ def _zarr_select(da: Any, sel: dict[str, str] | None) -> tuple[Any, dict[str, st
             idx = int(np.abs(coord - target).argmin())
             if coord[idx] != target:
                 gap = pd.Timedelta(abs(coord[idx] - target)) if coord.dtype.kind in "Mm" else abs(coord[idx] - target)
+                if coord.dtype.kind in "Mm" and len(coord) > 1 and gap > pd.Timedelta(coord[1] - coord[0]):
+                    raise ValueError(
+                        f"{dim} {want} is {gap} from the nearest {dim} in this store ({label(coord[idx])}), more than one step ({pd.Timedelta(coord[1] - coord[0])}); "
+                        f"the store holds {dim} {label(coord[0])} to {label(coord[-1])}"
+                    )
                 edge = " (outside the store's range)" if idx in (0, len(coord) - 1) and (target < coord[0] or target > coord[-1]) else ""
                 notes.append(f"{dim} {want} snapped to {label(coord[idx])}, off by {gap}{edge}")
         da = da.isel({dim: idx})
@@ -977,24 +995,48 @@ def _clip_reduce(da: Any, bbox: list[float], crs: str | None = None) -> dict[str
     }
 
 
+def _zarr_time_refusal(store_id: str, z: dict[str, Any], sel: dict[str, str] | None) -> str | None:
+    """Words for an asked time outside the store's fixed time_range, else None."""
+    lo, hi = z.get("time_range") or (None, None)
+    asked = (sel or {}).get(z.get("time_dim", "time")) or (sel or {}).get("valid_time")
+    if not (asked and lo):
+        return None
+    try:
+        t = dt.datetime.fromisoformat(asked.replace("Z", "")).replace(tzinfo=None)
+    except ValueError:
+        return None
+    if dt.datetime.fromisoformat(lo) <= t <= dt.datetime.fromisoformat(hi):
+        return None
+    return f"time {asked} is outside {store_id}'s range ({lo} to {hi})"
+
+
 def _zarr_statistics(store_id: str, variable: str, bbox: list[float] | None, sel: dict[str, str] | None) -> dict[str, Any]:
     z = ZARR_STORES.get(store_id)
     if not z:
         return {"error": f"unknown zarr store {store_id!r}; options: {', '.join(ZARR_STORES)}"}
+    if refusal := _zarr_time_refusal(store_id, z, sel):
+        return {"error": f"{refusal}; no statistics returned"}
     if not z["stats"]:
         return {"error": f"statistics are not offered for {z['title']}: {z.get('stats_note') or z['chunks']}"}
-    if variable not in z["variables"]:
-        return {"error": f"unknown variable {variable!r}; options: {', '.join(z['variables'])}"}
     if not bbox:
         return {"error": "bbox [w, s, e, n] is required: a Zarr store is a whole grid, so unclipped statistics would describe the globe or the continent"}
     ds = _open_zarr(store_id)
-    da, used, notes = _zarr_select(ds[variable], sel)
+    if variable in z["variables"]:
+        meta = z["variables"][variable]
+    elif variable in ds.data_vars:
+        a = ds[variable].attrs
+        meta = {"description": a.get("long_name") or variable, "units": a.get("units") or "unknown"}
+    else:
+        return {"error": f"unknown variable {variable!r}; curated options: {', '.join(z['variables'])}; the store holds {len(ds.data_vars)} variables"}
+    try:
+        da, used, notes = _zarr_select(ds[variable], sel)
+    except ValueError as e:
+        return {"error": "; ".join(x for x in (f"{z['title']}: {e}", z.get("time_range_note"), "no statistics returned") if x)}
     r = _clip_reduce(da, bbox, _HRRR_CRS if "{date}" in z["url"] else None)
     if r.get("error", "").startswith("bbox outside"):
         return {"error": f"bbox outside {z['title']}'s coverage ({z['coverage']})"}
     if "error" in r:
         return r | {"sel": used}
-    meta = z["variables"][variable]
     return {
         variable: r["stats"],
         "clipped_to": bbox,
@@ -1446,7 +1488,8 @@ def compute_statistics(
     """Compute pixel statistics (min/max/mean/std/percentiles) for a STAC item.
 
     Same shape clipped or not: {band_or_expression: {min, max, mean, std, ...}},
-    plus clipped_to when an AOI was applied and extent_note when it was not.
+    plus clipped_to when an AOI was applied and extent_note when it was not,
+    and scaling_note when the item's raster:bands carry a scale or offset (the numbers are raw).
 
     expression is band math over asset names, e.g. "(nir-red)/(nir+red)" for
     NDVI on Sentinel-2 (Earth Search asset names; Planetary Computer uses band
@@ -1569,12 +1612,22 @@ def compute_statistics(
         # teaching this tool any one collection's units (MODIS LST is
         # 0.02 K per DN — the caller cannot guess that from raw values).
         # Both paths: a clipped number in the wrong unit is still wrong
-        for a in item.get("assets", {}).values():
+        groups: dict[tuple, dict[str, Any]] = {}
+        for key, a in item.get("assets", {}).items():
             for band in a.get("raster:bands", []) or []:
                 if band.get("scale") is not None or band.get("offset") is not None:
-                    out.setdefault("band_scaling", []).append(
-                        {k: band[k] for k in ("name", "scale", "offset", "unit") if k in band}
-                    )
+                    g = {k: band[k] for k in ("scale", "offset", "unit") if k in band}
+                    groups.setdefault(tuple(sorted(g.items())), {**g, "bands": []})["bands"].append(key)
+        if groups:
+            out["band_scaling"] = list(groups.values())
+            raw = [g for g in groups.values() if g.get("scale") not in (None, 1) or g.get("offset") not in (None, 0)]
+            if raw:
+                g = max(raw, key=lambda g: len(g["bands"]))
+                out["scaling_note"] = (
+                    f"values are raw digital numbers: the item's raster:bands give scale {g.get('scale')} "
+                    f"and offset {g.get('offset')} on {len(g['bands'])} bands (physical = raw * scale + offset), "
+                    "and nothing here applies them; with an expression a non-zero offset shifts the index too"
+                )
     except Exception:
         pass
     return out
@@ -1606,20 +1659,13 @@ def tile_url_template(
         z = ZARR_STORES.get(collection_id)
         if not z:
             return f"unknown zarr store {collection_id!r}; options: {', '.join(ZARR_STORES)}"
+        if refusal := _zarr_time_refusal(collection_id, z, sel):
+            return f"{refusal}; pick a time inside it, no tile URL returned"
         if not z["tiles"]:
             return z["tiles_note"]
         v = z["variables"].get(item_id)
         if v is None:
             return f"unknown variable {item_id!r}; options: {', '.join(z['variables'])}"
-        lo, hi = z.get("time_range") or (None, None)
-        asked = (sel or {}).get(z["time_dim"]) or (sel or {}).get("valid_time")
-        if asked and lo:
-            try:
-                t = dt.datetime.fromisoformat(asked.replace("Z", "")).replace(tzinfo=None)
-            except ValueError:
-                t = None
-            if t and not dt.datetime.fromisoformat(lo) <= t <= dt.datetime.fromisoformat(hi):
-                return f"time {asked} is outside {collection_id}'s range ({lo} to {hi}); pick a time inside it, no tile URL returned"
         params = [("url", z["url"]), ("variable", item_id)]
         params += [("sel", f"{z['time_dim'] if k == 'valid_time' else k}=nearest::{x}") for k, x in (sel or {}).items()]
         if rescale or v.get("rescale"):
@@ -3339,7 +3385,7 @@ def compare_dates(
         try:
             # without the bbox the mean is the whole Sentinel-2 tile, not the place asked about
             s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox)
-            scope.update({k: s[k] for k in ("clipped_to", "extent_note") if k in s})
+            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_note") if k in s})
             return round(next(iter(s.values()))["mean"], 4)
         except Exception:
             return None
@@ -3639,9 +3685,22 @@ _EO_PREDICTOR_API = "https://api.github.com/repos/developmentseed/eo-predictor/c
 EO_PREDICTOR_URL = "https://developmentseed.org/eo-predictor"
 
 
-def _local_solar_hour(utc_hour: float, lon: float) -> float:
-    """Approximate local solar time — daylight check without an ephemeris file."""
-    return (utc_hour + lon / 15.0) % 24.0
+def _sun_elevation_deg(when: dt.datetime, lat: float, lon: float) -> float:
+    """Sun elevation above the horizon in degrees, from the NOAA approximation.
+
+    Accurate to about 1 degree, which is plenty for "is it daylight"; no
+    ephemeris file needed. `when` is UTC.
+    """
+    import math
+
+    n = when.timetuple().tm_yday
+    b = math.radians(360.0 / 365.0 * (n - 81))
+    decl = math.radians(23.44 * math.sin(b))
+    eot_min = 9.87 * math.sin(2 * b) - 7.53 * math.cos(b) - 1.5 * math.sin(b)
+    solar_h = when.hour + when.minute / 60.0 + when.second / 3600.0 + lon / 15.0 + eot_min / 60.0
+    ha = math.radians(15.0 * (solar_h - 12.0))
+    phi = math.radians(lat)
+    return math.degrees(math.asin(math.sin(phi) * math.sin(decl) + math.cos(phi) * math.cos(decl) * math.cos(ha)))
 
 
 def _pass_minima(dists_km: list[float], within_km: float) -> list[int]:
@@ -3740,8 +3799,11 @@ def next_pass(
 
     Answers "when could we next get imagery of this place." Propagates live
     Celestrak TLEs with Skyfield and reports each time a satellite's swath
-    band sweeps the point in the next `days` (max 7). Optical passes are
-    filtered to local daytime; radar (Sentinel-1) images day and night.
+    band sweeps the point in the next `days` (max 7). Every pass carries
+    `sun_elevation_deg` and `daylight` (sun above the horizon at the point at
+    pass time). Optical passes with the sun down are dropped, since optical
+    sensors do not acquire at night, and counted in `optical_passes_at_night`;
+    radar (Sentinel-1) is kept day or night and carries the flag too.
 
     Honest limits, and say them when it matters: this is swath geometry, not
     the acquisition plan — a pass is a POSSIBLE capture, not a promised one
@@ -3779,6 +3841,7 @@ def next_pass(
     target = wgs84.latlon(lat, lon)
 
     passes = []
+    at_night = 0
     for cname in wanted:
         cfg = cfgs.get(cname)
         if not cfg:
@@ -3800,15 +3863,17 @@ def next_pass(
             for i in _pass_minima(d.tolist(), cfg.get("reach_km", cfg["swath_km"] / 2)):
                 t = times[i]
                 utc = t.utc_datetime()
-                if cfg["optical"]:
-                    solar = _local_solar_hour(utc.hour + utc.minute / 60.0, lon)
-                    if not (6.0 <= solar <= 18.0):
-                        continue  # optical only acquires in daylight
+                sun = _sun_elevation_deg(utc, lat, lon)
+                if cfg["optical"] and sun <= 0:
+                    at_night += 1
+                    continue  # optical only acquires in daylight
                 passes.append(
                     {
                         "constellation": cname,
                         "satellite": sat.name,
                         "time_utc": utc.strftime("%Y-%m-%d %H:%M"),
+                        "sun_elevation_deg": round(sun, 1),
+                        "daylight": sun > 0,
                         "track_distance_km": round(float(d[i]), 1),
                         "kind": "optical" if cfg["optical"] else "radar (day or night, sees through cloud)",
                         "access": cfg.get("access", "open"),
@@ -3819,6 +3884,7 @@ def next_pass(
         "point": {"lat": lat, "lon": lon},
         "window_days": days,
         "passes": passes,
+        "optical_passes_at_night": at_night,
         "constellations_source": source,
         "constellations_available": list(cfgs),
         "skipped": skipped,
@@ -3826,6 +3892,8 @@ def next_pass(
         "note": (
             "swath geometry from live TLEs, not the acquisition plan — a pass is a "
             "possible capture, and imagery reaches public catalogs hours to a day later. "
+            "Optical passes are kept only when the sun is above the horizon at the point; "
+            "a low sun (under about 10 degrees) gives a dim image. "
             f"Commercial sensors only image if tasked. Richer view: {EO_PREDICTOR_URL}"
         ),
     }
@@ -4078,6 +4146,8 @@ def conditions_brief(
                 "constellation": p.get("constellation"),
                 "satellite": p.get("satellite"),
                 "time_utc": p.get("time_utc"),
+                "daylight": p.get("daylight"),
+                "sun_elevation_deg": p.get("sun_elevation_deg"),
                 "track_distance_km": p.get("track_distance_km"),
                 "kind": p.get("kind"),
                 "access": p.get("access"),
