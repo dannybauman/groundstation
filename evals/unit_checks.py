@@ -787,9 +787,9 @@ def t_render_map_3d_controls():
 
 def t_render_map_3d_camera_lifts_to_terrain():
     # field test 15: the Berkeley Pit box at zoom 14.5 put the camera at 1195 m under
-    # 2865 m of exaggerated ground; terrain re-applied once the DEM is in lifts it
+    # 2865 m of exaggerated ground; an unfrozen ground height follows the DEM as it lands
     js = _render_3d().split('map.on("load"')[1].split("\n});")[0]
-    assert 'map.once("idle", () => map.setTerrain({ source: "dem", exaggeration }))' in js
+    assert "duration: 0, freezeElevation: true })" in js
 
 
 # ---- stack layer (epic G) ----
