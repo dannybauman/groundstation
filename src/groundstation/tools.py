@@ -601,7 +601,9 @@ def geocode(query: str) -> dict[str, Any]:
             # A refusal has looked up each state (_settle), so name that over coordinates
             if len(pool) > 1:
                 def label(c: dict[str, Any], o: dict[str, Any]) -> str:
-                    return f"({c['where']})" if ambiguous else f"({_where(o)}) {_at(o)}"
+                    if ambiguous:
+                        return f"({c['where']}, {c['kind']})" if c.get("kind") else f"({c['where']})"
+                    return f"({_where(o)}) {_at(o)}"
                 out["geocode_note"] = (
                     f"{len(pool)} places match {query!r} equally well; using {h.get('name')} "
                     + (f"{label(top, h)}" if ambiguous else _at(h))
