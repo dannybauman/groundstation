@@ -1971,8 +1971,9 @@ def compute_statistics(
             elif f"{a}_b1" in out and a not in out:  # PC names the band asset_b1
                 out[a] = out.pop(f"{a}_b1")
     if corrected and isinstance(out, dict) and expression in out:
-        # PC keys the result by the expression it was sent; give back the one the caller wrote
-        out[raw_expression] = out.pop(expression)
+        # PC keys the result by the expression it was sent; give back the one the caller wrote,
+        # in place: compare_dates reads the first value, and a pop would put clipped_to first
+        out = {raw_expression if k == expression else k: v for k, v in out.items()}
     if retried and isinstance(out, dict):
         out["note"] = "titiler.xyz rate-limited; statistics from raster.eoapi.dev"
     if factors and isinstance(out, dict):
@@ -2028,7 +2029,7 @@ def compute_statistics(
             out["scaling_applied"] = False
             out["scaling_note"] = (
                 "values are raw digital numbers: this Sentinel-2 item carries no raster:bands and "
-                f"{catalog} has no known scale or offset convention here, so nothing is applied"
+                f"groundstation knows no scale or offset convention it can apply for {catalog} here, so nothing is applied"
             )
         if groups:
             out["band_scaling"] = list(groups.values())

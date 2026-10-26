@@ -1859,12 +1859,15 @@ def t_statistics_have_one_shape_clipped_or_not():
 
 def _scaled_stats(item, catalog="earth-search", **kw):
     # one compute_statistics call against a fake tiler; returns (result, params the tiler was sent)
-    feature = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
-               "properties": {"statistics": {"b1": {"count": 10, "min": 1000.0, "max": 3000.0, "mean": 2000.0, "std": 500.0,
+    # PC keys a band asset_b1 and an expression result by the expression it was sent, the tilers b1
+    def _feature(p):
+        key = "b1" if catalog != "planetary-computer" else p.get("expression") or f"{p['assets']}_b1"
+        return {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
+                "properties": {"statistics": {key: {"count": 10, "min": 1000.0, "max": 3000.0, "mean": 2000.0, "std": 500.0,
                                                     "percentile_2": 1100.0, "percentile_98": 2900.0, "histogram": [1, 2]}}}}
     sent = {}
     saved_post, saved_json = tools._client.post, tools._get_json
-    tools._client.post = lambda url, **k: (sent.update(k), _FakeResp(feature))[1]
+    tools._client.post = lambda url, **k: (sent.update(k), _FakeResp(_feature(dict(k["params"]))))[1]
     tools._get_json = lambda url, **k: item
     try:
         out = tools.compute_statistics(catalog, "sentinel-2-l2a", "S2X", bbox=[0.2, 0.2, 0.8, 0.8], **kw)
@@ -1936,8 +1939,10 @@ def t_planetary_computer_sentinel2_gets_the_collection_convention():
         assert out["scaling_applied"] is True and g["scale"] == 0.0001 and g["offset"] == off, out
         assert g["bands"] == ["B02", "B04", "B08", "B8A"], "reflectance bands only, never SCL, AOT, WVP or visual"
         assert g["source"].startswith("collection convention"), g
-        assert abs(out["B04"]["mean"] - (0.2 + off)) < 1e-9, out
-    _, params = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", expression="(B08-B04)/(B08+B04)")
+        assert abs(out["B04"]["mean"] - (0.2 + off)) < 1e-9 and "B04_b1" not in out, out
+        assert abs(out["B04"]["percentile_98"] - (0.29 + off)) < 1e-9 and abs(out["B04"]["std"] - 0.05) < 1e-9, out
+    out, params = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", expression="(B08-B04)/(B08+B04)")
+    assert list(out)[0] == "(B08-B04)/(B08+B04)", "the caller's expression, first, as compare_dates reads it"
     e = params["expression"]
     assert e.count("-0.100000000000") == 4 and "B08*0.000100000000" in e and "SCL" not in e, e
     _, params = _scaled_stats(_pc_item("03.01"), catalog="planetary-computer", expression="(B08-B04)/(B08+B04)")
