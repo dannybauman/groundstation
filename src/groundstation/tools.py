@@ -1792,12 +1792,19 @@ def compute_statistics(
     aoi_geojson: dict[str, Any] | None = None,
     bbox: list[float] | None = None,
     sel: dict[str, str] | None = None,
+    apply_scaling: bool = True,
 ) -> dict[str, Any]:
     """Compute pixel statistics (min/max/mean/std/percentiles) for a STAC item.
 
     Same shape clipped or not: {band_or_expression: {min, max, mean, std, ...}},
-    plus clipped_to when an AOI was applied and extent_note when it was not,
-    and scaling_note when the item's raster:bands carry a scale or offset (the numbers are raw).
+    plus clipped_to when an AOI was applied and extent_note when it was not.
+
+    The numbers are physical by default: the item's own raster:bands scale and offset
+    are applied (Sentinel-2 comes back as reflectance, 0 to 1, and an expression is
+    computed on the corrected bands, so an index is not biased by the post-2022 offset).
+    scaling_applied: true and band_scaling (the factors used) say so. apply_scaling=False
+    is the raw escape hatch: raw digital numbers, with scaling_note naming the factors
+    that were not applied.
 
     expression is band math over asset names, e.g. "(nir-red)/(nir+red)" for
     NDVI on Sentinel-2 (Earth Search asset names; Planetary Computer uses band
@@ -1820,8 +1827,32 @@ def compute_statistics(
     if bbox and not aoi_geojson:
         aoi_geojson = _bbox_feature(bbox)
     backend = CATALOGS[catalog]["raster"]
+    item_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
+    try:
+        item = _get_json(item_url)
+    except Exception:
+        item = None
+    factors: dict[str, tuple[float, float]] = {}
+    if apply_scaling and item:
+        for key, a in item.get("assets", {}).items():
+            b0 = (a.get("raster:bands") or [{}])[0]
+            sc, off = b0.get("scale") or 1, b0.get("offset") or 0
+            if (sc, off) != (1, 0):
+                factors[key] = (sc, off)
     params: list[tuple[str, str]] = [("max_size", "512")]
+    corrected = False
     if expression:
+        if factors:
+            raw_expression = expression
+            # the offset does not cancel in a ratio, so each band is corrected before the index is computed
+            # fixed-point numbers only: 1e-05 would read as the identifier "e" to the band parser
+            # a negative offset leaves dark pixels below zero, where a ratio goes infinite and the mean comes back null
+            def _corrected(m: re.Match) -> str:
+                sc, off = factors.get(m[0], (1, 0))
+                x = f"({m[0]}*{sc:.12f}{off:+.12f})"
+                return m[0] if m[0] not in factors else f"where({x}<0,0,{x})" if off < 0 else x
+            expression = re.sub(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", _corrected, expression)
+            corrected = expression != raw_expression
         if backend == "pc":  # PC accepts named-asset expressions directly
             params += [("expression", expression), ("asset_as_band", "true")]
             assets = assets or _expression_idents(expression)
@@ -1857,10 +1888,9 @@ def compute_statistics(
         if r.status_code == 429:
             return {"error": "titiler.xyz rate-limited (429); try again later or set GROUNDSTATION_TITILER"}
     if r.status_code >= 500 and backend not in ("pc", "veda"):
-        # a traceback tells an agent nothing. Look at the item only on failure,
-        # so the working path costs no extra request
+        # a traceback tells an agent nothing
         try:
-            note = _no_cog_note(_get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"))
+            note = _no_cog_note(item) if item else None
         except Exception:
             note = None
         if note:
@@ -1896,10 +1926,23 @@ def compute_statistics(
                 out[a] = out.pop(f"b{i}")
     if retried and isinstance(out, dict):
         out["note"] = "titiler.xyz rate-limited; statistics from raster.eoapi.dev"
+    if factors and isinstance(out, dict):
+        applied = False
+        for k, v in out.items():
+            if isinstance(v, dict) and "mean" in v and (expression is None and k in factors):
+                sc, off = factors[k]
+                n = v.get("count")
+                for f in [f for f in v if f in ("min", "max", "mean", "median", "majority", "minority") or f.startswith("percentile_")]:
+                    v[f] = v[f] * sc + off
+                if "sum" in v and n is not None:
+                    v["sum"] = v["sum"] * sc + n * off
+                if "std" in v:
+                    v["std"] *= sc
+                applied = True
+        if corrected or applied:
+            out["scaling_applied"] = True
     try:
-        item = _get_json(
-            f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
-        )
+        item = item or {}
         if not aoi_geojson:
             # Unclipped stats cover the WHOLE item. For a MODIS tile that is most of
             # a continent, so the mean is real and meaningless — this is how a demo
@@ -1929,7 +1972,7 @@ def compute_statistics(
         if groups:
             out["band_scaling"] = list(groups.values())
             raw = [g for g in groups.values() if g.get("scale") not in (None, 1) or g.get("offset") not in (None, 0)]
-            if raw:
+            if raw and not out.get("scaling_applied"):
                 g = max(raw, key=lambda g: len(g["bands"]))
                 out["scaling_note"] = (
                     f"values are raw digital numbers: the item's raster:bands give scale {g.get('scale')} "
@@ -3862,6 +3905,7 @@ def compare_dates(
     stack_facts: dict[str, Any] | None = None,
     out_path: str | None = None,
     notes: list[str] | None = None,
+    apply_scaling: bool = True,
 ) -> dict[str, Any]:
     """Compare two time windows over a place: matched scenes, index delta, swipe map.
 
@@ -3875,6 +3919,10 @@ def compare_dates(
     so two boxes over the same dates do not overwrite each other).
     stack_layer and stack_facts pass through to the swipe map, and since this tool geocodes
     the place itself, the panel truthfully claims Gazet/Nominatim.
+
+    Means are physical by default (scale and offset applied on both dates, so a scene from
+    before 2022 and one from after compare fairly); scaling_applied says so once.
+    apply_scaling=False gives raw digital numbers, with scaling_note naming what was not applied.
 
     A caveat list comes back when the delta shouldn't be read at face value —
     a cloudy scene on either end, or a near-zero baseline that makes delta_pct
@@ -3922,8 +3970,8 @@ def compare_dates(
     def _mean(it: dict[str, Any]) -> float | None:
         try:
             # without the bbox the mean is the whole Sentinel-2 tile, not the place asked about
-            s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox)
-            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_note") if k in s})
+            s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox, apply_scaling=apply_scaling)
+            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_applied", "scaling_note") if k in s})
             return round(next(iter(s.values()))["mean"], 4)
         except Exception:
             return None

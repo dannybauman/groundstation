@@ -1819,21 +1819,58 @@ def t_statistics_have_one_shape_clipped_or_not():
     assert "scaling_note" not in out, "scale 1 offset 0 is not a caveat"
 
 
-def t_statistics_say_when_scale_and_offset_are_unapplied():
-    # Field test No.12: Sentinel-2 stats were raw DN and nothing said so in words.
+def _scaled_stats(item, **kw):
+    # one compute_statistics call against a fake tiler; returns (result, params the tiler was sent)
     feature = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
-               "properties": {"statistics": {"b1": {"min": 1.0, "max": 9.0, "mean": 5.0, "percentile_2": 2.0, "percentile_98": 8.0, "histogram": [1, 2]}}}}
-    band = [{"scale": 0.0001, "offset": -0.1}]
-    item = {"bbox": [0, 0, 1, 1], "assets": {k: {"raster:bands": band} for k in ("green", "swir16", "nir")}}
+               "properties": {"statistics": {"b1": {"count": 10, "min": 1000.0, "max": 3000.0, "mean": 2000.0, "std": 500.0,
+                                                    "percentile_2": 1100.0, "percentile_98": 2900.0, "histogram": [1, 2]}}}}
+    sent = {}
     saved_post, saved_json = tools._client.post, tools._get_json
-    tools._client.post = lambda url, **kw: _FakeResp(feature)
-    tools._get_json = lambda url, **kw: item
+    tools._client.post = lambda url, **k: (sent.update(k), _FakeResp(feature))[1]
+    tools._get_json = lambda url, **k: item
     try:
-        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "S2X", assets=["green"], bbox=[0.2, 0.2, 0.8, 0.8])
+        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "S2X", bbox=[0.2, 0.2, 0.8, 0.8], **kw)
     finally:
         tools._client.post, tools._get_json = saved_post, saved_json
-    assert len(out["band_scaling"]) == 1 and len(out["band_scaling"][0]["bands"]) == 3, out["band_scaling"]
-    assert "0.0001" in out["scaling_note"] and "-0.1" in out["scaling_note"] and "3 bands" in out["scaling_note"], out
+    return out, dict(sent["params"])
+
+
+_S2_BAND = [{"scale": 0.0001, "offset": -0.1}]
+_S2_ITEM = {"bbox": [0, 0, 1, 1], "assets": {k: {"raster:bands": _S2_BAND} for k in ("green", "swir16", "nir", "red")}}
+
+
+def t_statistics_apply_scale_and_offset_by_default():
+    # Field test No.15: ratios cancel the scale but not the offset, so raw NDVI was biased after 2022
+    out, _ = _scaled_stats(_S2_ITEM, assets=["green"])
+    g = out["green"]
+    assert abs(g["min"] - 0.0) < 1e-9 and abs(g["max"] - 0.2) < 1e-9 and abs(g["mean"] - 0.1) < 1e-9, g
+    assert abs(g["percentile_2"] - 0.01) < 1e-9 and abs(g["std"] - 0.05) < 1e-9, "std scales only"
+    assert g["count"] == 10, "count is not a value"
+    assert out["scaling_applied"] is True and "scaling_note" not in out, out
+    assert out["band_scaling"][0]["scale"] == 0.0001, "the factors used travel with the result"
+
+
+def t_statistics_raw_path_keeps_the_scaling_note():
+    # Field test No.12: raw digital numbers must still say so in words when scaling is off
+    out, _ = _scaled_stats(_S2_ITEM, assets=["green"], apply_scaling=False)
+    assert out["green"]["mean"] == 2000.0 and out["green"]["std"] == 500.0, out
+    assert "scaling_applied" not in out, out
+    assert len(out["band_scaling"]) == 1 and len(out["band_scaling"][0]["bands"]) == 4, out["band_scaling"]
+    assert "0.0001" in out["scaling_note"] and "-0.1" in out["scaling_note"] and "4 bands" in out["scaling_note"], out
+
+
+def t_expression_bands_are_corrected_before_the_index():
+    _, params = _scaled_stats(_S2_ITEM, expression="(nir-red)/(nir+red)")
+    e = params["expression"]
+    assert e.count("*0.000100000000-0.100000000000)") == 8 and "where((b1*" in e and "where((b2*" in e, e
+    assert e.count("<0,0,") == 4, "a negative offset leaves dark pixels below zero, so they are floored"
+    # factor-less bands are left as written
+    plain = {"bbox": [0, 0, 1, 1], "assets": {k: {"raster:bands": [{"scale": 1.0}]} for k in ("nir", "red")}}
+    out, params = _scaled_stats(plain, expression="(nir-red)/(nir+red)")
+    assert params["expression"] == "(b1-b2)/(b1+b2)", params
+    assert "scaling_applied" not in out, out
+    _, params = _scaled_stats(_S2_ITEM, expression="(nir-red)/(nir+red)", apply_scaling=False)
+    assert params["expression"] == "(b1-b2)/(b1+b2)", "the raw path sends the expression as written"
 
 
 def t_nominatim_fallback_says_what_it_matched():
