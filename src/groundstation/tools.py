@@ -3383,7 +3383,7 @@ def render_postcard(
         _catalog_source(catalog, collection_id), caption, license_, stack_html,
         engine="STAC · rio-tiler" if mosaic_scenes else "STAC · TiTiler",
         dropped=dropped,
-        engine="STAC · rio-tiler" if mosaic_scenes else "STAC · TiTiler", legends=legends,
+        legends=legends,
     )
     try:
         out_path = _artifact_path(out_path, "postcard", f"{place}-{date}")
