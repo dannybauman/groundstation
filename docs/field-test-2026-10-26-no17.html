@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>groundstation field test №17: the 2 cards stops 28 to 30 set out to fix, re-run on 0.52.0</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
+  --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
+  --calm: #2e7d32; --blue: #1d4e8f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
+header { border-bottom: 2px solid var(--ink); padding: 42px 24px 30px; }
+.wrap { max-width: 1060px; margin: 0 auto; }
+header h1 { font: 700 34px/1.1 'Roboto Condensed', sans-serif; margin: 0 0 6px; letter-spacing: .02em; }
+header h1 .dot { display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); margin-right: 12px; }
+header .sub { font: 500 11.5px 'Roboto Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--mid); }
+header p.lede { max-width: 760px; font-size: 16px; margin: 16px 0 0; color: var(--mid); }
+.stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 26px auto 0; max-width: 1060px; padding: 0; }
+.stat { flex: 1; min-width: 160px; background: var(--white); border: 1px solid var(--rule); border-top: 3px solid var(--accent); padding: 12px 16px; }
+.stat b { display: block; font: 600 30px 'Roboto Condensed', sans-serif; color: var(--accent); }
+.stat span { font-size: 12px; color: var(--mid); }
+main { padding: 10px 24px 60px; }
+h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
+  display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
+h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(480px, 100%), 1fr)); gap: 16px; }
+@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.card .top { display: flex; align-items: center; gap: 10px; }
+.card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.card .tag { font: 500 10px 'Roboto Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); border: 1px solid var(--rule); padding: 3px 8px; }
+.card .who { margin-left: auto; font: 400 10.5px 'Roboto Mono', monospace; color: var(--muted); }
+.label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
+.returned { font: 400 12px/1.5 'Roboto Mono', monospace; background: #fbfaf7; border: 1px solid var(--rule); border-left: 3px solid var(--mid); padding: 8px 12px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+details.data summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; margin-bottom: 3px; }
+.answer { font-size: 13.5px; color: var(--mid); }
+.answer b { color: var(--ink); }
+.learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
+.learning b { color: var(--accent); font-style: normal; }
+.shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
+.fig { position: relative; display: block; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; }
+.fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
+  background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
+.fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 0 40px; }
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <h1><span class="dot"></span>THE FIELD TEST №17</h1>
+  <div class="sub">groundstation · 2 prompts re-run · 2 live artifacts · 2 fixed, 0 partly, 0 the same · October 26, 2026 · Development Seed labs</div>
+  <p class="lede">The 2 cards from field test 16 that stops 28 to 30 were charted to fix, asked again in the same words on main at 0.52.0 (PRs 93 to 95, landed the same day). The Rolling Fork compare now names its scaling factors, and the Lake Victoria call that needed a local patch in field test 16 runs clean with no patch. The layers read as a collection name, and at 390 px the credit sits inside the attribution bar. Each learning opens with its verdict, grounded only in the new output: 2 fixed, 0 partly, 0 the same.</p>
+</div></header>
+
+<div class="stats wrap" style="padding: 0 24px">
+  <div class="stat"><b>2</b><span>cards re-asked on 0.52.0, covering stops 28, 29 and 30</span></div>
+  <div class="stat"><b>2 · 0 · 0</b><span>fixed · partly · the same, each verdict grounded in the new output</span></div>
+  <div class="stat"><b>2</b><span>live artifacts: a before and after swipe and a land cover map; plus 3 Lake Victoria screenshots at phone and desktop width</span></div>
+</div>
+
+<main class="wrap">
+<h2 class="round">Round 1: the factors under the number, and the name and credit on a phone (stops 28 to 30)</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">1</div><div class="tag">claims on the stack</div><div class="who">insurance catastrophe adjuster</div></div>
+<div><div class="label">Input</div><div class="prompt">Rolling Fork, Mississippi was hit by the March 24, 2023 tornado. Show me before and after, and tell me what data this came from.</div></div>
+<div class="answer"><div class="label">Our read</div><b>Rolling Fork gives the same NDVI as field test 16, 0.198 before and 0.2274 after (delta 0.0294, 14.8%), and the result now names the scaling factors for both dates.</b> The data is Sentinel-2 L2A tile 15SXS, S2A_15SXS_20230219_0_L2A before (cloud 45.558468) and S2B_15SXS_20230326_0_L2A after (cloud 0.767861, 2 days after the tornado). Both <code>after</code> and <code>before</code> carry <code>band_scaling</code>: scale 0.0001 and offset 0 with declared_offset -0.1 on 24 bands including nir, scale 0.001 on aot, scale 0.001 unit cm on wvp. The scaling_note says one clause per date: scale 0.0001 and offset 0 applied for 2023-03-26 and for 2023-02-19, and for each Earth Search already took the -0.1 offset out of its pixels. The means could not move against field test 16: a normalized difference is a ratio, so the scale cancels, and the -0.1 offset is already in the pixels of both of these 2023 scenes, so nothing is left for compare_dates to add. The note names no date where the offset is still in the pixels, so I cannot say what a pre-2022 scene would show from this run. An NDVI mean over the whole box still says nothing about the damage track.</div>
+<a class="fig" href="img/ft17-place-rolling-fork.html" target="_blank" title="open the live artifact"><img src="img/ft17-place-rolling-fork.png" alt="artifact produced by example 1" loading="lazy"><span class="open">swipe: Rolling Fork NDVI with the adjuster's notes ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">compare_dates(bbox=[-90.95, 32.86, -90.8, 32.96], window_before="2023-02-15T00:00:00Z/2023-03-23T23:59:59Z", window_after="2023-03-25T00:00:00Z/2023-04-01T23:59:59Z", max_cloud_cover=50, label="Rolling Fork NDVI", stack_facts={"geocoded": "nominatim", "adjuster": "claim file RF-2023-0324"}, out_path="docs/img/ft17-place-rolling-fork.html", notes=["Claim event: EF4 tornado, 2023-03-24, NWS Jackson", "Track hand-drawn from the damage survey, not from this imagery"])
+  tile: 15SXS
+  after : S2B_15SXS_20230326_0_L2A  2023-03-26  cloud 0.767861  mean 0.2274  covers_aoi_pct 100.0
+    runner_up: S2B_15SYS_20230326_0_L2A  2023-03-26  cloud 7.874347  covers_aoi_pct 41.1
+  before: S2A_15SXS_20230219_0_L2A  2023-02-19  cloud 45.558468  mean 0.198  covers_aoi_pct 100.0
+    runner_up: S2A_15SYS_20230219_0_L2A  2023-02-19  cloud 13.800161  covers_aoi_pct 41.1
+  delta: 0.0294   delta_pct: 14.8   expression: (nir-red)/(nir+red)
+  map_path: docs/img/ft17-place-rolling-fork.html
+  clipped_to: [-90.95, 32.86, -90.8, 32.96]
+  scaling_applied: true
+  after.band_scaling: scale 0.001 offset 0 on 2 bands (aot, aot-jp2); scale 0.0001 offset 0, declared_offset -0.1 on 24 bands (blue, coastal, green, nir, nir08, and others); scale 0.001 offset 0 unit cm on 2 bands (wvp, wvp-jp2)
+  before.band_scaling: scale 0.001 offset 0 on 2 bands (aot, aot-jp2); scale 0.0001 offset 0, declared_offset -0.1 on 24 bands (blue, coastal, green, nir, nir08, and others); scale 0.001 offset 0 unit cm on 2 bands (wvp, wvp-jp2)
+  scaling_note: "scale 0.0001 and offset 0 applied for 2023-03-26 (Earth Search already took the -0.1 offset out of its pixels); scale 0.0001 and offset 0 applied for 2023-02-19 (Earth Search already took the -0.1 offset out of its pixels)"
+  caveat: ["cloud may be driving this delta (before scene S2A_15SXS_20230219_0_L2A 46%, threshold 20%). Cloud pushes a normalized index toward zero."]
+  notes: ["Claim event: EF4 tornado, 2023-03-24, NWS Jackson", "Track hand-drawn from the damage survey, not from this imagery"]
+  stack_facts_ignored: ["geocoded", "adjuster"]
+  note: stack_facts takes provenance flags only (events, weather, passes, terrain, snapshot; geocoded is kept only for a bbox geocode returned, with the source it returned); put free text in notes</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> Field test 16 said "Scaling is applied, but the factors are not named in the default compare_dates result", with "no scaling_note, and no scale or offset values in this result". Now the default compare_dates result carries <code>band_scaling</code> under both <code>after</code> and <code>before</code> (scale 0.0001, offset 0, declared_offset -0.1 on 24 bands, plus the aot and wvp scales) and a <code>scaling_note</code> with one clause per date: "scale 0.0001 and offset 0 applied for 2023-03-26 (Earth Search already took the -0.1 offset out of its pixels); scale 0.0001 and offset 0 applied for 2023-02-19 (Earth Search already took the -0.1 offset out of its pixels)". The factors no longer need an apply_scaling=False run or a compute_statistics call to be read. The means 0.2274 and 0.198 and the delta 0.0294 are unchanged from field test 16, as the note's offset clause and the ratio predict. The same card still shows the stop 21 caveat naming scene <code>S2A_15SXS_20230219_0_L2A</code> at 46% against a 20% threshold, <code>stack_facts_ignored</code> returning <code>geocoded</code> and <code>adjuster</code>, and both notes strings in the result. Not checked this run: the apply_scaling=False path, the out_path outside the repo, how many times each note string lands on the page, a scene older than 2022, and a non-ratio expression.</div>
+<div class="shows">stop 28 band_scaling on after and before · stop 28 scaling_note with one clause per date · declared_offset -0.1 already in the pixels · stop 21 cloud caveat at 46% against 20% · geocoded and adjuster in stack_facts_ignored · notes returned</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">2</div><div class="tag">legend at phone width, again</div><div class="who">geographer</div></div>
+<div><div class="label">Input</div><div class="prompt">Land cover around the shores of Lake Victoria, with a legend.</div></div>
+<div class="answer"><div class="label">Our read</div><b>The call that failed as shipped in field test 16 now succeeds with no patch, the six layers read "ESA WorldCover 2021" with the tile id beside them, and at 390 px the Development Seed credit is no longer a separate box: it sits inside the attribution bar's own text.</b> search_imagery found 6 scenes, all from 2021-01-01, covering 100.0% of the area (best single scene 47.0%), and render_map wrote the page with no KeyError. At 390 by 844 the Layers fold is closed on load and opens on a tap. The #credit div is display none; the attribution bar is the same box as before (left 10, top 790, right 380, bottom 834, 370 by 44) and its text now begins "groundstation · Development Seed labs · STAC + TiTiler". At 1280 by 800 the credit div shows (left 12, top 759, right 384.5, bottom 776), and the attribution bar (left 857.8, top 766, right 1270, bottom 790) reads "MapLibre | OpenFreeMap ..." without the credit text.</div>
+<a class="fig" href="img/ft17-victoria-landcover.html" target="_blank" title="open the live artifact"><img src="img/ft17-victoria-390-open.png" alt="artifact produced by example 2" loading="lazy"><span class="open">map: Lake Victoria, ESA WorldCover 2021, with legend (clean call, no patch) ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("planetary-computer", ["esa-worldcover"], bbox=[31.6, -3.1, 34.9, 0.6], datetime_range="2021-01-01T00:00:00Z/2021-12-31T23:59:59Z", limit=10)
+  count: 6   recommended: 6 scene_ids from 2021-01-01, covers_aoi_pct 100.0 (best single scene covers 47.0%)
+  full_coverage_set: date 2021-01-01, union_covers_aoi_pct 100.0
+
+render_map("Lake Victoria shores, ESA WorldCover 2021", bbox=[31.6, -3.1, 34.9, 0.6], [coverage_set layer, assets ["map"], colormap_name "esa-worldcover"], out_path="docs/img/ft17-victoria-landcover.html")
+  Both calls ran in-process from groundstation.tools at 0.52.0, once each, no patch, no layer name. No error.
+  map_path: docs/img/ft17-victoria-landcover.html
+  layers: ["ESA WorldCover 2021 · ESA_WorldCover_10m_2021_v200_S03E033", "ESA WorldCover 2021 · ESA_WorldCover_10m_2021_v200_S03E030", "ESA WorldCover 2021 · ESA_WorldCover_10m_2021_v200_N00E033", "ESA WorldCover 2021 · ESA_WorldCover_10m_2021_v200_N00E030", "ESA WorldCover 2021 · ESA_WorldCover_10m_2021_v200_S06E033", "ESA WorldCover 2021 · ESA_WorldCover_10m_2021_v200_S06E030"]
+  state.layers name / detail: name "ESA WorldCover 2021", detail "ESA_WorldCover_10m_2021_v200_S03E033" (and the same name for the other 5 tiles); tiles URLs use mosaic/pc1.<digits>.<hash>
+  legend: title "ESA WorldCover 2021", 11 classes (10 Tree cover ... 100 Moss and lichen)
+
+Playwright, headless Chromium, viewport set before load, 6 s load plus 1 s after tap:
+390 x 844:
+  details.fold (Layers) open on load: False; after a tap on its summary: True
+  panel rows (6): "ESA WorldCover 2021" with the tile id as detail: S03E033, S03E030, N00E033, N00E030, S06E033, S06E030
+  #credit: display none, box 0,0,0,0
+  .maplibregl-ctrl-attrib: left 10, top 790, right 380, bottom 834 (370 x 44)
+  attribution text: "groundstation · Development Seed labs · STAC + TiTiler | OpenFreeMap © OpenMapTiles Data from OpenStreetMap"; contains "Development Seed labs": True
+1280 x 800:
+  #credit: display block, left 12, top 759, right 384.5, bottom 776
+  attribution: left 857.8, top 766, right 1270, bottom 790; text "MapLibre | OpenFreeMap © OpenMapTiles Data from OpenStreetMap"; contains "Development Seed labs": False
+  details.fold open on load: True
+
+screenshots: docs/img/ft17-victoria-390.png, docs/img/ft17-victoria-390-open.png, docs/img/ft17-victoria-1280.png</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> Field test 16 said the call "fails as shipped with KeyError 'id'", that each layer read "2021-01-01" and not the collection plus date, and that at 390 px the credit (803 to 820) is a "credit inside the attribution box on both axes" (bar 790 to 834). On 0.52.0 the same two calls ran once each with no patch and no layer name and returned a page: no KeyError, and the tiles come from mosaic ids of the form pc1.&lt;digits&gt;.&lt;hash&gt;, so the searchid read works for esa-worldcover. All 6 layers read "ESA WorldCover 2021" with the tile id as the detail line. At 390 by 844 the credit div is hidden (display none) and its text is the start of MapLibre's attribution bar, so it cannot sit on the data credits; the bar is the same 370 by 44 box as before. At 1280 by 800 the credit div still shows and the attribution bar does not carry it, so the wide layout is unchanged. The viewport was set before the page loaded. Not checked: a real phone, widths between 390 and 500, whether the longer attribution text wraps to a third line on a narrower phone, and other collections whose register answer may differ.</div>
+<div class="shows">clean call, no KeyError (PR 92) · layers named "ESA WorldCover 2021" with tile id (stop 29) · credit folded into the attribution bar at 390 px (stop 30) · Layers fold closed on load · credit div and plain attribution at 1280 px</div>
+</div>
+</div>
+<div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
+bash scripts/doctor.sh                      # walks the setup chain, prints the fix
+uv run evals/unit_checks.py                 # 199 offline checks
+uv run scripts/field_test.py docs/field-test-2026-10-26-no17.cases.json</code></div>
+</main>
+
+<footer>field test №17 · October 26, 2026 · run on main at 0.52.0 · 2 cards re-run, 2 fixed, 0 partly, 0 the same · groundstation · Development Seed labs</footer>
+
+</body>
+</html>
