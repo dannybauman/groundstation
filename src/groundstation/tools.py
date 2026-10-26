@@ -1415,24 +1415,62 @@ def preview_item(
 
     bbox [w, s, e, n] crops the preview to that area (the tiler's part
     endpoint) instead of rendering the whole scene — pass the AOI so the
-    subject fills the frame and scene-edge nodata stays out. Ignored on
-    Planetary Computer, whose previews are pre-rendered whole-scene PNGs.
+    subject fills the frame and scene-edge nodata stays out. On Planetary
+    Computer, passing assets or expression (with any of rescale,
+    colormap_name, bbox) renders through the data API's item endpoints; with
+    none of them you get the collection's pre-rendered whole-scene preview.
+    When that fallback cannot honor something you passed, the result lists
+    it under `dropped`.
     """
+    asked = [k for k, v in (("assets", assets), ("expression", expression), ("rescale", rescale),
+                            ("colormap_name", colormap_name), ("bbox", bbox)) if v]
     part = ",".join(str(round(v, 6)) for v in bbox) if bbox else ""
     assets = assets or ([] if expression else _default_assets(collection_id))
     if expression and not rescale:
         rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
     backend = CATALOGS[catalog]["raster"]
     if backend == "pc":
+        # the stored rendered_preview is whole-scene and takes no parameters;
+        # asked-for ones go to the data API's item endpoints instead
+        if asked and (assets or expression):
+            if expression and not assets:
+                assets = _expression_idents(expression)
+            params = [("collection", collection_id), ("item", item_id)] + [("assets", a) for a in assets]
+            if expression:
+                params += [("expression", expression), ("asset_as_band", "true")]
+            if rescale:
+                params.append(("rescale", rescale))
+            if colormap_name:
+                params.append(("colormap_name", colormap_name))
+            params.append(("max_size", str(max_size)))
+            if part:
+                params.append(("dst_crs", "epsg:3857"))  # same mercator crop as the other backends
+            path = f"bbox/{part}.png" if part else "preview.png"
+            return {
+                "preview_url": "https://planetarycomputer.microsoft.com/api/data/v1/item/"
+                + f"{path}?{httpx.QueryParams(params)}",
+                "backend": "pc-data-api",
+            }
         item = _get_json(
             f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
         )
         rp = item.get("assets", {}).get("rendered_preview", {}).get("href")
         if rp:
-            return {"preview_url": rp, "backend": "pc-data-api"}
+            out = {"preview_url": rp, "backend": "pc-data-api"}
+            if asked:
+                out["dropped"] = [
+                    {"param": k, "why": "no assets known for this collection, so the pre-rendered "
+                     "whole-scene preview was used (pass assets to apply it)"}
+                    for k in asked
+                ]
+            return out
         return {"error": "No rendered_preview asset on this Planetary Computer item"}
     if backend == "veda":
+        if expression and not assets:
+            assets = _expression_idents(expression)
         params = [("assets", a) for a in assets or ["cog_default"]]
+        if expression:
+            params += [("expression", expression), ("asset_as_band", "true")]
         if rescale:
             params.append(("rescale", rescale))
         if colormap_name:
@@ -3209,6 +3247,7 @@ def _postcard_html(
     license_: str | None = None,
     stack_html: str | None = None,
     engine: str = "STAC · TiTiler",
+    dropped: list[dict[str, str]] | None = None,
     legends: list[dict[str, Any]] | None = None,
 ) -> str:
     import base64
@@ -3220,7 +3259,8 @@ def _postcard_html(
             "PLACE": escape(place), "DATE": escape(date),
             "COLLECTION": escape(collection_id), "SOURCE": escape(source),
             "CAPTION": f'<p class="caption">{escape(caption)}</p>' if caption else "",
-            "LICENSE": f"<div>license: {escape(license_)}</div>" if license_ else "",
+            "LICENSE": (f"<div>license: {escape(license_)}</div>" if license_ else "")
+            + (f"<div>not applied: {escape('; '.join(d['param'] + ' (' + d['why'] + ')' for d in dropped))}</div>" if dropped else ""),
             "STACK": stack_html or "", "LEGEND": _legend_card_html(legends or []),
         })
     )
@@ -3269,7 +3309,7 @@ def render_postcard(
     pass the REST of a same-day full_coverage_set — the card bakes as a
     rio-tiler mosaic read straight from the COGs, main scene winning where
     scenes overlap. Same-day fills keep the seam invisible. Needs bbox;
-    earth-search-style catalogs only (PC/VEDA fall back to single scene).
+    earth-search-style catalogs only (PC/VEDA fall back to single scene, named in `dropped`).
     """
     if bbox is not None:
         # clamp to the scenes' union bbox so an AOI hanging off the data
@@ -3292,12 +3332,14 @@ def render_postcard(
         # then shape it: nearest standard card ratio (or the caller's pick),
         # trimmed centrally — inside the clamp, so still all data
         _, bbox = _snap_aspect(bbox, "imagery", aspect)
-    png, mosaic_scenes, mosaic_note = None, 0, None
+    png, mosaic_scenes, mosaic_note, dropped = None, 0, None, []
     if fill_item_ids:
         if bbox is None:
             mosaic_note = "fill_item_ids ignored: a mosaic card needs bbox"
+            dropped.append({"param": "fill_item_ids", "why": "a mosaic card needs bbox"})
         elif CATALOGS[catalog]["raster"] != "titiler-xyz":
             mosaic_note = f"mosaic cards need direct COG access; {catalog} fell back to the single scene"
+            dropped.append({"param": "fill_item_ids", "why": f"mosaic cards need direct COG access, which {catalog} does not offer"})
         else:
             try:
                 png, mosaic_scenes = _mosaic_png(
@@ -3315,8 +3357,11 @@ def render_postcard(
         )
         if "preview_url" not in p:
             return p
+        dropped += p.get("dropped", [])
         r = _client.get(p["preview_url"], timeout=90)
-        r.raise_for_status()
+        if r.status_code >= 400:
+            # never write a card around a broken image
+            return {"error": f"image request failed: HTTP {r.status_code}", "url": p["preview_url"]}
         png = r.content
         from urllib.parse import urlsplit
 
@@ -3336,7 +3381,9 @@ def render_postcard(
     html = _postcard_html(
         png, place, date, collection_id,
         _catalog_source(catalog, collection_id), caption, license_, stack_html,
-        engine="STAC · rio-tiler" if mosaic_scenes else "STAC · TiTiler", legends=legends,
+        engine="STAC · rio-tiler" if mosaic_scenes else "STAC · TiTiler",
+        dropped=dropped,
+        legends=legends,
     )
     try:
         out_path = _artifact_path(out_path, "postcard", f"{place}-{date}")
@@ -3344,6 +3391,8 @@ def render_postcard(
         return {"error": str(e)}
     _write_artifact(out_path, html)
     out = {"path": out_path}
+    if dropped:
+        out["dropped"] = dropped
     if legends:
         out["legend"] = legends[0]
     if mosaic_scenes:
