@@ -1857,7 +1857,7 @@ def t_statistics_have_one_shape_clipped_or_not():
     assert "scaling_note" not in out, "scale 1 offset 0 is not a caveat"
 
 
-def _scaled_stats(item, **kw):
+def _scaled_stats(item, catalog="earth-search", **kw):
     # one compute_statistics call against a fake tiler; returns (result, params the tiler was sent)
     feature = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
                "properties": {"statistics": {"b1": {"count": 10, "min": 1000.0, "max": 3000.0, "mean": 2000.0, "std": 500.0,
@@ -1867,7 +1867,7 @@ def _scaled_stats(item, **kw):
     tools._client.post = lambda url, **k: (sent.update(k), _FakeResp(feature))[1]
     tools._get_json = lambda url, **k: item
     try:
-        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "S2X", bbox=[0.2, 0.2, 0.8, 0.8], **kw)
+        out = tools.compute_statistics(catalog, "sentinel-2-l2a", "S2X", bbox=[0.2, 0.2, 0.8, 0.8], **kw)
     finally:
         tools._client.post, tools._get_json = saved_post, saved_json
     return out, dict(sent["params"])
@@ -1920,6 +1920,37 @@ def t_earth_search_offset_already_in_the_pixels_is_not_applied_twice():
     assert "-0.1" not in params["expression"] and "where" not in params["expression"], params
     out, _ = _scaled_stats(item, assets=["green"], apply_scaling=False)
     assert "already in the pixels" in out["scaling_note"], out
+
+
+def _pc_item(baseline):
+    # Planetary Computer shape: band-id assets, no raster:bands, the offset still in the pixels
+    return {"bbox": [0, 0, 1, 1], "properties": {"s2:processing_baseline": baseline},
+            "assets": {k: {} for k in ("B02", "B04", "B08", "B8A", "SCL", "AOT", "WVP", "visual")}}
+
+
+def t_planetary_computer_sentinel2_gets_the_collection_convention():
+    # stop 31: PC items carry no raster:bands, so the means were raw DN and a post-2022 NDVI was biased silently
+    for baseline, off in (("05.09", -0.1), ("03.01", 0)):
+        out, params = _scaled_stats(_pc_item(baseline), catalog="planetary-computer", assets=["B04"])
+        g = out["band_scaling"][0]
+        assert out["scaling_applied"] is True and g["scale"] == 0.0001 and g["offset"] == off, out
+        assert g["bands"] == ["B02", "B04", "B08", "B8A"], "reflectance bands only, never SCL, AOT, WVP or visual"
+        assert g["source"].startswith("collection convention"), g
+        assert abs(out["B04"]["mean"] - (0.2 + off)) < 1e-9, out
+    _, params = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", expression="(B08-B04)/(B08+B04)")
+    e = params["expression"]
+    assert e.count("-0.100000000000") == 4 and "B08*0.000100000000" in e and "SCL" not in e, e
+    _, params = _scaled_stats(_pc_item("03.01"), catalog="planetary-computer", expression="(B08-B04)/(B08+B04)")
+    assert "B04*0.000100000000+0.000000000000" in params["expression"], params
+    out, _ = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", assets=["B04"], apply_scaling=False)
+    assert "scaling_applied" not in out and "collection convention" in out["scaling_note"], out
+
+
+def t_sentinel2_without_raster_bands_or_a_convention_says_raw():
+    # stop 31: any other catalog with no raster:bands must not look scaled
+    out, _ = _scaled_stats(_pc_item("05.09"), assets=["B04"])
+    assert out["scaling_applied"] is False and "raw digital numbers" in out["scaling_note"], out
+    assert "band_scaling" not in out and out["B04"]["mean"] == 2000.0, out
 
 
 def t_nominatim_fallback_says_what_it_matched():
