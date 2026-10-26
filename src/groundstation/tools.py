@@ -1355,7 +1355,8 @@ def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float
 RECOMMEND_MAX_CLOUD = 30.0  # above this a scene is only recommended when nothing cleaner exists
 # Field test No.8: a strict max on coverage took a 49.7% scene at 19% cloud over a
 # 48.9% scene at 0.6%, and a strict min on cloud took a 25-day-older scene for 0.4
-# points. Within these bands the axes are a tie and the newest scene wins
+# points. Within these bands the axes are a tie; a recency band then keeps the
+# scenes that are one look, and _scene_key (newest on a dead tie) picks among them
 RECOMMEND_COVERAGE_TIE = 5.0
 RECOMMEND_CLOUD_TIE = 5.0
 RECOMMEND_RECENCY_DAYS = 7  # scenes this close to the newest near-equal one are the same look; _scene_key picks among them
@@ -1389,7 +1390,15 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
 
     days = [d for d in map(day, near) if d]
     band = [it for it in near if not days or (day(it) or dt.date.min) >= max(days) - dt.timedelta(days=RECOMMEND_RECENCY_DAYS)]
-    best = min(band, key=_scene_key)
+    band.sort(key=lambda it: it.get("datetime") or "", reverse=True)
+    # newest first, and min keeps the first of equal keys, so a dead tie (an archive with no cloud
+    # figures) goes to the newest instead of falling to the id as text
+    best = min(band, key=lambda it: _scene_key(it)[:2])
+    is_newest = not days or day(best) == max(days)
+    pick = (
+        f"newest of {len(near)} near-equal scenes" if is_newest
+        else f"best on coverage, then cloud, of {len(band)} near-equal scenes within {RECOMMEND_RECENCY_DAYS} days of the newest"
+    )
     with_cloud = [it for it in items if cloud(it) is not None]
     clearest = min(with_cloud, key=lambda it: cloud(it) or 0.0) if with_cloud else None
     bc = cloud(best)
@@ -1400,7 +1409,7 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     elif cov(clearest) >= cov(best) - RECOMMEND_COVERAGE_TIE and len(near) > 1:
         # the clearest scene is inside both tie bands, so freshness decided
         reason = (
-            f"{'no cloud figure' if bc is None else f'{bc:.1f}% cloud'}, covers {cov(best):.1f}% of the area, and newest of {len(near)} near-equal scenes; "
+            f"{'no cloud figure' if bc is None else f'{bc:.1f}% cloud'}, covers {cov(best):.1f}% of the area, and {pick}; "
             f"the clearest ({cloud(clearest):.1f}% cloud) is from {(clearest.get('datetime') or '')[:10]}"
         )
     else:
@@ -4666,12 +4675,9 @@ def conditions_brief(
         items = img_res.get("items", [])
         latest_look = None
         if items:
-            # Find the newest item with cloud_cover <= 20.0, or fall back to lowest cloud
-            low_cloud_items = [it for it in items if it.get("cloud_cover") is not None and it["cloud_cover"] <= 20.0]
-            if low_cloud_items:
-                best_item = min(low_cloud_items, key=_scene_key)
-            else:
-                best_item = min(items, key=lambda it: it.get("cloud_cover") or 100.0)
+            # the pick search_imagery already made (coverage, cloud, recency band), else the same key over the window
+            rec_id = (img_res.get("recommended") or {}).get("id")
+            best_item = next((it for it in items if it["id"] == rec_id), None) or min(items, key=_scene_key)
 
             latest_look = {
                 "id": best_item["id"],

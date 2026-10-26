@@ -2887,12 +2887,18 @@ def t_one_scene_key_in_recommended():
     part = {"id": "part", "datetime": "2026-10-21T15:00:00Z", "cloud_cover": 5.0, "covers_aoi_pct": 68.0}
     assert tools._recommend([part, full])["id"] == "full"
     # inside the tie bands and the recency band, _scene_key picks: the newer scene is no better on it
-    a = {"id": "a", "datetime": "2026-10-10T15:00:00Z", "cloud_cover": 3.0, "covers_aoi_pct": 99.0}
-    b = {"id": "b", "datetime": "2026-10-13T15:00:00Z", "cloud_cover": 6.0, "covers_aoi_pct": 97.0}
-    assert tools._recommend([a, b])["id"] == "a"
+    a = {"id": "a", "datetime": "2026-10-10T15:00:00Z", "cloud_cover": 6.0, "covers_aoi_pct": 99.0}
+    b = {"id": "b", "datetime": "2026-10-13T15:00:00Z", "cloud_cover": 3.0, "covers_aoi_pct": 97.0}
+    rec = tools._recommend([a, b])
+    assert rec["id"] == "a" and "and newest of" not in rec["reason"] and "best on coverage, then cloud, of 2 near-equal scenes within 7 days of the newest" in rec["reason"], rec
     # outside the recency band the newer look still wins the tie, as stop 8 set it
     c = {**b, "id": "c", "datetime": "2026-10-25T15:00:00Z"}
-    assert tools._recommend([a, c])["id"] == "c"
+    rec = tools._recommend([a, c])
+    assert rec["id"] == "c", rec
+    # an archive with no cloud figures: a dead tie keeps the newest, not the id as text
+    old = {"id": "a", "datetime": "2026-10-10T15:00:00Z", "cloud_cover": None, "covers_aoi_pct": 90.0}
+    new = {"id": "z", "datetime": "2026-10-12T15:00:00Z", "cloud_cover": None, "covers_aoi_pct": 90.0}
+    assert tools._recommend([old, new])["id"] == "z"
 
 
 def t_postcard_prints_the_uncovered_wedge_on_the_card():
