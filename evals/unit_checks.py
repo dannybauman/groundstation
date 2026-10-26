@@ -206,6 +206,16 @@ def t_coverage_set_expands_to_item_layers():
         pass
 
 
+def t_coverage_set_nameless_reads_collection_and_date():
+    def names(coll, date, **kw):
+        fcs = {"date": date, "items": [{"catalog": "planetary-computer", "collection": coll, "id": "T1", "bbox": [0, 0, 1, 1]}]}
+        return [(l["name"], l["detail"]) for l in tools._expand_coverage_set({"type": "coverage_set", "set": fcs, **kw})]
+    assert names("esa-worldcover", "2021-01-01") == [("ESA WorldCover 2021", "T1")]
+    assert names("esa-worldcover", "2020-01-01") == [("ESA WorldCover 2020", "T1")]
+    assert names("esa-worldcover", "2021-01-01", name="Mine") == [("Mine", "T1")]
+    assert names("sentinel-2-l2a", "2024-05-01") == [("sentinel-2-l2a 2024-05-01", "T1")]
+
+
 def t_next_pass_pure_helpers():
     # one dip under the swath line = one pass; a shallow approach = none
     assert tools._pass_minima([300, 100, 50, 100, 300], 145) == [2]
@@ -612,6 +622,26 @@ def t_compare_dates_clips_means_to_bbox():
         assert maps[0]["stack_facts"] == {"terrain": True}, maps[0]["stack_facts"]
         assert seen == [box, box], seen
         assert out["clipped_to"] == box and "extent_note" not in out
+    finally:
+        tools.search_imagery, tools.compute_statistics, tools.render_map = saved
+
+
+def t_compare_dates_carries_band_scaling_and_names_factors():
+    saved = (tools.search_imagery, tools.compute_statistics, tools.render_map)
+    item = lambda i, d: {"id": i, "collection": "sentinel-2-l2a", "datetime": d + "T18:00:00Z", "cloud_cover": 1, "bbox": [-122, 39, -121, 40]}
+    wins = iter([[item("S2A_10TFK_20230328_0_L2A", "2023-03-28")], [item("S2A_10TFK_20210203_0_L2A", "2021-02-03")]])
+    tools.search_imagery = lambda *a, **kw: {"items": next(wins)}
+    groups = {
+        "S2A_10TFK_20230328_0_L2A": [{"scale": 0.0001, "declared_offset": -0.1, "offset": 0, "bands": ["a"] * 13}],
+        "S2A_10TFK_20210203_0_L2A": [{"scale": 0.0001, "offset": -0.1, "bands": ["a"] * 13}],
+    }
+    tools.compute_statistics = lambda cat, coll, iid, **kw: {"nd": {"mean": 0.5}, "scaling_applied": True, "band_scaling": groups[iid]}
+    tools.render_map = lambda **kw: {"map_path": "x.html"}
+    try:
+        out = tools.compare_dates(bbox=[-121.5, 39.4, -121.4, 39.5], window_before="a/b", window_after="c/d")
+        assert out["after"]["band_scaling"][0]["declared_offset"] == -0.1 and out["before"]["band_scaling"][0]["offset"] == -0.1
+        n = out["scaling_note"]
+        assert "offset -0.1 applied for 2021-02-03" in n and "offset 0 applied for 2023-03-28 (Earth Search already took the -0.1 offset out of its pixels)" in n, n
     finally:
         tools.search_imagery, tools.compute_statistics, tools.render_map = saved
 

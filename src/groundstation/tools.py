@@ -2592,6 +2592,11 @@ def _hole_text(aoi: list[float], shapes: list[Any]) -> str:
     return f"{pct:.0f}% of the view is uncovered, mostly {where}"
 
 
+def _dated_name(collection: str, date: str) -> str:
+    t = LEGENDS.get(collection, {}).get("title") or ""
+    return f"{t[:-4]}{date[:4]}" if t[-4:].isdigit() else f"{t or collection} {date}"
+
+
 def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[str, Any]:
     """An {"type": "item"} layer becomes a raster layer with tiles + scene bounds.
 
@@ -2606,10 +2611,12 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
     if not rescale and l.get("expression"):
         rescale, basis = "-1,1", "default for an index expression"
     item_bounds = l.get("bbox")
+    item: dict[str, Any] = {}
     if item_bounds is None:
         # scene footprint bounds stop the map requesting (and the tiler
         # serving 404s for) every out-of-footprint tile in the viewport
-        item_bounds = (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("bbox")
+        item = _item(l["catalog"], l["collection_id"], l["item_id"]) or {}
+        item_bounds = item.get("bbox")
     fallback = _fallback_tiles(l)
     tiles = tile_url_template(
         l["catalog"],
@@ -2622,13 +2629,14 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
         bbox=view or l.get("bbox"),
     )
     # a caller who passed bbox wants no fetch at all, so only the bbox-less path reads the item
-    geom = l.get("footprint") or (None if l.get("bbox") else (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("geometry"))
+    geom = l.get("footprint") or item.get("geometry")
     if isinstance(geom, dict) and geom.get("type") in ("Polygon", "MultiPolygon"):
         _LAYER_FOOTPRINTS[tiles] = geom
+    date = ((item.get("properties") or {}).get("datetime") or "")[:10]
     return {
         "type": "raster",
-        "name": l.get("name") or l["item_id"],
-        **({"detail": l["detail"]} if l.get("detail") else {}),
+        "name": l.get("name") or (_dated_name(l["collection_id"], date) if date else l["item_id"]),
+        **({"detail": l.get("detail") or l["item_id"]} if l.get("detail") or (date and not l.get("name")) else {}),
         "tiles": tiles,
         "opacity": l.get("opacity", 1),
         **({"bounds": item_bounds} if item_bounds else {}),
@@ -2651,7 +2659,8 @@ def _expand_coverage_set(layer: dict[str, Any]) -> list[dict[str, Any]]:
     items = (layer.get("set") or {}).get("items") or []
     if not items:
         raise ValueError("coverage_set layer has no items — pass search_imagery's full_coverage_set")
-    prefix = layer.get("name") or (layer.get("set") or {}).get("date") or "coverage"
+    date = (layer.get("set") or {}).get("date")
+    prefix = layer.get("name") or (_dated_name(items[0]["collection"], date) if date else "coverage")
     params = {k: layer[k] for k in ("assets", "expression", "colormap_name", "rescale", "opacity") if k in layer}
     out = []
     for it in items:
@@ -4061,6 +4070,7 @@ def compare_dates(
 
     Means are physical by default (scale and offset applied on both dates, so a scene from
     before 2022 and one from after compare fairly); scaling_applied says so once.
+    band_scaling rides with each date and scaling_note names the factors in words.
     apply_scaling=False gives raw digital numbers, with scaling_note naming what was not applied.
 
     A caveat list comes back when the delta shouldn't be read at face value —
@@ -4105,12 +4115,15 @@ def compare_dates(
     a, b = pick(after_items), pick(before_items)
 
     scope: dict[str, Any] = {}
+    scaling: dict[str, list[dict[str, Any]]] = {}
 
     def _mean(it: dict[str, Any]) -> float | None:
         try:
             # without the bbox the mean is the whole Sentinel-2 tile, not the place asked about
             s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox, apply_scaling=apply_scaling)
             scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_applied", "scaling_note") if k in s})
+            if s.get("band_scaling"):
+                scaling[it["id"]] = s["band_scaling"]
             return round(next(iter(s.values()))["mean"], 4)
         except Exception:
             return None
@@ -4153,11 +4166,27 @@ def compare_dates(
         "map_path": m["map_path"],
         **scope,
     }
+    for side, it in (("after", a), ("before", b)):
+        if it["id"] in scaling:
+            out[side]["band_scaling"] = scaling[it["id"]]
+    if scope.get("scaling_applied") and "scaling_note" not in scope and len(scaling) == 2:
+        out["scaling_note"] = _applied_scaling_words(
+            [(x["datetime"][:10], scaling[x["id"]]) for x in (a, b)]
+        )
     caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"), (a["id"], b["id"]))
     if caveats:
         out["caveat"] = caveats
     _notes_result(out, notes, stack_facts, bbox)
     return out
+
+
+def _applied_scaling_words(dated: list[tuple[str, list[dict[str, Any]]]]) -> str:
+    parts = []
+    for d, gs in dated:
+        g = max(gs, key=lambda g: len(g["bands"]))
+        took = f" (Earth Search already took the {g['declared_offset']} offset out of its pixels)" if "declared_offset" in g else ""
+        parts.append(f"scale {g.get('scale')} and offset {g.get('offset')} applied for {d}{took}")
+    return "; ".join(parts)
 
 
 # ---------------------------------------------------------------- monitoring
