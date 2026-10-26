@@ -353,6 +353,19 @@ def t_field_test_etime_parser():
     assert ft._etime_seconds("not-a-time") is None
 
 
+def t_map_draws_legend_for_worldcover():
+    with tempfile.TemporaryDirectory() as d:
+        def lay(cm):
+            return [{"type": "raster", "name": "r", "tiles": "https://x/{z}/{x}/{y}.png", "colormap_name": cm}]
+        out = str(Path(d) / "a.html")
+        r = tools.render_map("t", [0, 0, 1, 1], lay("esa-worldcover"), out_path=out)
+        html = Path(r["map_path"]).read_text()
+        assert "ESA WorldCover 2021" in html and "Cropland" in html and "Built-up" in html
+        assert len(r["legend"]["classes"]) == 11 and r["legend"]["classes"][3]["name"] == "Cropland"
+        r = tools.render_map("t", [0, 0, 1, 1], lay("viridis"), out_path=str(Path(d) / "b.html"))
+        assert "legend" not in r and 'id="legends"' not in Path(r["map_path"]).read_text()
+
+
 def t_map_with_no_imagery_says_so():
     # field test No.6: a geojson-only storm track rendered a 10 KB still that
     # was two dots on blank. The render "succeeded" and nothing said otherwise.
@@ -630,6 +643,12 @@ def t_postcard_attribution_block():
     assert "license:" not in _postcard()  # omitted, not left blank
 
 
+def t_postcard_legend_row():
+    html = _postcard(legends=tools._legends_for([], "esa-worldcover"))
+    assert "ESA WorldCover 2021" in html and "Mangroves" in html and "<script" not in html
+    assert 'class="legend"' not in _postcard()
+
+
 def t_postcard_license_placeholder_omitted():
     # STAC's "proprietary" is a missing-SPDX-id marker, not a terms claim
     assert tools._shareable_license("proprietary") is None
@@ -654,6 +673,64 @@ def t_postcard_no_local_paths_and_small():
         assert "/Users/" not in html and "file://" not in html
         assert "First light after the storm." in html
         assert out.stat().st_size < 5 * 1024 * 1024
+
+
+class _ImgResp:
+    def __init__(self, status):
+        self.status_code, self.content = status, CANNED_PNG
+
+
+def _postcard_call(status=200, **kw):
+    seen = []
+    saved = tools._client.get, tools._get_json
+    tools._client.get = lambda url, **k: (seen.append(url), _ImgResp(status))[1]
+    tools._get_json = lambda url, **k: {"bbox": [-113, 33, -111, 34], "license": "x"}
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            out = tools.render_postcard(
+                "planetary-computer", "landsat-c2-l2", "I", "P", "2026-08-17",
+                out_path=str(Path(d) / "c.html"), **kw,
+            )
+            html = Path(out["path"]).read_text(encoding="utf-8") if "path" in out else ""
+    finally:
+        tools._client.get, tools._get_json = saved
+    return out, seen, html
+
+
+def t_postcard_pc_honors_assets_rescale_colormap_bbox():
+    out, seen, html = _postcard_call(
+        assets=["lwir11"], rescale="48000,57000", colormap_name="inferno",
+        bbox=[-112.25, 33.35, -111.95, 33.60],
+    )
+    u = seen[0]
+    assert "/api/data/v1/item/bbox/" in u and "assets=lwir11" in u
+    assert "rescale=48000%2C57000" in u and "colormap_name=inferno" in u
+    assert "dropped" not in out and "not applied" not in html
+
+
+def t_postcard_pc_no_params_keeps_prerendered_preview():
+    saved = tools._get_json
+    seen = []
+    try:
+        tools._get_json = lambda url, **k: {"assets": {"rendered_preview": {"href": "https://pc/pre.png"}}, "license": "x"}
+        saved_get = tools._client.get
+        tools._client.get = lambda url, **k: (seen.append(url), _ImgResp(200))[1]
+        with tempfile.TemporaryDirectory() as d:
+            tools.render_postcard("planetary-computer", "landsat-c2-l2", "I", "P", "d", out_path=str(Path(d) / "c.html"))
+    finally:
+        tools._get_json, tools._client.get = saved, saved_get
+    assert seen == ["https://pc/pre.png"]
+
+
+def t_postcard_failed_image_is_an_error_not_a_card():
+    out, seen, _ = _postcard_call(status=500, assets=["red"])
+    assert "path" not in out and "HTTP 500" in out["error"] and out["url"] == seen[0]
+
+
+def t_postcard_names_what_it_dropped():
+    out, _, html = _postcard_call(bbox=[-112.25, 33.35, -111.95, 33.60], fill_item_ids=["J"])
+    assert {d["param"] for d in out["dropped"]} == {"fill_item_ids"}
+    assert "not applied: fill_item_ids" in html
 
 
 def _render_3d(**kw) -> str:
