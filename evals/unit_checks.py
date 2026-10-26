@@ -211,9 +211,13 @@ def t_next_pass_pure_helpers():
     assert tools._pass_minima([300, 200, 300], 145) == []
     # plateau at the minimum still counts once (<= left, < right)
     assert tools._pass_minima([300, 50, 50, 300], 145) == [2]
-    # local solar time: UTC 19:00 at 120W is 11:00 — a daytime optical pass
-    assert abs(tools._local_solar_hour(19.0, -120) - 11.0) < 0.01
-    assert abs(tools._local_solar_hour(2.0, 140) - 11.33) < 0.34
+    # sun elevation (NOAA approximation, about 1 degree)
+    U = dt.timezone.utc
+    sun = tools._sun_elevation_deg
+    assert sun(dt.datetime(2026, 3, 20, 12, 0, tzinfo=U), 0, 0) > 85
+    assert abs(sun(dt.datetime(2026, 6, 21, 12, 0, tzinfo=U), 0, 0) - 66.5) < 1.5
+    assert sun(dt.datetime(2026, 10, 26, 12, 29, tzinfo=U), 78.22, 15.65) < 0  # Longyearbyen, polar night
+    assert 30 < sun(dt.datetime(2026, 10, 28, 19, 13, tzinfo=U), 38.82, -123.19) < 40
 
 
 def t_coverage_note_names_the_hole():
@@ -2091,7 +2095,7 @@ def t_zarr_select_says_how_far_it_snapped():
 
     t = np.array(["2022-12-31T18", "2023-01-10T12"], dtype="datetime64[ns]")
     da = xr.DataArray(np.zeros((2, 2, 2)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=[1.0, 0.0], longitude=[0.0, 1.0]))
-    _, used, notes = tools._zarr_select(da, dict(valid_time="2026-10-25T00:00"))
+    _, used, notes = tools._zarr_select(da, dict(valid_time="2023-01-11T00:00"))
     assert used["time"].startswith("2023-01-10") and "outside the store's range" in notes[0] and "off by" in notes[0], notes
 
 
@@ -2291,6 +2295,68 @@ def t_zarr_tile_time_outside_range_refused():
     assert "outside" in out and "2023-01-10" in out and "{z}" not in out, out
     ok = tools.tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel={"time": "2023-01-10T12:00"})
     assert "{z}" in ok, ok
+
+
+def t_zarr_snap_past_one_step_is_refused():
+    import numpy as np
+    import xarray as xr
+
+    t = np.array(["2026-10-25T00", "2026-10-25T06", "2026-10-25T12"], dtype="datetime64[ns]")
+    da = xr.DataArray(np.zeros((3, 2, 2)), dims=("time", "latitude", "longitude"), coords=dict(time=t, latitude=[1.0, 0.0], longitude=[0.0, 1.0]))
+    try:
+        tools._zarr_select(da, dict(valid_time="2026-10-20T21:00"))
+        raise AssertionError("a 5-day snap was not refused")
+    except ValueError as e:
+        assert "2026-10-25 00:00:00" in str(e) and "2026-10-25 12:00:00" in str(e), e
+    _, used, notes = tools._zarr_select(da, dict(valid_time="2026-10-25T09:00"))  # 3 h off on a 6 h grid
+    assert "snapped" in notes[0], notes
+    _, _, notes = tools._zarr_select(da, dict(valid_time="2026-10-25T05:00"))
+    assert "snapped" in notes[0], notes
+
+
+def t_zarr_stats_refusals_name_the_range():
+    import numpy as np
+    import xarray as xr
+
+    saved = tools._open_zarr
+    def boom(sid):
+        raise AssertionError("opened the store for a time it does not hold")
+    tools._open_zarr = boom
+    try:
+        mur = tools.compute_statistics("zarr", "nasa-mur-sst", "analysed_sst", bbox=[-122.05, 36.65, -121.75, 36.95], sel={"time": "2026-10-20"})
+        assert "2020-01-20" in mur["error"], mur
+        era = tools.compute_statistics("zarr", "weatherbench2-era5", "total_precipitation_6hr", bbox=[-122.4, 38.6, -121.4, 40.0], sel={"time": "2026-10-15T12:00"})
+        assert "1959-01-01" in era["error"] and "2023-01-10" in era["error"] and "stats" not in era, era
+    finally:
+        tools._open_zarr = saved
+    # a rolling store: the snap refusal carries the store's own range note
+    t = np.array(["2026-10-26T00", "2026-10-26T01"], dtype="datetime64[ns]")
+    da = xr.DataArray(np.zeros((2, 2, 2)), dims=("time", "y", "x"), coords=dict(time=t, y=[0.0, 1.0], x=[0.0, 1.0]))
+    tools._open_zarr = lambda sid: xr.Dataset({"TMP": da})
+    try:
+        hr = tools._zarr_statistics("noaa-hrrr-forecast", "TMP", [0.0, 0.0, 1.0, 1.0], dict(valid_time="2026-10-20T21:00"))
+    finally:
+        tools._open_zarr = saved
+    assert "2026-10-26 01:00:00" in hr["error"] and "past dates are not in this store" in hr["error"], hr
+
+
+def t_zarr_uncurated_variable_in_store_is_accepted():
+    import numpy as np
+    import xarray as xr
+
+    lat, lon = np.arange(30.0, 24.0, -1.0), np.arange(255.0, 265.0, 1.0)
+    da = xr.DataArray(np.ones((6, 10)), dims=("latitude", "longitude"), coords=dict(latitude=lat, longitude=lon), attrs=dict(long_name="Sea ice", units="1"))
+    ds = xr.Dataset({"sea_ice": da.expand_dims(time=[np.datetime64("2023-01-10", "ns")])})
+    saved = tools._open_zarr
+    tools._open_zarr = lambda sid: ds
+    try:
+        ok = tools._zarr_statistics("weatherbench2-era5", "sea_ice", [-104.5, 26.5, -102.5, 28.5], dict(time="2023-01-10T00:00"))
+        assert ok["units"] == "1" and "Sea ice" in ok["dataset"], ok
+        bad = tools._zarr_statistics("weatherbench2-era5", "nope", [-104.5, 26.5, -102.5, 28.5], None)
+        assert "1 variables" in bad["error"] and "2m_temperature" in bad["error"], bad
+    finally:
+        tools._open_zarr = saved
+    assert "total_precipitation_6hr" in tools.describe_collection("zarr", "weatherbench2-era5")["variables"]
 
 
 def t_versions_agree():
