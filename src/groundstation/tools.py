@@ -730,6 +730,7 @@ ZARR_STORES: dict[str, dict[str, Any]] = {
             "total_cloud_cover_atmosphere": {"description": "total cloud cover", "units": "percent"},
         },
         "sel": "valid_time (when the forecast is for, UTC; picks the latest run and its lead time), or init_time and lead_time",
+        "time_range_note": "the range is rolling: the store holds the newest run only, up to 384 h ahead, and past dates are not in this store",
         "coverage": "global, 0.25 degrees (~20 km); runs every 6 h, lead 0-384 h (hourly to 120 h, then 3-hourly)",
         "chunks": "1 run x 210 lead steps x 726 x 726 per chunk: one point costs a quarter-globe chunk",
         "stats": False,
@@ -745,6 +746,7 @@ ZARR_STORES: dict[str, dict[str, Any]] = {
         "region": "us-west-1",
         "variables": {"TMP": {"description": "air temperature 2 m above ground", "units": "K"}},
         "sel": "valid_time (UTC); the newest 00/06/12/18z run is used, up to 48 h ahead",
+        "time_range_note": "the range is rolling: the store holds the newest run only, up to 48 h ahead, and past dates are not in this store",
         "coverage": "CONUS only, 3 km Lambert conformal grid",
         "chunks": "48 steps x 150 x 150 per chunk",
         "stats": True,
@@ -761,14 +763,25 @@ ZARR_STORES: dict[str, dict[str, Any]] = {
         "coverage": "global ocean, 0.01 degrees",
         "chunks": "5 days x 1799 x 3600 per chunk, about 123 MB: one cell costs a whole chunk",
         "stats": False,
+        "stats_note": "the record ends 2020-01-20, and one cell costs a 123 MB chunk read, so statistics are not offered",
+        "time_dim": "time",
+        "time_range": ["2002-06-01", "2020-01-20"],
         "tiles": False,
-        "tiles_note": "titiler.xyz is denied at this bucket, and a 123 MB chunk makes a tile read slow",
+        "tiles_note": "titiler.xyz does not reach this bucket, and a 123 MB chunk makes a tile read slow",
         "source": "NASA JPL MUR SST on AWS Open Data (metadata only here)",
     },
     "weatherbench2-era5": {
         "title": "ERA5 reanalysis, 1959 to 2023-01-10, 6-hourly, 1.5 degrees (WeatherBench 2)",
         "url": "https://storage.googleapis.com/weatherbench2/datasets/era5/1959-2023_01_10-6h-240x121_equiangular_with_poles_conservative.zarr",
-        "variables": {"2m_temperature": {"description": "air temperature 2 m above ground", "units": "K", "rescale": "220,320", "colormap_name": "inferno"}},
+        "variables": {
+            "2m_temperature": {"description": "air temperature 2 m above ground", "units": "K", "rescale": "220,320", "colormap_name": "inferno"},
+            "2m_dewpoint_temperature": {"description": "dewpoint temperature 2 m above ground", "units": "K", "rescale": "220,310", "colormap_name": "inferno"},
+            "10m_wind_speed": {"description": "wind speed 10 m above ground", "units": "m s-1", "rescale": "0,25", "colormap_name": "viridis"},
+            "total_precipitation_6hr": {"description": "total precipitation over the 6 h ending at the step", "units": "m", "rescale": "0,0.02", "colormap_name": "blues"},
+            "mean_sea_level_pressure": {"description": "air pressure reduced to mean sea level", "units": "Pa", "rescale": "95000,105000", "colormap_name": "viridis"},
+            "sea_surface_temperature": {"description": "sea surface temperature (NaN over land)", "units": "K", "rescale": "270,305", "colormap_name": "inferno"},
+        },
+        "variables_note": "the store holds 62 variables; compute_statistics accepts any of them by its store name, and the ones listed here are the ones groundstation has checked and can draw",
         "sel": "time (UTC, 6-hourly, ends 2023-01-10): history, not a forecast",
         "coverage": "global, 1.5 degrees (~165 km), longitudes 0 to 360",
         "chunks": "small time-sliced chunks",
@@ -928,6 +941,11 @@ def _zarr_select(da: Any, sel: dict[str, str] | None) -> tuple[Any, dict[str, st
             idx = int(np.abs(coord - target).argmin())
             if coord[idx] != target:
                 gap = pd.Timedelta(abs(coord[idx] - target)) if coord.dtype.kind in "Mm" else abs(coord[idx] - target)
+                if coord.dtype.kind in "Mm" and len(coord) > 1 and gap > pd.Timedelta(coord[1] - coord[0]):
+                    raise ValueError(
+                        f"{dim} {want} is {gap} from the nearest {dim} in this store ({label(coord[idx])}), more than one step ({pd.Timedelta(coord[1] - coord[0])}); "
+                        f"the store holds {dim} {label(coord[0])} to {label(coord[-1])}"
+                    )
                 edge = " (outside the store's range)" if idx in (0, len(coord) - 1) and (target < coord[0] or target > coord[-1]) else ""
                 notes.append(f"{dim} {want} snapped to {label(coord[idx])}, off by {gap}{edge}")
         da = da.isel({dim: idx})
@@ -977,24 +995,48 @@ def _clip_reduce(da: Any, bbox: list[float], crs: str | None = None) -> dict[str
     }
 
 
+def _zarr_time_refusal(store_id: str, z: dict[str, Any], sel: dict[str, str] | None) -> str | None:
+    """Words for an asked time outside the store's fixed time_range, else None."""
+    lo, hi = z.get("time_range") or (None, None)
+    asked = (sel or {}).get(z.get("time_dim", "time")) or (sel or {}).get("valid_time")
+    if not (asked and lo):
+        return None
+    try:
+        t = dt.datetime.fromisoformat(asked.replace("Z", "")).replace(tzinfo=None)
+    except ValueError:
+        return None
+    if dt.datetime.fromisoformat(lo) <= t <= dt.datetime.fromisoformat(hi):
+        return None
+    return f"time {asked} is outside {store_id}'s range ({lo} to {hi})"
+
+
 def _zarr_statistics(store_id: str, variable: str, bbox: list[float] | None, sel: dict[str, str] | None) -> dict[str, Any]:
     z = ZARR_STORES.get(store_id)
     if not z:
         return {"error": f"unknown zarr store {store_id!r}; options: {', '.join(ZARR_STORES)}"}
+    if refusal := _zarr_time_refusal(store_id, z, sel):
+        return {"error": f"{refusal}; no statistics returned"}
     if not z["stats"]:
         return {"error": f"statistics are not offered for {z['title']}: {z.get('stats_note') or z['chunks']}"}
-    if variable not in z["variables"]:
-        return {"error": f"unknown variable {variable!r}; options: {', '.join(z['variables'])}"}
     if not bbox:
         return {"error": "bbox [w, s, e, n] is required: a Zarr store is a whole grid, so unclipped statistics would describe the globe or the continent"}
     ds = _open_zarr(store_id)
-    da, used, notes = _zarr_select(ds[variable], sel)
+    if variable in z["variables"]:
+        meta = z["variables"][variable]
+    elif variable in ds.data_vars:
+        a = ds[variable].attrs
+        meta = {"description": a.get("long_name") or variable, "units": a.get("units") or "unknown"}
+    else:
+        return {"error": f"unknown variable {variable!r}; curated options: {', '.join(z['variables'])}; the store holds {len(ds.data_vars)} variables"}
+    try:
+        da, used, notes = _zarr_select(ds[variable], sel)
+    except ValueError as e:
+        return {"error": "; ".join(x for x in (f"{z['title']}: {e}", z.get("time_range_note"), "no statistics returned") if x)}
     r = _clip_reduce(da, bbox, _HRRR_CRS if "{date}" in z["url"] else None)
     if r.get("error", "").startswith("bbox outside"):
         return {"error": f"bbox outside {z['title']}'s coverage ({z['coverage']})"}
     if "error" in r:
         return r | {"sel": used}
-    meta = z["variables"][variable]
     return {
         variable: r["stats"],
         "clipped_to": bbox,
@@ -1606,20 +1648,13 @@ def tile_url_template(
         z = ZARR_STORES.get(collection_id)
         if not z:
             return f"unknown zarr store {collection_id!r}; options: {', '.join(ZARR_STORES)}"
+        if refusal := _zarr_time_refusal(collection_id, z, sel):
+            return f"{refusal}; pick a time inside it, no tile URL returned"
         if not z["tiles"]:
             return z["tiles_note"]
         v = z["variables"].get(item_id)
         if v is None:
             return f"unknown variable {item_id!r}; options: {', '.join(z['variables'])}"
-        lo, hi = z.get("time_range") or (None, None)
-        asked = (sel or {}).get(z["time_dim"]) or (sel or {}).get("valid_time")
-        if asked and lo:
-            try:
-                t = dt.datetime.fromisoformat(asked.replace("Z", "")).replace(tzinfo=None)
-            except ValueError:
-                t = None
-            if t and not dt.datetime.fromisoformat(lo) <= t <= dt.datetime.fromisoformat(hi):
-                return f"time {asked} is outside {collection_id}'s range ({lo} to {hi}); pick a time inside it, no tile URL returned"
         params = [("url", z["url"]), ("variable", item_id)]
         params += [("sel", f"{z['time_dim'] if k == 'valid_time' else k}=nearest::{x}") for k, x in (sel or {}).items()]
         if rescale or v.get("rescale"):
