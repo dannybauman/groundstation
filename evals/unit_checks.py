@@ -2584,6 +2584,49 @@ def t_compare_dates_default_path_per_box_and_out_path():
         tools.search_imagery, tools.compute_statistics, tools._coverage = saved
 
 
+def _notes_map(**kw):
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        res = tools.render_map("t", [0, 0, 1, 1], [{"type": "raster", "name": "A", "tiles": "https://x/{z}/{x}/{y}.png"}], out_path=out, **kw)
+        return res, Path(out).read_text(encoding="utf-8")
+
+
+def t_notes_render_escaped_in_box_and_stack():
+    res, html = _notes_map(notes=["claim 2024-03-01", "<script>x</script>"])
+    assert res["notes"] == ["claim 2024-03-01", "<script>x</script>"]
+    assert 'id="notes"' in html and "<b>Notes</b>" in html and "claim 2024-03-01" in html
+    assert "&lt;script&gt;x&lt;/script&gt;" in html and "<script>x</script>" not in html
+    assert html.count("claim 2024-03-01") == 2  # box and Stack panel
+
+
+def t_notes_absent_changes_nothing():
+    res, html = _notes_map()
+    assert 'id="notes"' not in html and "notes" not in res and "stack_facts_ignored" not in res
+    res2, html2 = _notes_map(notes=[])
+    assert html2 == html and "notes" not in res2
+
+
+def t_stack_facts_unknown_key_named_known_key_kept():
+    res, html = _notes_map(stack_facts={"claim_event": "x", "track": "y", "events": True})
+    assert res["stack_facts_ignored"] == ["claim_event", "track"] and "notes" in res["note"]
+    assert "claim_event" not in html
+
+
+def t_compare_dates_passes_notes_through():
+    item = lambda i, d: {"id": i, "datetime": f"{d}T10:00:00Z", "collection": "sentinel-2-l2a", "bbox": [0, 0, 1, 1], "cloud_cover": 1}
+    saved = tools.search_imagery, tools.compute_statistics, tools._coverage
+    tools.search_imagery = lambda *a, **k: {"items": [item("S2B_31TBF_20240101_0_L2A", "2024-01-01")]}
+    tools.compute_statistics = lambda *a, **k: {"x": {"mean": 0.5}}
+    tools._coverage = lambda *a, **k: 1.0
+    try:
+        out = tools.compare_dates(bbox=[0, 0, 1, 1], window_before="2024-01-01/2024-01-02", window_after="2024-02-01/2024-02-02",
+                                  notes=["storm <b>"], stack_facts={"bogus": 1})
+        assert out["notes"] == ["storm <b>"] and out["stack_facts_ignored"] == ["bogus"]
+        assert "storm &lt;b&gt;" in Path(out["map_path"]).read_text(encoding="utf-8")
+    finally:
+        tools.search_imagery, tools.compute_statistics, tools._coverage = saved
+
+
 def t_brief_page_and_conditions_brief_share_one_radius():
     import importlib.util
     spec = importlib.util.spec_from_file_location("brief", Path(__file__).resolve().parents[1] / "briefing" / "brief.py")
