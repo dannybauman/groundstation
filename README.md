@@ -102,6 +102,7 @@ The first `search_datasets` call takes 20 to 30 seconds while collection lists c
 | `render_map_3d` | terrain fly-throughs: imagery draped over real relief | MapLibre terrain + keyless AWS Terrarium tiles |
 | `render_postcard` | share cards with the pixels embedded and attribution baked in, so nothing expires | TiTiler previews |
 | `active_events` / `weather_summary` | open fires, floods and storms, plus the past and coming week of weather | NASA EONET, GDACS, Open-Meteo |
+| `smoke_forecast` | near-surface smoke now and hours ahead (CONUS) | NOAA HRRR smoke through raster.eoapi.dev, model guidance not observation |
 | `next_pass` | when a satellite could next image a place | Celestrak orbits, constellations read from [eo-predictor](https://github.com/developmentseed/eo-predictor)'s catalog |
 | `conditions_brief` | current conditions around a place in one call: dryness, wind, events, the latest look, the next pass | the tools above |
 
@@ -138,7 +139,7 @@ Any TiTiler deployment with the `/stac` router works. One caveat: NAIP and Lands
 
 ## More
 
-- `docs/examples.md`: the field tests. Real prompts run through the agent and graded, with the fixes each round produced. The pages are at `/docs/field-test.html` when the console is running
+- `docs/field-test-2026-10-25-no10.html`: the newest field test (№10). Real prompts run through the agent and graded, with the fixes each round produced; `docs/examples.md` is the first edition. The pages are at `/docs/field-test.html` when the console is running
 - `docs/architecture.md`: how it fits together, the design decisions, and what is deliberately not built
 - `docs/plan-2026-10-devseed-stack.md`: where it is going next: Zarr through titiler.xyz, HRRR smoke in the briefs, cross-catalog discovery, stac-geoparquet archives, and a hosted toolset on mcp-toolsets-runtime, each tied to the Development Seed work it rides on
 - Deep exploration hands off to [stac-map](https://github.com/developmentseed/stac-map) (Pete Gadomski), which renders COGs client-side with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster) (Kyle Barron). Tiling and pixel math ride [TiTiler](https://github.com/developmentseed/titiler)

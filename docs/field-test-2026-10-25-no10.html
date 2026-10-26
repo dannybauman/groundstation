@@ -38,6 +38,7 @@ h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
 .label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
 .prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
 .returned { font: 400 12px/1.5 'Roboto Mono', monospace; background: #fbfaf7; border: 1px solid var(--rule); border-left: 3px solid var(--mid); padding: 8px 12px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+details.data summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; margin-bottom: 3px; }
 .answer { font-size: 13.5px; color: var(--mid); }
 .answer b { color: var(--ink); }
 .learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
@@ -73,7 +74,9 @@ footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var
 <div class="grid">
 <div class="card"><div class="top"><div class="num">1</div><div class="tag">water change</div><div class="who">reservoir hydrologist</div></div>
 <div><div class="label">Input</div><div class="prompt">Lake Oroville, California: how has the water surface changed between this month and the same month 2 years ago?</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Lake Oroville, California")
+<div class="answer"><div class="label">Our read</div>Both looks are clear (cloud fractions 0.000591 and 0.011652) and from the same tile, 10SFJ, so the two dates compare like for like. Over the lake box the NDWI mean went from -0.455073209681556 on 2024-10-05 to -0.4990661532661996 on 2026-10-15, and the median from -0.5517482517482517 to -0.5985079688029841. Water scores high on this index, so a lower mean and median point to <b>less open water in the box this October than two Octobers ago</b>. The index says which way, not how many acres: it has not been turned into a surface area, and the box includes shoreline and hills.</div>
+<a class="fig" href="img/ft10-oroville-compare.html" target="_blank" title="open the live artifact"><img src="img/ft10-oroville-compare.png" alt="artifact produced by example 1" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Lake Oroville, California")
   source: nominatim   name: Lake Oroville, Butte County, California, United States
   bbox: [-121.5703521, 39.511624, -121.2810537, 39.7347615]
 
@@ -94,16 +97,16 @@ compute_statistics(earth-search, sentinel-2-l2a, S2B_10SFJ_20241005_0_L2A, expre
 
 compute_statistics(earth-search, sentinel-2-l2a, S2B_10SFJ_20261015_0_L2A, expression="(green-nir)/(green+nir)", bbox=lake)
   min -0.9872068230277186  max 0.9925650557620818  mean -0.4990661532661996
-  median -0.5985079688029841  std 0.36099365033807596  count 202109.8125  valid_percent 100.0</div></div>
-<div class="answer"><div class="label">Our read</div>Both looks are clear (cloud fractions 0.000591 and 0.011652) and from the same tile, 10SFJ, so the two dates compare like for like. Over the lake box the NDWI mean went from -0.455073209681556 on 2024-10-05 to -0.4990661532661996 on 2026-10-15, and the median from -0.5517482517482517 to -0.5985079688029841. Water scores high on this index, so a lower mean and median point to <b>less open water in the box this October than two Octobers ago</b>. The index says which way, not how many acres: it has not been turned into a surface area, and the box includes shoreline and hills.</div>
-<a class="fig" href="img/ft10-oroville-compare.html" target="_blank" title="open the live artifact"><img src="img/ft10-oroville-compare.png" alt="artifact produced by example 1" loading="lazy"><span class="open">live artifact ↗</span></a>
+  median -0.5985079688029841  std 0.36099365033807596  count 202109.8125  valid_percent 100.0</div></details>
 <div class="learning"><b>Learning →</b> <b>The headline delta is a whole-scene number, not a lake number.</b> compare_dates returned means of -0.5834 and -0.5639 (delta -0.0195) because it computes the expression over the full tile, with no clip. The lake-box means above needed two separate compute_statistics calls with the geocoded bbox, and they differ from the tile means (-0.455 vs -0.5639 in 2024). Read the compare_dates delta as a tile-wide change; it can say 'a little lower' while the lake box moved by a different amount. The swipe map is the part that shows the shoreline.</div>
 <div class="shows">geocode · compare_dates with a custom NDWI expression · same-tile scene matching · clipped compute_statistics on both dates · swipe map</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">2</div><div class="tag">orchard ndvi</div><div class="who">almond grower's agronomist</div></div>
 <div><div class="label">Input</div><div class="prompt">Kern County near Wasco, California: what is the latest clear Sentinel-2 look, and the NDVI over a 10 km box of orchards?</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Wasco, California")
+<div class="answer"><div class="label">Our read</div>The latest look is 2026-10-17, and it covers the whole box (covers_aoi_pct 100.0) at 0.002916 cloud, so nothing has to be stitched. Over the box NDVI has a mean of 0.3993492456793862 and a median of 0.44077134986225897, with the 2nd to 98th percentile spread running from 0.07647202540923528 to 0.7299168975069252. A 10 km box of orchards also holds bare ground, roads and fallow blocks, so the wide spread is what a mixed box looks like; the map shows which blocks sit at the low end.</div>
+<a class="fig" href="img/ft10-wasco-ndvi.html" target="_blank" title="open the live artifact"><img src="img/ft10-wasco-ndvi.png" alt="artifact produced by example 2" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Wasco, California")
   source: nominatim   name: Wasco, Kern County, California, United States
   lat/lon: 35.5941238, -119.3409457
   bbox: [-119.420787, 35.553704, -119.322811, 35.616087]
@@ -124,16 +127,16 @@ compute_statistics(earth-search, sentinel-2-l2a, S2C_11SKV_20261017_0_L2A, expre
   clipped_to: [-119.3963, 35.5491, -119.2856, 35.6391]
 
 render_map("Wasco orchards NDVI", bbox, [item layer S2C_11SKV_20261017_0_L2A, expression (nir-red)/(nir+red), rdylgn, rescale -0.2,0.9])
-  map_path: /tmp/ft10/out/map-wasco-orchards-ndvi.html   coverage_pct: 100.0</div></div>
-<div class="answer"><div class="label">Our read</div>The latest look is 2026-10-17, and it covers the whole box (covers_aoi_pct 100.0) at 0.002916 cloud, so nothing has to be stitched. Over the box NDVI has a mean of 0.3993492456793862 and a median of 0.44077134986225897, with the 2nd to 98th percentile spread running from 0.07647202540923528 to 0.7299168975069252. A 10 km box of orchards also holds bare ground, roads and fallow blocks, so the wide spread is what a mixed box looks like; the map shows which blocks sit at the low end.</div>
-<a class="fig" href="img/ft10-wasco-ndvi.html" target="_blank" title="open the live artifact"><img src="img/ft10-wasco-ndvi.png" alt="artifact produced by example 2" loading="lazy"><span class="open">live artifact ↗</span></a>
+  map_path: /tmp/ft10/out/map-wasco-orchards-ndvi.html   coverage_pct: 100.0</div></details>
 <div class="learning"><b>Learning →</b> <b>A box is not a field.</b> The stats are one set of numbers for everything inside the 10 km square, orchard or not; a grower's question about a specific block needs that block's polygon through aoi_geojson. Also, the box was built by hand around the geocoded point, because geocode for a town returns the town's own bbox (about 9 km by 7 km), not a 10 km square.</div>
 <div class="shows">search_imagery cloud filter + recommended scene · compute_statistics with an NDVI expression clipped to a bbox · render_map with an expression layer</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">3</div><div class="tag">radar through cloud</div><div class="who">coastal engineer</div></div>
 <div><div class="label">Input</div><div class="prompt">Outer Banks, North Carolina: the latest Sentinel-1 radar scene over the barrier islands.</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Outer Banks, North Carolina")
+<div class="answer"><div class="label">Our read</div>The newest scene is 2026-10-21 and covers all of the area (covers_aoi_pct 100.0), though valid_percent in the statistics is 83.44, so about a sixth of the box holds no data (the swath edge shows on the right of the preview). <b>Why radar here:</b> the Outer Banks sit in the path of coastal storms and sea fog, and optical imagery shows cloud tops instead of the ground on those days. Sentinel-1 sends its own microwave pulse and reads the echo, so it works through cloud and in the dark; this pass was acquired at about 23:05 UTC. Smooth water comes back dark and the rough ocean, sand and buildings come back brighter, so the preview separates the sound, the barrier islands and the open Atlantic without any cloud to wait out. Radar gives you the water line and surface roughness, not colour.</div>
+<a class="fig" href="img/ft10-outer-banks-radar.html" target="_blank" title="open the live artifact"><img src="img/ft10-outer-banks-radar.png" alt="artifact produced by example 3" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Outer Banks, North Carolina")
   source: nominatim   name: Outer Banks, Waves, Dare County, North Carolina, 27982, United States
   bbox: [-75.7888367, 35.2469037, -75.1488367, 35.8869037]
 
@@ -155,16 +158,16 @@ preview_item(... same item, assets=[vv], rescale="30,200", colormap_name=greys_r
   fetched: 200, 180087 bytes
 
 render_map("Outer Banks radar, Sentinel-1 VV", aoi, [item layer vv, rescale 30,200, greys_r])
-  map_path: /tmp/ft10/out/map-outer-banks-radar--sentinel-1-vv.html   coverage_pct: 100.0</div></div>
-<div class="answer"><div class="label">Our read</div>The newest scene is 2026-10-21 and covers all of the area (covers_aoi_pct 100.0), though valid_percent in the statistics is 83.44, so about a sixth of the box holds no data (the swath edge shows on the right of the preview). <b>Why radar here:</b> the Outer Banks sit in the path of coastal storms and sea fog, and optical imagery shows cloud tops instead of the ground on those days. Sentinel-1 sends its own microwave pulse and reads the echo, so it works through cloud and in the dark; this pass was acquired at about 23:05 UTC. Smooth water comes back dark and the rough ocean, sand and buildings come back brighter, so the preview separates the sound, the barrier islands and the open Atlantic without any cloud to wait out. Radar gives you the water line and surface roughness, not colour.</div>
-<a class="fig" href="img/ft10-outer-banks-radar.html" target="_blank" title="open the live artifact"><img src="img/ft10-outer-banks-radar.png" alt="artifact produced by example 3" loading="lazy"><span class="open">live artifact ↗</span></a>
+  map_path: /tmp/ft10/out/map-outer-banks-radar--sentinel-1-vv.html   coverage_pct: 100.0</div></details>
 <div class="learning"><b>Learning →</b> <b>The first preview came back all white.</b> I picked rescale 0,0.4 as if the VV band were a backscatter ratio; this collection's vv asset holds raw values of 31 to 1218, so the pixels saturated and the image was a 2259-byte PNG that I opened and saw was blank white, still with HTTP 200. A statistics call told me the real range and the rescale 30,200 fixed it. The first map I rendered carried the wrong rescale and was replaced. Also, the search reports no cloud cover for this collection, which is correct for radar but means 'newest, full coverage' is the only selection rule.</div>
 <div class="shows">earth-search sentinel-1-grd · covers_aoi_pct and recommended · preview_item on a radar band · compute_statistics to find a rescale · render_map</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">4</div><div class="tag">olympic postcard</div><div class="who">state parks communications lead</div></div>
 <div><div class="label">Input</div><div class="prompt">A postcard of the Olympic Peninsula, Washington, from the freshest clear Sentinel-2 scene.</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Olympic Peninsula, Washington")
+<div class="answer"><div class="label">Our read</div>No single scene covers the whole peninsula: the best one, 2026-10-21 tile 10TDT, covers 43.6% of the geocoded box at 4.039512 cloud, and the clearer scenes cover only a sliver. So the postcard shows the part of the peninsula that one fresh scene does cover, the central Olympics and the coast west of them, cropped to bbox [-124.2, 47.3, -123.0, 47.84]. It is a single file with the image embedded, so it can be shared without live tile links. Where it gets posted is the communications lead's decision.</div>
+<a class="fig" href="img/ft10-olympic-postcard.html" target="_blank" title="open the live artifact"><img src="img/ft10-olympic-postcard.png" alt="artifact produced by example 4" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Olympic Peninsula, Washington")
   source: nominatim   name: Olympic Peninsula, Washington, United States
   bbox: [-124.7333752, 46.815491, -122.6100875, 48.3917695]
 
@@ -179,16 +182,16 @@ search_imagery(earth-search, [sentinel-2-l2a], bbox, datetime_range="2026-09-25T
 
 render_postcard(earth-search, sentinel-2-l2a, S2B_10TDT_20261021_0_L2A, place="Olympic Peninsula, Washington", date="2026-10-21",
                 assets=[visual], bbox=[-124.2, 47.3, -123.0, 47.84], caption="Sentinel-2, 21 October 2026, S2B_10TDT_20261021")
-  path: /tmp/ft10/out/postcard-olympic-peninsula--washington-2026-10-21.html</div></div>
-<div class="answer"><div class="label">Our read</div>No single scene covers the whole peninsula: the best one, 2026-10-21 tile 10TDT, covers 43.6% of the geocoded box at 4.039512 cloud, and the clearer scenes cover only a sliver. So the postcard shows the part of the peninsula that one fresh scene does cover, the central Olympics and the coast west of them, cropped to bbox [-124.2, 47.3, -123.0, 47.84]. It is a single file with the image embedded, so it can be shared without live tile links. Where it gets posted is the communications lead's decision.</div>
-<a class="fig" href="img/ft10-olympic-postcard.html" target="_blank" title="open the live artifact"><img src="img/ft10-olympic-postcard.png" alt="artifact produced by example 4" loading="lazy"><span class="open">live artifact ↗</span></a>
+  path: /tmp/ft10/out/postcard-olympic-peninsula--washington-2026-10-21.html</div></details>
 <div class="learning"><b>Learning →</b> <b>The place name is bigger than any one scene.</b> The results already show at least three tiles (10TDS, 10TES, 10TDT), so 'freshest clear scene' has no single answer, and the tool says so in its reason line. I chose the 43.6% scene and cropped to a bbox inside it; the card was not checked by eye for cloud over the high peaks, and everything north of 47.84 is outside the picture. render_postcard does take a caption: the postcard was re-rendered once with the scene id S2B_10TDT_20261021 in it. A postcard of the whole peninsula would need render_postcard's fill_item_ids to mosaic same-day scenes, which I did not try.</div>
 <div class="shows">geocode · search_imagery recommended + honest coverage reason · render_postcard with a bbox crop, embedded image</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">5</div><div class="tag">rainier in 3d</div><div class="who">mountaineering guide</div></div>
 <div><div class="label">Input</div><div class="prompt">Mount Rainier in 3D, draped with the latest clear Sentinel-2 look.</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Mount Rainier, Washington")
+<div class="answer"><div class="label">Our read</div>The recommended scene is 2026-10-21, tile 10TES, at 0.05366 cloud. It covers 76.0% of the geocoded box, so I narrowed the 3D view to bbox [-121.9, 46.72, -121.64, 46.95], which sits inside that scene, and the tool reports coverage_pct 100.0 for it. Terrain comes from the keyless Terrarium elevation tiles. The docstring gives a range of 1.0 to 3.0 and defaults to 1.5 but names no value for mountains, so I took 2.0 as a middle setting for a tall peak; the page has a slider to change it. For a guide this is a route-reading and orientation view, not a hazard map.</div>
+<a class="fig" href="img/ft10-rainier-3d.html" target="_blank" title="open the live artifact"><img src="img/ft10-rainier-3d.png" alt="artifact produced by example 5" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Mount Rainier, Washington")
   source: nominatim   name: Mount Rainier, Pierce County, Washington, United States
   lat/lon: 46.8522029, -121.7575158
   bbox: [-121.9075158, 46.7022029, -121.60751579999999, 47.0022029]
@@ -205,9 +208,7 @@ search_imagery(earth-search, [sentinel-2-l2a], bbox, datetime_range="2026-08-25T
 render_map_3d("Mount Rainier in 3D", bbox=[-121.9, 46.72, -121.64, 46.95],
               layer=item S2B_10TES_20261021_0_L2A visual, bbox [-123.00025, 45.963114, -121.635457, 46.9537], exaggeration=2.0)
   path: /tmp/ft10/out/map3d-mount-rainier-in-3d.html
-  state: exaggeration 2.0, terrain true, coverage_pct 100.0</div></div>
-<div class="answer"><div class="label">Our read</div>The recommended scene is 2026-10-21, tile 10TES, at 0.05366 cloud. It covers 76.0% of the geocoded box, so I narrowed the 3D view to bbox [-121.9, 46.72, -121.64, 46.95], which sits inside that scene, and the tool reports coverage_pct 100.0 for it. Terrain comes from the keyless Terrarium elevation tiles. The docstring gives a range of 1.0 to 3.0 and defaults to 1.5 but names no value for mountains, so I took 2.0 as a middle setting for a tall peak; the page has a slider to change it. For a guide this is a route-reading and orientation view, not a hazard map.</div>
-<a class="fig" href="img/ft10-rainier-3d.html" target="_blank" title="open the live artifact"><img src="img/ft10-rainier-3d.png" alt="artifact produced by example 5" loading="lazy"><span class="open">live artifact ↗</span></a>
+  state: exaggeration 2.0, terrain true, coverage_pct 100.0</div></details>
 <div class="learning"><b>Learning →</b> <b>The docstring has no mountain-specific exaggeration advice,</b> only the 1.0 to 3.0 range and a default of 1.5, so the 2.0 is my judgment, not the tool's recommendation. The 3D page was written but not opened in a browser by me, so how the drape looks over the summit and whether the scene's snow shows as intended is unchecked. The geocoded bbox was clipped to fit one scene, which cut the east side of the mountain out of the view.</div>
 <div class="shows">geocode · search_imagery recommended scene · render_map_3d terrain drape with exaggeration slider</div>
 </div>
@@ -217,7 +218,9 @@ render_map_3d("Mount Rainier in 3D", bbox=[-121.9, 46.72, -121.64, 46.95],
 <div class="grid">
 <div class="card"><div class="top"><div class="num">6</div><div class="tag">events near manila</div><div class="who">county emergency manager</div></div>
 <div><div class="label">Input</div><div class="prompt">What is happening right now within a few hundred km of Manila, Philippines?</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Manila, Philippines")
+<div class="answer"><div class="label">Our read</div>Nothing is active within about 330 km of Manila: EONET listed 0 open events in that box over 30 days, and the GDACS half of the call timed out, so the all-clear is EONET's alone. The nearest active event the worldwide call returns is Super Typhoon Champi, at [126.3, 30.7] with a position stamped 2026-10-25T12:00:00Z, 1871.8 km from the Manila geocode. That is not a few hundred km, so it is not a threat to the city on this evidence. The map shows Manila under the Sentinel-2 scene of 2026-10-15 (7.7% cloud, 70.7% of the search box), and Champi is a toggleable layer well off the edge of that frame. The imagery is ten days old, so it is a baseline of the city, not the present.</div>
+<a class="fig" href="img/ft10-manila-events.html" target="_blank" title="open the live artifact"><img src="img/ft10-manila-events.png" alt="artifact produced by example 6" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Manila, Philippines")
   source: nominatim   name: Manila, Capital District, Metro Manila, Philippines
   lat/lon: 14.5904492, 120.9803621
 
@@ -245,16 +248,16 @@ search_imagery(earth-search, sentinel-2-l2a, bbox=[120.63, 14.24, 121.33, 14.94]
 
 render_map("Manila: latest Sentinel-2, nearest active event layer", bbox=[120.2, 14.37, 121.24, 15.37])
   layers: Sentinel-2 2026-10-15 (S2A_51PTS_20261015_0_L2A, visual); Super Typhoon Champi (EONET) (geojson point)
-  map: ft10-manila-events.html</div></div>
-<div class="answer"><div class="label">Our read</div>Nothing is active within about 330 km of Manila: EONET listed 0 open events in that box over 30 days, and the GDACS half of the call timed out, so the all-clear is EONET's alone. The nearest active event the worldwide call returns is Super Typhoon Champi, at [126.3, 30.7] with a position stamped 2026-10-25T12:00:00Z, 1871.8 km from the Manila geocode. That is not a few hundred km, so it is not a threat to the city on this evidence. The map shows Manila under the Sentinel-2 scene of 2026-10-15 (7.7% cloud, 70.7% of the search box), and Champi is a toggleable layer well off the edge of that frame. The imagery is ten days old, so it is a baseline of the city, not the present.</div>
-<a class="fig" href="img/ft10-manila-events.html" target="_blank" title="open the live artifact"><img src="img/ft10-manila-events.png" alt="artifact produced by example 6" loading="lazy"><span class="open">live artifact ↗</span></a>
+  map: ft10-manila-events.html</div></details>
 <div class="learning"><b>Learning →</b> <b>The all-clear rests on half the sources.</b> GDACS returned a read timeout on both events calls, and EONET found nothing in the box, so "nothing near Manila" is a statement about EONET only. Also: the map is framed on the city and the one event layer is 1,870 km away, so the event dot is off screen; a wide frame would show the typhoon but shrink Manila to a blur.</div>
 <div class="shows">geocode · active_events with a bbox, then worldwide as the fallback · search_imagery picks the scene · render_map with imagery and a geojson events layer</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">7</div><div class="tag">biggest event</div><div class="who">wire-service reporter</div></div>
 <div><div class="label">Input</div><div class="prompt">What is the biggest event happening in the world today, and what does the latest satellite picture of it show?</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">active_events(days=30)
+<div class="answer"><div class="label">Our read</div>I took Super Typhoon Champi as the most significant event: it is the only super typhoon in the list, and the call gives no size figure for the wildfires to compare against, so this is a judgement and not a ranking from the data. The Sentinel-2 scene on the map was acquired 2026-10-25 02:19Z, about ten hours before the 12:00Z position fix the call reports, so <b>this is the before</b>. It is also nearly all cloud (S2B_52RBU: 96.5% cloud, covering 11.2% of the search box), and no scene found covers the area. The recommended scene was S2B_52RBT (90.5% cloud, 7.8% of the search box), but I drew S2B_52RBU instead: it is the clearest of the five that reaches the typhoon's latitude (its footprint runs up to 30.717857 N, against the 30.7 N fix), so the choice is mine, not the tool's. The next possible optical Sentinel-2 look is 2026-10-28 02:28 UTC (track distance 94.6 km, as of run time). A radar pass comes sooner and sees through cloud: Sentinel-1C at 2026-10-26 09:13 UTC (94.8 km as of run time) and Sentinel-1A at 2026-10-27 21:53 UTC (34.1 km as of run time; a re-run gave different distances, so treat them as indicative). Those are possible captures from swath geometry, not a promised acquisition.</div>
+<a class="fig" href="img/ft10-champi-before.html" target="_blank" title="open the live artifact"><img src="img/ft10-champi-before.png" alt="artifact produced by example 7" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">active_events(days=30)
   eonet_note: EONET listed 47 open events in 30 days
   gdacs_error: The read operation timed out
   Severe Storms (3):
@@ -287,16 +290,15 @@ next_pass(30.7, 126.3, days=3)
 
 render_map("Super Typhoon Champi: the before", bbox=[125.3, 29.5, 127.3, 31.5])
   layers: Sentinel-2 2026-10-25 02:19Z (S2B_52RBU_20261025_0_L2A, visual); Champi position 2026-10-25 12:00Z (geojson point)
-  map: ft10-champi-before.html</div></div>
-<div class="answer"><div class="label">Our read</div>I took Super Typhoon Champi as the most significant event: it is the only super typhoon in the list, and the call gives no size figure for the wildfires to compare against, so this is a judgement and not a ranking from the data. The Sentinel-2 scene on the map was acquired 2026-10-25 02:19Z, about ten hours before the 12:00Z position fix the call reports, so <b>this is the before</b>. It is also nearly all cloud (S2B_52RBU: 96.5% cloud, covering 11.2% of the search box), and no scene found covers the area. The recommended scene was S2B_52RBT (90.5% cloud, 7.8% of the search box), but I drew S2B_52RBU instead: it is the clearest of the five that reaches the typhoon's latitude (its footprint runs up to 30.717857 N, against the 30.7 N fix), so the choice is mine, not the tool's. The next possible optical Sentinel-2 look is 2026-10-28 02:28 UTC (track distance 94.6 km, as of run time). A radar pass comes sooner and sees through cloud: Sentinel-1C at 2026-10-26 09:13 UTC (94.8 km as of run time) and Sentinel-1A at 2026-10-27 21:53 UTC (34.1 km as of run time; a re-run gave different distances, so treat them as indicative). Those are possible captures from swath geometry, not a promised acquisition.</div>
-<a class="fig" href="img/ft10-champi-before.html" target="_blank" title="open the live artifact"><img src="img/ft10-champi-before.png" alt="artifact produced by example 7" loading="lazy"><span class="open">live artifact ↗</span></a>
+  map: ft10-champi-before.html</div></details>
 <div class="learning"><b>Learning →</b> <b>EONET carries no size for a wildfire or a storm here</b>, so "most significant" is the reporter's call, not the tool's. GDACS timed out, so only EONET's list was available. Also, the Sentinel-2 scene here is almost all cloud, so the Sentinel-1 radar passes, which the call says see through cloud, may be the more useful next look.</div>
 <div class="shows">active_events worldwide · search_imagery with the cloud caveat · before-versus-after read · next_pass for the next look, optical and radar</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">8</div><div class="tag">summit weather and hrrr</div><div class="who">Mt Hood Meadows ski area operations</div></div>
 <div><div class="label">Input</div><div class="prompt">What is the weather doing on Mt Hood over the next days, and what will it be tomorrow at 18Z up there?</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Mt Hood, Oregon")
+<div class="answer"><div class="label">Our read</div>Two different pictures, and they do not agree. The weather summary is for a grid cell at <b>3322 m</b>, and its own elevation_note says "readings are for a grid cell at 3322 m (45.363, -121.682) — say so if the place spans a big elevation range, the valley is warmer than this". At that height it has tomorrow (2026-10-26) between -11.2 and -9.1 C with 37.9 mm of precipitation and wind to 41.9 km/h, with precipitation through 2026-10-28 and wind above 38 km/h through 2026-10-27 (12.0 km/h on 2026-10-28). The HRRR box around the summit for 2026-10-26 18:00 UTC reads a mean of 273.02545166015625 K over 16 cells, min 268.33404541015625 K, max 277.20904541015625 K. In Celsius, subtracting 273.15: mean 273.02545 - 273.15 = -0.12 C; min 268.33405 - 273.15 = -4.82 C; max 277.20905 - 273.15 = 4.06 C. So HRRR says about freezing across the box, while the 3322 m cell says about -10 C. I did not work out which is right. One possible reason is terrain height (the weather cell is at 3322 m); HRRR's own terrain height was not checked. Neither is the lift-served mountain, and nothing here is a base-area reading. I drew no map for this case.</div>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Mt Hood, Oregon")
   source: nominatim   name: Mount Hood, Hood River County, Oregon, United States
   lat/lon: 45.3735129, -121.695878
 
@@ -319,15 +321,16 @@ compute_statistics(zarr, noaa-hrrr-forecast, TMP, bbox=[-121.75, 45.32, -121.65,
   dataset: NOAA HRRR forecast, 2 m temperature (University of Utah): TMP (air temperature 2 m above ground), K
   units: K
   sel: {"time": "2026-10-26 18:00:00"}
-  caveats: []</div></div>
-<div class="answer"><div class="label">Our read</div>Two different pictures, and they do not agree. The weather summary is for a grid cell at <b>3322 m</b>, and its own elevation_note says "readings are for a grid cell at 3322 m (45.363, -121.682) — say so if the place spans a big elevation range, the valley is warmer than this". At that height it has tomorrow (2026-10-26) between -11.2 and -9.1 C with 37.9 mm of precipitation and wind to 41.9 km/h, with precipitation through 2026-10-28 and wind above 38 km/h through 2026-10-27 (12.0 km/h on 2026-10-28). The HRRR box around the summit for 2026-10-26 18:00 UTC reads a mean of 273.02545166015625 K over 16 cells, min 268.33404541015625 K, max 277.20904541015625 K. In Celsius, subtracting 273.15: mean 273.02545 - 273.15 = -0.12 C; min 268.33405 - 273.15 = -4.82 C; max 277.20905 - 273.15 = 4.06 C. So HRRR says about freezing across the box, while the 3322 m cell says about -10 C. I did not work out which is right. One possible reason is terrain height (the weather cell is at 3322 m); HRRR's own terrain height was not checked. Neither is the lift-served mountain, and nothing here is a base-area reading. I drew no map for this case.</div>
+  caveats: []</div></details>
 <div class="learning"><b>Learning →</b> <b>The two sources disagree by about ten degrees and the tools do not say why.</b> The weather grid cell is at 3322 m. One possible reason is that a 3 km HRRR box around the summit averages in lower slopes, but I did not check HRRR's own terrain height, so that is a guess. Operations would want the base-area and mid-mountain number; I ran weather_summary only at the summit point and HRRR only over the summit box, so this card has no lower-elevation reading. The stats also come back in kelvin, so the conversion is left to the reader.</div>
 <div class="shows">weather_summary with its elevation note · HRRR zarr statistics for a small box · kelvin to Celsius shown by hand · an honest no-map</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">9</div><div class="tag">smoke over spokane</div><div class="who">Spokane Regional Clean Air Agency</div></div>
 <div><div class="label">Input</div><div class="prompt">How much smoke is over Spokane now, and what does the model say 24 hours from now?</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Spokane, Washington")
+<div class="answer"><div class="label">Our read</div>Clear now and clear tomorrow. The model has 0.1 µg/m³ at 2026-10-25 22:00Z and 0.3 µg/m³ at 2026-10-26 22:00Z, both far under the tool's own "under 5 clear" line. The "24 hours ahead" frame is valid 2026-10-26T22:00Z, forecast hour 28 of the 18Z run, exactly 24 h after the "now" frame of 2026-10-25T22:00Z. The smoke layer is transparent where air is clear, so on the map you see the Sentinel-2 scene of 2026-10-15 (0.0% cloud, full coverage) with no smoke drawn over it, and that blank is the answer, not a failure. This is model guidance, not a monitor reading, and the scale is not the AQI; a regulator should read it next to the agency's sensors.</div>
+<a class="fig" href="img/ft10-spokane-smoke.html" target="_blank" title="open the live artifact"><img src="img/ft10-spokane-smoke.png" alt="artifact produced by example 9" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Spokane, Washington")
   source: nominatim   name: Spokane, Spokane County, Washington, United States
   lat/lon: 47.6571934, -117.42351
   bbox: [-117.6039994, 47.5867785, -117.3038581, 47.7587975]
@@ -353,16 +356,16 @@ search_imagery(earth-search, sentinel-2-l2a, bbox=Spokane, 2026-10-01/2026-10-25
 
 render_map("Spokane: smoke forecast over Sentinel-2", bbox=[-117.75, 47.5, -117.15, 47.85])
   layers: Sentinel-2 2026-10-15 (S2B_11TMN_20261015_0_L2A, visual); HRRR smoke valid 2026-10-26 22:00Z (raster, tiles from smoke_forecast)
-  map: ft10-spokane-smoke.html</div></div>
-<div class="answer"><div class="label">Our read</div>Clear now and clear tomorrow. The model has 0.1 µg/m³ at 2026-10-25 22:00Z and 0.3 µg/m³ at 2026-10-26 22:00Z, both far under the tool's own "under 5 clear" line. The "24 hours ahead" frame is valid 2026-10-26T22:00Z, forecast hour 28 of the 18Z run, exactly 24 h after the "now" frame of 2026-10-25T22:00Z. The smoke layer is transparent where air is clear, so on the map you see the Sentinel-2 scene of 2026-10-15 (0.0% cloud, full coverage) with no smoke drawn over it, and that blank is the answer, not a failure. This is model guidance, not a monitor reading, and the scale is not the AQI; a regulator should read it next to the agency's sensors.</div>
-<a class="fig" href="img/ft10-spokane-smoke.html" target="_blank" title="open the live artifact"><img src="img/ft10-spokane-smoke.png" alt="artifact produced by example 9" loading="lazy"><span class="open">live artifact ↗</span></a>
+  map: ft10-spokane-smoke.html</div></details>
 <div class="learning"><b>Learning →</b> <b>A correct map can look broken.</b> With air this clean the smoke layer draws nothing, so the picture is plain imagery. The map subtitle says clear air is transparent, but a viewer of the card has to be told, so the answer says it too. A smoke day in the same place would be the better demo.</div>
 <div class="shows">smoke_forecast now and ahead · the tile template as a render_map layer · caveats returned with the numbers · imagery picked by cloud and coverage</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">10</div><div class="tag">forecast vs history</div><div class="who">utility load forecaster, Phoenix</div></div>
 <div><div class="label">Input</div><div class="prompt">What is tomorrow's temperature across the Phoenix metro, and can I see a past summer day for comparison?</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Phoenix, Arizona")
+<div class="answer"><div class="label">Our read</div><b>HRRR is the forecast. ERA5 is history.</b> The HRRR box over the metro for 2026-10-26 18:00 UTC reads a mean of 298.6933787434896 K over 375 cells. Subtracting 273.15: mean 298.69338 - 273.15 = 25.54 C; min 292.95905 - 273.15 = 19.81 C; max 299.95905 - 273.15 = 26.81 C. That is the number for one hour tomorrow, 18Z (11:00 MST). The map is ERA5 reanalysis for 2022-07-15 18:00 UTC, 11:00 MST (the store ends 2023-01-10, so it can only draw a past day; the store is 6-hourly, so 18:00 is a stored step). It shows that mid-July morning on a coarse global grid (240 by 121 cells, roughly 1.5 degrees) and sets no number for tomorrow. I read no ERA5 temperature value off the map, so I make no claim about how hot that day was, so the only figures here are the HRRR ones. Load forecasting would use the HRRR hourly series; this card shows one hour.</div>
+<a class="fig" href="img/ft10-phoenix-era5.html" target="_blank" title="open the live artifact"><img src="img/ft10-phoenix-era5.png" alt="artifact produced by example 10" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Phoenix, Arizona")
   source: nominatim   name: Phoenix, Maricopa County, Arizona, United States
   lat/lon: 33.4484367, -112.074141
   bbox: [-112.3240289, 33.2904827, -111.9255304, 33.9183794]
@@ -384,9 +387,7 @@ one tile fetched (z5 x6 y13) from the earlier 21:00 template to confirm the host
 
 render_map("Phoenix: ERA5 2 m temperature, 2022-07-15 18:00 UTC (history)", bbox=[-118, 30, -106, 38])
   layers: ERA5 2m_temperature 2022-07-15 18Z (raster, opacity 0.55); Phoenix metro bbox (HRRR stats box) (geojson outline, bbox [-112.3240289, 33.2904827, -111.9255304, 33.9183794])
-  map: ft10-phoenix-era5.html</div></div>
-<div class="answer"><div class="label">Our read</div><b>HRRR is the forecast. ERA5 is history.</b> The HRRR box over the metro for 2026-10-26 18:00 UTC reads a mean of 298.6933787434896 K over 375 cells. Subtracting 273.15: mean 298.69338 - 273.15 = 25.54 C; min 292.95905 - 273.15 = 19.81 C; max 299.95905 - 273.15 = 26.81 C. That is the number for one hour tomorrow, 18Z (11:00 MST). The map is ERA5 reanalysis for 2022-07-15 18:00 UTC, 11:00 MST (the store ends 2023-01-10, so it can only draw a past day; the store is 6-hourly, so 18:00 is a stored step). It shows that mid-July morning on a coarse global grid (240 by 121 cells, roughly 1.5 degrees) and sets no number for tomorrow. I read no ERA5 temperature value off the map, so I make no claim about how hot that day was, so the only figures here are the HRRR ones. Load forecasting would use the HRRR hourly series; this card shows one hour.</div>
-<a class="fig" href="img/ft10-phoenix-era5.html" target="_blank" title="open the live artifact"><img src="img/ft10-phoenix-era5.png" alt="artifact produced by example 10" loading="lazy"><span class="open">live artifact ↗</span></a>
+  map: ft10-phoenix-era5.html</div></details>
 <div class="learning"><b>Learning →</b> <b>The two stores do not share a time key or a resolution.</b> HRRR is a 3 km forecast picked by valid_time and ERA5 is a 1.5 degree history picked by time, so one question needs two differently shaped calls, and the ERA5 layer is a blur at metro scale. The stats also arrive in kelvin with no conversion.</div>
 <div class="shows">HRRR zarr statistics in kelvin · ERA5 zarr tile template as a map layer · forecast and history kept apart · tile fetched to prove the template</div>
 </div>
@@ -396,7 +397,9 @@ render_map("Phoenix: ERA5 2 m temperature, 2022-07-15 18:00 UTC (history)", bbox
 <div class="grid">
 <div class="card"><div class="top"><div class="num">11</div><div class="tag">land cover</div><div class="who">urban planner in Nairobi</div></div>
 <div><div class="label">Input</div><div class="prompt">Which land cover datasets cover Nairobi, and can you draw one?</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">search_datasets("land cover", place="Nairobi")
+<div class="answer"><div class="label">Our read</div>Seven land cover or land cover related collections on Planetary Computer cover Nairobi, and each one is flagged covers_aoi=True. One of them, HGB, is a biomass map at 300 m, not land cover, so it is a loose keyword match. I picked ESA WorldCover because it is the 10 m one with a free CC-BY-4.0 licence and two vintages. Its 2021 tile covers 100.0% of the city box, and the map is that one tile with the class colours switched on. The two Esri 10 m 9-class collections (io-lulc-9-class and io-lulc-annual-v02) are the alternatives if the planner wants a yearly series instead.</div>
+<a class="fig" href="img/ft10-nairobi-landcover.html" target="_blank" title="open the live artifact"><img src="img/ft10-nairobi-landcover.png" alt="artifact produced by example 11" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">search_datasets("land cover", place="Nairobi")
   planetary-computer/esa-cci-lc   gsd=None   covers_aoi=True   ESA Climate Change Initiative Land Cover Maps (Cloud Optimized GeoTIFF)
   planetary-computer/esa-cci-lc-netcdf   gsd=None   covers_aoi=True   ESA Climate Change Initiative Land Cover Maps (NetCDF)
   planetary-computer/esa-worldcover   gsd=None   covers_aoi=True   ESA WorldCover
@@ -422,16 +425,16 @@ tile_url_template(..., assets=["map"], colormap_name="esa-worldcover")
   (same tile came back 8-bit/color RGBA)
 render_map(...)
   /tmp/ft10/out/map-nairobi-land-cover--esa-worldcover-2021.html  layers: ['ESA WorldCover 2021 (10 m)']
-  (the tile URL draws through a mosaic hash, f062509104d5..., not the item id)</div></div>
-<div class="answer"><div class="label">Our read</div>Seven land cover or land cover related collections on Planetary Computer cover Nairobi, and each one is flagged covers_aoi=True. One of them, HGB, is a biomass map at 300 m, not land cover, so it is a loose keyword match. I picked ESA WorldCover because it is the 10 m one with a free CC-BY-4.0 licence and two vintages. Its 2021 tile covers 100.0% of the city box, and the map is that one tile with the class colours switched on. The two Esri 10 m 9-class collections (io-lulc-9-class and io-lulc-annual-v02) are the alternatives if the planner wants a yearly series instead.</div>
-<a class="fig" href="img/ft10-nairobi-landcover.html" target="_blank" title="open the live artifact"><img src="img/ft10-nairobi-landcover.png" alt="artifact produced by example 11" loading="lazy"><span class="open">live artifact ↗</span></a>
+  (the tile URL draws through a mosaic hash, f062509104d5..., not the item id)</div></details>
 <div class="learning"><b>Learning →</b> <b>The first tile template draws grey.</b> <code>tile_url_template</code> for WorldCover with only <code>assets=["map"]</code> returned a template whose tile came back as an 8-bit gray+alpha PNG: raw class codes, which no planner can read. Adding <code>colormap_name="esa-worldcover"</code> gave an RGBA tile and the map uses that. The tool does not say a categorical layer needs a colormap, so the caller has to know. Also, <code>search_datasets</code> gives gsd=None for WorldCover and the Esri layers even though both are 10 m by name, so a max_gsd filter would have dropped them.</div>
 <div class="shows">search_datasets by place · describe_collection · tile_url_template with a named colormap · categorical layer on render_map</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">12</div><div class="tag">dhaka landsat</div><div class="who">flood-mapping NGO in Dhaka</div></div>
 <div><div class="label">Input</div><div class="prompt">Which collections cover Dhaka at 30 m or better, and what is the latest Landsat scene over it?</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Dhaka, Bangladesh")
+<div class="answer"><div class="label">Our read</div>Twenty collections came back for Dhaka with max_gsd=30. The ones with a stated resolution at 30 m or better are Planet NICFI basemaps at 4.77 m, Sentinel-2 at 10 m, and Landsat, HLS and HREA at 30 m. The rest report no resolution, including JRC Global Surface Water and the MODIS products (the MODIS titles say 250 m and 500 m), so they passed the filter without a number. For the latest Landsat scene, five Landsat 8 and 9 scenes came back, all covering 100.0% of the city box. The newest by date is LC08_L2SP_137044_20261009_02_T1 at 32.15% cloud. The tool recommends its same-day neighbour LC08_L2SP_137043_20261009_02_T1 at 25.68% cloud, and that is the one drawn.</div>
+<a class="fig" href="img/ft10-dhaka-landsat.html" target="_blank" title="open the live artifact"><img src="img/ft10-dhaka-landsat.png" alt="artifact produced by example 12" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Dhaka, Bangladesh")
   ঢাকা, ঢাকা মহানগর, ঢাকা জেলা, ঢাকা বিভাগ, 1215, বাংলাদেশ  bbox=[90.2290144, 23.6043863, 90.5490144, 23.9243863]
 search_datasets("imagery", place="Dhaka, Bangladesh", max_gsd=30)
   count: 20
@@ -473,16 +476,16 @@ render_map(...)
 
 item LC08_L2SP_137043_20261009_02_T1 (STAC item fetched from planetary-computer)
   bbox: [89.56965318268992, 23.46361462056458, 91.89052931081352, 25.62568537943542]   eo:cloud_cover: 25.68   landsat:wrs_path/row: 137/043
-preview_url fetched: 200 image/png 1574332 bytes</div></div>
-<div class="answer"><div class="label">Our read</div>Twenty collections came back for Dhaka with max_gsd=30. The ones with a stated resolution at 30 m or better are Planet NICFI basemaps at 4.77 m, Sentinel-2 at 10 m, and Landsat, HLS and HREA at 30 m. The rest report no resolution, including JRC Global Surface Water and the MODIS products (the MODIS titles say 250 m and 500 m), so they passed the filter without a number. For the latest Landsat scene, five Landsat 8 and 9 scenes came back, all covering 100.0% of the city box. The newest by date is LC08_L2SP_137044_20261009_02_T1 at 32.15% cloud. The tool recommends its same-day neighbour LC08_L2SP_137043_20261009_02_T1 at 25.68% cloud, and that is the one drawn.</div>
-<a class="fig" href="img/ft10-dhaka-landsat.html" target="_blank" title="open the live artifact"><img src="img/ft10-dhaka-landsat.png" alt="artifact produced by example 12" loading="lazy"><span class="open">live artifact ↗</span></a>
+preview_url fetched: 200 image/png 1574332 bytes</div></details>
 <div class="learning"><b>Learning →</b> <b>The preview is the whole scene, not Dhaka.</b> On Planetary Computer <code>preview_item</code> returns the item's own rendered_preview, so the <code>bbox</code> I passed was ignored and the PNG shows the full Landsat footprint (the item bbox in <code>returned</code> runs from 89.57 to 91.89 E and 23.46 to 25.63 N, against a Dhaka box of 90.23 to 90.55 E). Separately, the max_gsd filter let through collections with no resolution field (gsd=None), so its output needs a human to read titles. For a flood watch the 25.68% cloud figure matters: a quarter of the scene is cloud, and nothing in this call says whether the cloud sits over Dhaka itself.</div>
 <div class="shows">search_datasets max_gsd filter · search_imagery on planetary-computer · preview_item · item layer on render_map</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">13</div><div class="tag">suva pass</div><div class="who">field survey team in Fiji</div></div>
 <div><div class="label">Input</div><div class="prompt">When is the next open-data satellite pass over Suva, and what is the freshest clear Sentinel-2 look at it now?</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Suva, Fiji")
+<div class="answer"><div class="label">Our read</div>The next open-data optical pass is SENTINEL-2A at 2026-10-26 22:21 UTC, at a track distance of 104.7 km on this run (distances move by tens of km between re-runs). After that come Sentinel-1 radar on 2026-10-27 at 06:19 UTC (SENTINEL-1A) and 06:23 UTC (SENTINEL-1C), SENTINEL-3B at 2026-10-27 21:56 UTC, and two more Sentinel-1 passes on 2026-10-28. <b>A pass is a possible capture, not an acquisition plan</b>, and the result carries no swath width, so the track distance cannot be turned into whether Suva is in frame. The freshest Sentinel-2 scene with 20% cloud or less is from 2026-10-07 (16.96% cloud), but it covers only 15.1% of the Suva box. The best single scene is S2C_60KXE_20260825_0_L2A at 10.92% cloud covering 69.8%, and that is what the map shows. A full cover needs two tiles from the same day, which the tool found for 2026-05-27.</div>
+<a class="fig" href="img/ft10-suva-s2.html" target="_blank" title="open the live artifact"><img src="img/ft10-suva-s2.png" alt="artifact produced by example 13" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Suva, Fiji")
   Suva, Rewa, Central, Viti  lat=-18.1415884 lon=178.4421662  bbox=[178.2821662, -18.3015884, 178.6021662, -17.9815884]
 
 next_pass(lat=-18.1415884, lon=178.4421662, days=3)
@@ -535,16 +538,16 @@ search_imagery("earth-search", ["sentinel-2-l2a"], bbox=<Suva>, max_cloud_cover=
   S2C_60KXE_20260507_0_L2A   2026-05-07T22:21:13.694000Z   cloud 8.07   covers 69.8   bbox [177.946562, -19.07845, 178.99386, -18.078355]
   S2C_60KXF_20260507_0_L2A   2026-05-07T22:20:59.226000Z   cloud 11.89   covers 60.2   bbox [177.993966, -18.174345, 178.983355, -17.174817]
   recommended: {"id": "S2C_60KXE_20260825_0_L2A", "covers_aoi_pct": 69.8, "cloud_cover": 10.919899, "reason": "10.9% cloud but covers 69.8% of the area; the clearest scene (0.8% cloud) covers 19.1%"}
-  full_coverage_set: date 2026-05-27, union_covers_aoi_pct 100.0 (S2C_60KXE_20260527_1_L2A + S2C_60KXF_20260527_0_L2A)</div></div>
-<div class="answer"><div class="label">Our read</div>The next open-data optical pass is SENTINEL-2A at 2026-10-26 22:21 UTC, at a track distance of 104.7 km on this run (distances move by tens of km between re-runs). After that come Sentinel-1 radar on 2026-10-27 at 06:19 UTC (SENTINEL-1A) and 06:23 UTC (SENTINEL-1C), SENTINEL-3B at 2026-10-27 21:56 UTC, and two more Sentinel-1 passes on 2026-10-28. <b>A pass is a possible capture, not an acquisition plan</b>, and the result carries no swath width, so the track distance cannot be turned into whether Suva is in frame. The freshest Sentinel-2 scene with 20% cloud or less is from 2026-10-07 (16.96% cloud), but it covers only 15.1% of the Suva box. The best single scene is S2C_60KXE_20260825_0_L2A at 10.92% cloud covering 69.8%, and that is what the map shows. A full cover needs two tiles from the same day, which the tool found for 2026-05-27.</div>
-<a class="fig" href="img/ft10-suva-s2.html" target="_blank" title="open the live artifact"><img src="img/ft10-suva-s2.png" alt="artifact produced by example 13" loading="lazy"><span class="open">live artifact ↗</span></a>
+  full_coverage_set: date 2026-05-27, union_covers_aoi_pct 100.0 (S2C_60KXE_20260527_1_L2A + S2C_60KXF_20260527_0_L2A)</div></details>
 <div class="learning"><b>Learning →</b> <b>The first search lied by omission.</b> With <code>limit=5</code> the five newest clear scenes were all tile 60KXE sliver passes covering 15 to 19% of Suva, and the recommendation was a 16.1% scene. Only <code>limit=25</code> showed the 22:21 UTC passes that cover 69.8%, and the 2026-05-27 same-day set that covers 100.0%. A team that took the first answer would have settled for a scene showing under a fifth of the city. Suva sits near the tile edge, so the limit has to be raised there. The pass list has the same blind spot: it names the 22:21 UTC time, but only comparing it with the scene times above suggests that is the orbit whose scenes covered 69.8%.</div>
 <div class="shows">geocode · next_pass default sensors · search_imagery coverage and limit · possible capture, not a plan</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">14</div><div class="tag">offline archive</div><div class="who">port authority analyst in Lisbon</div></div>
 <div><div class="label">Input</div><div class="prompt">Cache 60 days of Sentinel-2 over Lisbon, then search it with the network cut.</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Lisbon, Portugal")
+<div class="answer"><div class="label">Our read</div>Seventy-five Sentinel-2 scenes for the Lisbon box, from 2026-08-26 to 2026-10-25, were written to one parquet file. With HTTPS_PROXY pointed at a port nothing listens on, the live control search failed with Connection refused, and the same search against the parquet file returned five scenes with the network cut. <b>The archive search ran with no network.</b> The result says it is a snapshot as of 2026-10-25 and that newer scenes may exist. The recommended scene is S2C_29SMC_20261018_0_L2A: 0.04% cloud and 100.0% cover of the city box. It was then drawn from the live catalog, with the network back.</div>
+<a class="fig" href="img/ft10-lisbon-archive.html" target="_blank" title="open the live artifact"><img src="img/ft10-lisbon-archive.png" alt="artifact produced by example 14" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Lisbon, Portugal")
   Lisboa, Portugal  bbox=[-9.2298356, 38.6913994, -9.0863328, 38.7967584]
 write_archive("earth-search", ["sentinel-2-l2a"], bbox=[-9.2298356, 38.6913994, -9.0863328, 38.7967584], datetime_range="2026-08-26T00:00:00Z/2026-10-25T23:59:59Z", out_path="/tmp/ft10/lisbon-s2.parquet")
   path: /tmp/ft10/lisbon-s2.parquet
@@ -570,16 +573,16 @@ search_imagery("/tmp/ft10/lisbon-s2.parquet", ["sentinel-2-l2a"], bbox=<Lisbon>,
 
 network back on
 render_map("Lisbon, Sentinel-2 scene of 2026-10-18 (from the archive)", bbox=<Lisbon>, [item layer: earth-search / sentinel-2-l2a / S2C_29SMC_20261018_0_L2A, assets ["visual"]])
-  /tmp/ft10/out/map-lisbon--sentinel-2-scene-of-2026-10-18--from-the-archive.html  layers: ['Sentinel-2 true colour, 2026-10-18']</div></div>
-<div class="answer"><div class="label">Our read</div>Seventy-five Sentinel-2 scenes for the Lisbon box, from 2026-08-26 to 2026-10-25, were written to one parquet file. With HTTPS_PROXY pointed at a port nothing listens on, the live control search failed with Connection refused, and the same search against the parquet file returned five scenes with the network cut. <b>The archive search ran with no network.</b> The result says it is a snapshot as of 2026-10-25 and that newer scenes may exist. The recommended scene is S2C_29SMC_20261018_0_L2A: 0.04% cloud and 100.0% cover of the city box. It was then drawn from the live catalog, with the network back.</div>
-<a class="fig" href="img/ft10-lisbon-archive.html" target="_blank" title="open the live artifact"><img src="img/ft10-lisbon-archive.png" alt="artifact produced by example 14" loading="lazy"><span class="open">live artifact ↗</span></a>
+  /tmp/ft10/out/map-lisbon--sentinel-2-scene-of-2026-10-18--from-the-archive.html  layers: ['Sentinel-2 true colour, 2026-10-18']</div></details>
 <div class="learning"><b>Learning →</b> <b>This time the bbox was passed, so offline worked.</b> The archive search gets no help from a place name, since a place name has to be geocoded over the network, and the previous field-test case showed that failing. The archive note also says analysis goes through the live catalog, so a connection that stays cut can find a scene but cannot draw it. Two entries for the same tile and date (S2C_29SMC_20261018_0 at 0.04% cloud and S2C_29SMC_20261018_1 at 7.19%) sit in the archive; the tool did not say which is the reprocessing.</div>
 <div class="shows">write_archive · archive search under a dead proxy · live control fails · snapshot note · live render from an archived id</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">15</div><div class="tag">veda night lights</div><div class="who">NASA Earth science communicator</div></div>
 <div><div class="label">Input</div><div class="prompt">Show me one VEDA catalog layer over a place it covers.</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">search_datasets(catalog="veda", keywords="nightlights")   7 collections: delta-disasters-hd-blackmarble-nightlights, ercot-houston-nightlights-freeze, greenville-nightlights-tornadoes-2024, lakeview-nightlights-tornadoes-2024, nightlights-derecho, nightlights-hd-1band, nightlights-hd-monthly
+<div class="answer"><div class="label">Our read</div>A keyword search of VEDA found seven night lights collections, three NO2 ones and ten HLS ones. I picked the Houston deep freeze night lights: Black Marble night lights images for 2021-02-10, before, and 2021-02-16, after the freeze that hit ERCOT's power grid. Both items cover 100.0% of the Houston box, and the collection's license is CC0-1.0. The map puts them in one swipe so the communicator can drag between the two nights. The tool returned compare: True for the two layers. Nothing in the returned numbers says how much light was lost, so the map is the evidence and this reading is not.</div>
+<a class="fig" href="img/ft10-houston-nightlights.html" target="_blank" title="open the live artifact"><img src="img/ft10-houston-nightlights.png" alt="artifact produced by example 15" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">search_datasets(catalog="veda", keywords="nightlights")   7 collections: delta-disasters-hd-blackmarble-nightlights, ercot-houston-nightlights-freeze, greenville-nightlights-tornadoes-2024, lakeview-nightlights-tornadoes-2024, nightlights-derecho, nightlights-hd-1band, nightlights-hd-monthly
 search_datasets(catalog="veda", keywords="no2")   3 collections: no2-monthly, no2-monthly-diff, OMI_trno2-COG
 search_datasets(catalog="veda", keywords="hls")   10 collections, first 8 listed here: darnah-flood, hls-bais2-v2, hls-entropy-difference, hls-l30-002-ej-reprocessed, hls-ndvi, hls-ndvi-difference, hls-s30-002-ej-reprocessed, hls-swir-falsecolor-composite
 describe_collection("veda", "ercot-houston-nightlights-freeze")
@@ -601,9 +604,7 @@ render_map(two item layers, same collection)
 search_datasets(catalog="veda", keywords="nightlights"), first result, as returned
   catalog: veda   id: delta-disasters-hd-blackmarble-nightlights   gsd: None   (no covers_aoi key; reading it raised KeyError: 'covers_aoi')
 
-tile fetched: GET .../tiles/WebMercatorQuad/8/59/105.png?assets=cog_default  ->  200 image/png 21022 bytes</div></div>
-<div class="answer"><div class="label">Our read</div>A keyword search of VEDA found seven night lights collections, three NO2 ones and ten HLS ones. I picked the Houston deep freeze night lights: Black Marble night lights images for 2021-02-10, before, and 2021-02-16, after the freeze that hit ERCOT's power grid. Both items cover 100.0% of the Houston box, and the collection's license is CC0-1.0. The map puts them in one swipe so the communicator can drag between the two nights. The tool returned compare: True for the two layers. Nothing in the returned numbers says how much light was lost, so the map is the evidence and this reading is not.</div>
-<a class="fig" href="img/ft10-houston-nightlights.html" target="_blank" title="open the live artifact"><img src="img/ft10-houston-nightlights.png" alt="artifact produced by example 15" loading="lazy"><span class="open">live artifact ↗</span></a>
+tile fetched: GET .../tiles/WebMercatorQuad/8/59/105.png?assets=cog_default  ->  200 image/png 21022 bytes</div></details>
 <div class="learning"><b>Learning →</b> <b>VEDA hands back collections, not places.</b> <code>search_datasets</code> with <code>catalog="veda"</code> and no place gave no covers_aoi key at all, and the gsd I looked at was None, so the three keyword searches I tried (nightlights, no2, hls) could not say which layers sit over a place I care about. The place check only happened later, in <code>search_imagery</code> for Houston. One tile of the layer came back as a 21022-byte PNG, so it draws; I did not look at how bright it is, and compute_statistics was not called.</div>
 <div class="shows">search_datasets on veda · describe_collection · search_imagery · before and after swipe on render_map</div>
 </div>
@@ -613,7 +614,9 @@ tile fetched: GET .../tiles/WebMercatorQuad/8/59/105.png?assets=cog_default  -> 
 <div class="grid">
 <div class="card"><div class="top"><div class="num">16</div><div class="tag">dubai compare</div><div class="who">real-estate economist</div></div>
 <div><div class="label">Input</div><div class="prompt">Show me Dubai's coastline and desert edge in October 2021 against October 2026, in true colour.</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Dubai, United Arab Emirates")
+<div class="answer"><div class="label">Our read</div>Both ends of the pair are clear Sentinel-2 scenes from the same tile (40RCN): 2021-10-30 at 0.039738% cloud and 2026-10-19 at 0.033182% cloud. The page is a true-colour swipe, so a reader can drag the divider across the coast and the desert fringe and judge the change by eye. The numbers alone say little: the vegetation index averaged over the whole tile moved from 0.069 to 0.0795, a delta of 0.0105, and the tool itself warns that the percentage is noise on a baseline this close to zero. The stills do not prove a built-up change by themselves, and a figure for new land or buildings would need a land-cover comparison this run did not make. The swipe covers 56.4% of the Dubai bounding box, so the rest of the frame is blank.</div>
+<a class="fig" href="img/ft10-dubai-compare.html" target="_blank" title="open the live artifact"><img src="img/ft10-dubai-compare.png" alt="artifact produced by example 16" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Dubai, United Arab Emirates")
   bbox: [54.7153981, 24.6230801, 56.205298, 25.5250676]   source: nominatim
 
 compare_dates(place="Dubai, United Arab Emirates", window_before="2021-10-01T00:00:00Z/2021-10-31T23:59:59Z",
@@ -627,16 +630,16 @@ compare_dates(place="Dubai, United Arab Emirates", window_before="2021-10-01T00:
 
 render_map("Dubai true colour: 2026-10-19 vs 2021-10-30", bbox, [item S2B_40RCN_20261019_0_L2A assets=["visual"], item S2A_40RCN_20211030_1_L2A assets=["visual"]], compare=True)
   layers: ["2026-10-19 (after)", "2021-10-30 (before)"]   coverage_pct: 56.4
-  coverage_note: "layers cover 56% of the requested view, so the rest renders blank. Pass the whole full_coverage_set from search_imagery, or tighten bbox to what you have"</div></div>
-<div class="answer"><div class="label">Our read</div>Both ends of the pair are clear Sentinel-2 scenes from the same tile (40RCN): 2021-10-30 at 0.039738% cloud and 2026-10-19 at 0.033182% cloud. The page is a true-colour swipe, so a reader can drag the divider across the coast and the desert fringe and judge the change by eye. The numbers alone say little: the vegetation index averaged over the whole tile moved from 0.069 to 0.0795, a delta of 0.0105, and the tool itself warns that the percentage is noise on a baseline this close to zero. The stills do not prove a built-up change by themselves, and a figure for new land or buildings would need a land-cover comparison this run did not make. The swipe covers 56.4% of the Dubai bounding box, so the rest of the frame is blank.</div>
-<a class="fig" href="img/ft10-dubai-compare.html" target="_blank" title="open the live artifact"><img src="img/ft10-dubai-compare.png" alt="artifact produced by example 16" loading="lazy"><span class="open">live artifact ↗</span></a>
+  coverage_note: "layers cover 56% of the requested view, so the rest renders blank. Pass the whole full_coverage_set from search_imagery, or tighten bbox to what you have"</div></details>
 <div class="learning"><b>Learning →</b> <b>compare_dates cannot draw true colour.</b> Its layers always carry an index expression with the red-yellow-green ramp, so a default call gives an NDVI swipe, not the photograph an economist asked for. I used compare_dates to pick the matched scenes and then drew the true-colour swipe with render_map on the same two ids. Also, one Sentinel-2 tile covers only 56.4% of the Dubai box, and render_map's return says so in a coverage_note rather than filling the gap.</div>
 <div class="shows">compare_dates scene matching · render_map two-layer true-colour swipe · render_map coverage_note · near-zero baseline caveat</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">17</div><div class="tag">kilauea swir</div><div class="who">volcano observatory analyst</div></div>
 <div><div class="label">Input</div><div class="prompt">Kīlauea: draw the latest Sentinel-2 scene in a SWIR composite so hot ground reads, give me the SWIR numbers over the summit caldera, and tell me when we can look again.</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">geocode("Kilauea, Hawaii")
+<div class="answer"><div class="label">Our read</div>The latest scene is S2B_4QHG_20261018_0_L2A, and it is cloudy: the search listed 35.941234% cloud for the whole tile, so the summit view may be partly covered. The cleaner one is 2026-09-28 at 6.979185%, which the tool recommended. The map draws the 2026-10-18 scene with swir22 as red, swir16 as green and red as blue, over the caldera box. Over that box the swir22 reading has a mean of 928.0746 and a median of 751.0, with the 2nd and 98th percentiles at 329.0 and 2582.0 and a maximum of 15131.0. These are raw band values and are not converted to reflectance in this call. The max sits far above the 98th percentile, so a few pixels are much brighter than the rest, which is what hot ground or cloud edge would do, and the numbers cannot tell which. The next possible looks are Sentinel-1 radar at 2026-10-26 04:10 UTC, then optical Sentinel-3B at 20:30 on the same day, Landsat 8 at 2026-10-27 20:42 and Sentinel-2B at 2026-10-28 20:59. On this run the nearest track distances were 60.2 km (Sentinel-1A), 103.5 km (Sentinel-3B), 85.7 km (Landsat 8) and 128.0 km (Sentinel-2B), and they move between runs. They are swath passes, not promised captures.</div>
+<a class="fig" href="img/ft10-kilauea-swir.html" target="_blank" title="open the live artifact"><img src="img/ft10-kilauea-swir.png" alt="artifact produced by example 17" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Kilauea, Hawaii")
   bbox: [-159.422598, 22.1961855, -159.392682, 22.22117]   source: nominatim      (this is Kilauea on Kauai, not the volcano)
 
 search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[-155.30, 19.38, -155.24, 19.44],
@@ -664,16 +667,16 @@ next_pass(19.4069, -155.2834, days=5)
 
 render_map("Kilauea summit: SWIR composite 2026-10-18", [-155.30, 19.39, -155.26, 19.42],
            [item S2B_4QHG_20261018_0_L2A assets=["swir22","swir16","red"] rescale="0,4000"])
-  layers: ["swir22/swir16/red 2026-10-18"]</div></div>
-<div class="answer"><div class="label">Our read</div>The latest scene is S2B_4QHG_20261018_0_L2A, and it is cloudy: the search listed 35.941234% cloud for the whole tile, so the summit view may be partly covered. The cleaner one is 2026-09-28 at 6.979185%, which the tool recommended. The map draws the 2026-10-18 scene with swir22 as red, swir16 as green and red as blue, over the caldera box. Over that box the swir22 reading has a mean of 928.0746 and a median of 751.0, with the 2nd and 98th percentiles at 329.0 and 2582.0 and a maximum of 15131.0. These are raw band values and are not converted to reflectance in this call. The max sits far above the 98th percentile, so a few pixels are much brighter than the rest, which is what hot ground or cloud edge would do, and the numbers cannot tell which. The next possible looks are Sentinel-1 radar at 2026-10-26 04:10 UTC, then optical Sentinel-3B at 20:30 on the same day, Landsat 8 at 2026-10-27 20:42 and Sentinel-2B at 2026-10-28 20:59. On this run the nearest track distances were 60.2 km (Sentinel-1A), 103.5 km (Sentinel-3B), 85.7 km (Landsat 8) and 128.0 km (Sentinel-2B), and they move between runs. They are swath passes, not promised captures.</div>
-<a class="fig" href="img/ft10-kilauea-swir.html" target="_blank" title="open the live artifact"><img src="img/ft10-kilauea-swir.png" alt="artifact produced by example 17" loading="lazy"><span class="open">live artifact ↗</span></a>
+  layers: ["swir22/swir16/red 2026-10-18"]</div></details>
 <div class="learning"><b>Learning →</b> <b>The geocoder sent me to the wrong island.</b> "Kilauea, Hawaii" resolved to a place on Kauai (22.2 N, 159.4 W), not the volcano. I used a hand-set caldera box around 19.407 N, 155.283 W instead, so the box is my own choice and not a geocoded one. The statistics call also returned a band_scaling list with many scale/offset entries while the stats are for one band, so the raw number needs care before it is quoted as reflectance.</div>
 <div class="shows">false-colour SWIR composite via assets · compute_statistics clipped to a bbox · next_pass for the next look · geocoder ambiguity</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">18</div><div class="tag">tahoe ndsi</div><div class="who">water-supply planner</div></div>
 <div><div class="label">Input</div><div class="prompt">How much snow is on the high Sierra west of Lake Tahoe now, against early September, and show me the current snow index.</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[-120.22, 38.82, -120.08, 38.92], max_cloud_cover=20)
+<div class="answer"><div class="label">Our read</div>The box west of the lake has no snowpack to measure on either date. The mean snow index was -0.4381 on 2026-10-17 and -0.4283 on 2026-09-07, and the 98th percentile was -0.1062 and -0.1046. A snow-covered pixel reads well above zero in this index, and at the 98th percentile both dates are still below it. So the 98 percent of pixels at or under that line read as not snow. The maximum was 0.9574 in October and 0.8504 in September, which means some pixels did read like snow or bright rock on both dates, but they are a tiny tail. For a planner the honest reading is that October 17 shows no snowpack to count yet, and that these two dates cannot show a trend. The map draws the October layer so a reader can see where the few bright pixels are.</div>
+<a class="fig" href="img/ft10-tahoe-ndsi.html" target="_blank" title="open the live artifact"><img src="img/ft10-tahoe-ndsi.png" alt="artifact produced by example 18" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[-120.22, 38.82, -120.08, 38.92], max_cloud_cover=20)
   2026-10-01 to 2026-10-25, latest:  S2C_10SGJ_20261017_0_L2A   2026-10-17   cloud 0.032494   covers 100.0
   2026-09-01 to 2026-09-10, latest:  S2C_10SGJ_20260907_0_L2A   2026-09-07   cloud 0.060432   covers 100.0
 
@@ -685,16 +688,16 @@ compute_statistics("earth-search", "sentinel-2-l2a", "S2C_10SGJ_20260907_0_L2A",
   min -0.9990817263544536  max 0.8504372657504908  mean -0.42831627323595167  std 0.17145848534748445
   median -0.4404343660172469  percentile_2 -0.7571569595261599  percentile_98 -0.10462192999419842  valid_percent 100.0
 
-render_map("Sierra west of Tahoe: NDSI 2026-10-17", bbox, [item S2C_10SGJ_20261017_0_L2A expression="(green-swir16)/(green+swir16)" rescale="-1,1" colormap_name="blues"])</div></div>
-<div class="answer"><div class="label">Our read</div>The box west of the lake has no snowpack to measure on either date. The mean snow index was -0.4381 on 2026-10-17 and -0.4283 on 2026-09-07, and the 98th percentile was -0.1062 and -0.1046. A snow-covered pixel reads well above zero in this index, and at the 98th percentile both dates are still below it. So the 98 percent of pixels at or under that line read as not snow. The maximum was 0.9574 in October and 0.8504 in September, which means some pixels did read like snow or bright rock on both dates, but they are a tiny tail. For a planner the honest reading is that October 17 shows no snowpack to count yet, and that these two dates cannot show a trend. The map draws the October layer so a reader can see where the few bright pixels are.</div>
-<a class="fig" href="img/ft10-tahoe-ndsi.html" target="_blank" title="open the live artifact"><img src="img/ft10-tahoe-ndsi.png" alt="artifact produced by example 18" loading="lazy"><span class="open">live artifact ↗</span></a>
+render_map("Sierra west of Tahoe: NDSI 2026-10-17", bbox, [item S2C_10SGJ_20261017_0_L2A expression="(green-swir16)/(green+swir16)" rescale="-1,1" colormap_name="blues"])</div></details>
 <div class="learning"><b>Learning →</b> <b>There was no snow to measure.</b> I chose a box and two clear dates before looking, and the numbers came back as bare ground both times. A planner who wants a snowpack trend needs a winter or spring pair. Also, the box is my own pick for high ground west of the lake, not a watershed boundary.</div>
 <div class="shows">NDSI expression through compute_statistics · bbox clip · two-date stats · render_map index layer with colormap</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">19</div><div class="tag">austin burn</div><div class="who">post-fire recovery coordinator</div></div>
 <div><div class="label">Input</div><div class="prompt">Find a 2026 wildfire in the western US, compare before and after with a burn index, and give me the numbers over the burn area.</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">active_events(bbox=[-125, 31, -102, 49], days=365)
+<div class="answer"><div class="label">Our read</div>Signs of a burn show only in the bottom of the distribution. Over the box around the Austin fire the burn index averaged 0.7047 on 2026-07-27, before the fire was listed on 2026-08-09, and 0.6736 on 2026-10-03, a drop of 0.0311. The median hardly moved (0.7372 to 0.7434), but the spread grew from 0.1265 to 0.2124 and the 2nd percentile fell from 0.2986 to -0.0638. That pattern fits a patch of burnt ground inside mostly unchanged ground: most pixels the same, a tail much lower. The compare tool's own scene-wide number is +0.0088 because it is a whole-tile mean (see the code line in the returned block), and the tile is larger than the box, so it should not be quoted for the burn. I did not measure the scar's size; the feed gave a point only.</div>
+<a class="fig" href="img/ft10-austin-burn-compare.html" target="_blank" title="open the live artifact"><img src="img/ft10-austin-burn-compare.png" alt="artifact produced by example 19" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">active_events(bbox=[-125, 31, -102, 49], days=365)
   eonet_note: "EONET listed 481 open events in 365 days"      gdacs_error: "The read operation timed out"
   eonet entries: 481, of which 302 titled "Wildfire ..." (the rest include "Prescribed Fire ...")
   picked: "Wildfire AUSTIN, Clackamas, Oregon"   date 2026-08-09   coordinates [-121.944872, 45.025216]
@@ -714,16 +717,16 @@ compute_statistics(... "S2A_10TEQ_20260727_0_L2A", expression="(nir-swir22)/(nir
 
 compute_statistics(... "S2C_10TEQ_20261003_0_L2A", expression="(nir-swir22)/(nir+swir22)", bbox=[-122.03, 44.96, -121.86, 45.09])
   min -0.806525128943265  max 0.9990054699154649  mean 0.6736266853781298  std 0.21239665594421625
-  median 0.7433962264150943  percentile_2 -0.06376360808709176  percentile_98 0.8573770491803279  valid_percent 100.0</div></div>
-<div class="answer"><div class="label">Our read</div>Signs of a burn show only in the bottom of the distribution. Over the box around the Austin fire the burn index averaged 0.7047 on 2026-07-27, before the fire was listed on 2026-08-09, and 0.6736 on 2026-10-03, a drop of 0.0311. The median hardly moved (0.7372 to 0.7434), but the spread grew from 0.1265 to 0.2124 and the 2nd percentile fell from 0.2986 to -0.0638. That pattern fits a patch of burnt ground inside mostly unchanged ground: most pixels the same, a tail much lower. The compare tool's own scene-wide number is +0.0088 because it is a whole-tile mean (see the code line in the returned block), and the tile is larger than the box, so it should not be quoted for the burn. I did not measure the scar's size; the feed gave a point only.</div>
-<a class="fig" href="img/ft10-austin-burn-compare.html" target="_blank" title="open the live artifact"><img src="img/ft10-austin-burn-compare.png" alt="artifact produced by example 19" loading="lazy"><span class="open">live artifact ↗</span></a>
+  median 0.7433962264150943  percentile_2 -0.06376360808709176  percentile_98 0.8573770491803279  valid_percent 100.0</div></details>
 <div class="learning"><b>Learning →</b> <b>Two traps.</b> First, the compare tool takes a whole-tile mean (no bbox in its stats call), so its delta (+0.0088) points the opposite way from the clipped statistics (-0.0311); the clipped call is the one to trust for a fire box, and the first one is not a bug but easy to misread. Second, active_events asks EONET for open events only, so I could not ask for recently closed fires, and the feed has no size, so Austin was a pick from the list and not the largest fire. The box is my own, drawn around the point, and I did not confirm the scar's extent on the map.</div>
 <div class="shows">active_events wildfire list · compare_dates with an NBR expression · clipped compute_statistics on both dates · tile-wide versus bbox-clipped delta</div>
 </div>
 
 <div class="card"><div class="top"><div class="num">20</div><div class="tag">bend brief</div><div class="who">the mayor's office in Bend, Oregon</div></div>
 <div><div class="label">Input</div><div class="prompt">Give me a conditions brief for Bend: smoke now and tomorrow, the weather, and when satellites can next look.</div></div>
-<div><div class="label">What the tools returned</div><div class="returned">uv run briefing/brief.py --place "Bend, Oregon" --days 7 --out /tmp/ft10/r4/brief
+<div class="answer"><div class="label">Our read</div>The brief says Bend is calm. Smoke is 0.1 µg/m³ now and 0.0 for 2026-10-26 at 22:00 UTC, both clear on the tool's scale, and it is model guidance from NOAA HRRR, not a measurement. The weather section gives 16.5 °C today, freezing nights on October 23 and 24, highs of 8.7 to 10.5 °C from October 26, and a wind peak of 34.2 km/h on October 28 with almost no rain. The latest look is a Sentinel-2 scene from 2026-10-23 at 0.02% cloud covering the area. The disaster alert feed (GDACS) failed, and the page says so in plain words, so the all-clear rests on EONET and the HRRR smoke model. The next looks are not on the page. A separate pass prediction puts the next radar pass at 2026-10-26 14:34 UTC and the next optical Sentinel-3B pass at 18:42, both possible captures, not promises.</div>
+<a class="fig" href="img/ft10-bend-brief.html" target="_blank" title="open the live artifact"><img src="img/ft10-bend-brief.png" alt="artifact produced by example 20" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">uv run briefing/brief.py --place "Bend, Oregon" --days 7 --out /tmp/ft10/r4/brief
   [5/5] synthesizing brief with Claude...
   brief: brief-bend--oregon-2026-10-25.html      map: brief-map-bend--oregon-2026-10-25.html   (also .md and .data.json)
 
@@ -743,9 +746,7 @@ next_pass(44.0614073, -121.3128911, days=3)
   SENTINEL-1A  2026-10-26 14:34   track 48.0 km    radar (day or night, sees through cloud)
   SENTINEL-1C  2026-10-26 14:37   track 72.1 km    radar
   SENTINEL-3B  2026-10-26 18:42   track 84.9 km    optical
-  SENTINEL-1A  2026-10-27 01:40   track 152.4 km   radar</div></div>
-<div class="answer"><div class="label">Our read</div>The brief says Bend is calm. Smoke is 0.1 µg/m³ now and 0.0 for 2026-10-26 at 22:00 UTC, both clear on the tool's scale, and it is model guidance from NOAA HRRR, not a measurement. The weather section gives 16.5 °C today, freezing nights on October 23 and 24, highs of 8.7 to 10.5 °C from October 26, and a wind peak of 34.2 km/h on October 28 with almost no rain. The latest look is a Sentinel-2 scene from 2026-10-23 at 0.02% cloud covering the area. The disaster alert feed (GDACS) failed, and the page says so in plain words, so the all-clear rests on EONET and the HRRR smoke model. The next looks are not on the page. A separate pass prediction puts the next radar pass at 2026-10-26 14:34 UTC and the next optical Sentinel-3B pass at 18:42, both possible captures, not promises.</div>
-<a class="fig" href="img/ft10-bend-brief.html" target="_blank" title="open the live artifact"><img src="img/ft10-bend-brief.png" alt="artifact produced by example 20" loading="lazy"><span class="open">live artifact ↗</span></a>
+  SENTINEL-1A  2026-10-27 01:40   track 152.4 km   radar</div></details>
 <div class="learning"><b>Learning →</b> <b>The page tells its own gaps, and misses one.</b> It names the GDACS failure and warns that the vegetation rise of 12% is averaged over a tile much larger than the city. But the smoke frame sits on the linked map page and the page has no next-pass section, so the full brief the mayor's office asked for took the script plus one more tool call.</div>
 <div class="shows">briefing/brief.py end to end · smoke numbers with the model caveat · stated source gap · next_pass added alongside</div>
 </div>
