@@ -86,6 +86,7 @@ Triggers: "postcard", "share card", "something I can post", "can I put this on L
 - **Card shape is a choice, not an accident.** Cards snap to standard ratios (3:2, 4:3, 1:1, 4:5, 2:3) by trimming the bbox centrally; swipe compares and 3D default to landscape 3:2. Override when the scene's shape is the point — `aspect="2:3"` on `render_postcard`, or `postcard={"aspect": "2:3", ...}` on the render tools — for tall subjects like a coastline, a river valley, a long glacier.
 - Pixels are embedded rather than linked on purpose. A map artifact points at live tiles, and a Planetary Computer URL carries a signed token that dies within the hour, so a shared page goes blank. A postcard keeps working.
 - Index cards work the same way as index map layers: pass `expression` and `colormap_name`.
+- A categorical colormap the tools know (`esa-worldcover` today) draws a legend on the map and the postcard, and the result's `legend` lists the classes to quote.
 - The license line only appears when the collection declares a real one. Earth Search says `proprietary` for Sentinel-2, which is STAC's placeholder rather than the actual terms, so the card leaves it off instead of printing something misleading.
 - Where and whether to post is the user's decision, never yours. Hand them the file and say what's in it.
 

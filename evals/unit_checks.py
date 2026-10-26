@@ -353,6 +353,19 @@ def t_field_test_etime_parser():
     assert ft._etime_seconds("not-a-time") is None
 
 
+def t_map_draws_legend_for_worldcover():
+    with tempfile.TemporaryDirectory() as d:
+        def lay(cm):
+            return [{"type": "raster", "name": "r", "tiles": "https://x/{z}/{x}/{y}.png", "colormap_name": cm}]
+        out = str(Path(d) / "a.html")
+        r = tools.render_map("t", [0, 0, 1, 1], lay("esa-worldcover"), out_path=out)
+        html = Path(r["map_path"]).read_text()
+        assert "ESA WorldCover 2021" in html and "Cropland" in html and "Built-up" in html
+        assert len(r["legend"]["classes"]) == 11 and r["legend"]["classes"][3]["name"] == "Cropland"
+        r = tools.render_map("t", [0, 0, 1, 1], lay("viridis"), out_path=str(Path(d) / "b.html"))
+        assert "legend" not in r and 'id="legends"' not in Path(r["map_path"]).read_text()
+
+
 def t_map_with_no_imagery_says_so():
     # field test No.6: a geojson-only storm track rendered a 10 KB still that
     # was two dots on blank. The render "succeeded" and nothing said otherwise.
@@ -628,6 +641,12 @@ def t_postcard_attribution_block():
     assert "sentinel-2-l2a via Element 84 Earth Search" in html
     assert "license: proprietary" in html
     assert "license:" not in _postcard()  # omitted, not left blank
+
+
+def t_postcard_legend_row():
+    html = _postcard(legends=tools._legends_for([], "esa-worldcover"))
+    assert "ESA WorldCover 2021" in html and "Mangroves" in html and "<script" not in html
+    assert 'class="legend"' not in _postcard()
 
 
 def t_postcard_license_placeholder_omitted():
