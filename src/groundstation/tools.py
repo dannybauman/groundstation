@@ -15,6 +15,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from html import escape
 from pathlib import Path
 from urllib.parse import quote, urljoin
 from typing import Any
@@ -1747,6 +1748,7 @@ __TLBAR__
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
 __STACK__
 <script>
+const esc = s => String(s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
 const LAYERS = __LAYERS__;
 const BBOX = __BBOX__;
 // Field test No.8: CARTO's free basemap started serving "API KEY REQUIRED"
@@ -1792,7 +1794,7 @@ function addLayerTo(m, l, i) {
     m.on("click", id + "-fill", (e) => {
       const p = e.features[0].properties;
       new maplibregl.Popup().setLngLat(e.lngLat)
-        .setHTML("<b>" + (p.title || p.name || "") + "</b><br>" + (p.description || p.date || ""))
+        .setHTML("<b>" + esc(p.title || p.name || "") + "</b><br>" + (p.description || p.date || ""))
         .addTo(m);
     });
   }
@@ -1806,8 +1808,8 @@ if (COMPARE && rasters.length === 2) {
   // comparison: two synced maps, right one on top clipped left of a draggable divider
   document.getElementById("map").insertAdjacentHTML("afterend",
     `<div id="mapL"></div><div id="divider"><div class="knob">◂▸</div></div>
-     <div class="side-label" style="left:12px">◂ ${rasters[1].name}</div>
-     <div class="side-label" style="right:12px">${rasters[0].name} ▸</div>`);
+     <div class="side-label" style="left:12px">◂ ${esc(rasters[1].name)}</div>
+     <div class="side-label" style="right:12px">${esc(rasters[0].name)} ▸</div>`);
   const mapR = new maplibregl.Map({ container: "map", ...MAP_OPTS });
   const mapL = new maplibregl.Map({ container: "mapL", style: BASE_STYLE(),
     bounds: MAP_OPTS.bounds, fitBoundsOptions: MAP_OPTS.fitBoundsOptions });
@@ -2063,12 +2065,34 @@ def _footprints_overlap(resolved: list[dict[str, Any]], min_frac: float = 0.6) -
     return smaller > 0 and inter / smaller >= min_frac
 
 
+def _js(value: Any) -> str:
+    # json inside <script>: "<" as < so a "</script>" in a name cannot end the block
+    return json.dumps(value).replace("<", "\\u003c")
+
+
+def _fill(template: str, mapping: dict[str, str]) -> str:
+    # one pass over the __KEY__ tokens: a substituted value is never re-expanded,
+    # so caller text containing "__LAYERS__" stays literal
+    return re.sub(r"__([A-Z]+)__", lambda m: mapping.get(m.group(1), m.group(0)), template)
+
+
 def _artifact_path(out_path: str | None, prefix: str, title: str) -> str:
-    if out_path:
-        return out_path
+    """Resolve where an HTML artifact goes; raises ValueError for a path it will not write."""
     out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
-    out_dir.mkdir(parents=True, exist_ok=True)
-    return str(out_dir / f"{prefix}-{slugify(title)}.html")
+    if not out_path:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = str(out_dir / f"{prefix}-{slugify(title)}.html")
+    dest = Path(out_path)
+    if dest.suffix.lower() != ".html":
+        raise ValueError("out_path must end in .html")
+    if dest.is_symlink():
+        raise ValueError("out_path is a symlink; refusing to write through it")
+    # GROUNDSTATION_OUT is where the console writes; the cwd tree is where the
+    # field-test scripts write (docs/img). Either is fine, anything else is not
+    roots = [out_dir.resolve(), Path.cwd().resolve()]
+    if not any(dest.resolve().is_relative_to(r) for r in roots):
+        raise ValueError("out_path must sit under GROUNDSTATION_OUT or the working directory")
+    return str(dest)
 
 
 # standard card shapes (name -> height/width). A card is a deliberate
@@ -2218,8 +2242,6 @@ def _map_stack_facts(
 
 
 def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
-    from html import escape
-
     from groundstation.stack import STAGE_LABELS
 
     parts, last = [], None
@@ -2264,9 +2286,7 @@ def _stack_chunk_for(
     entries = _stack.stack_instances(components, _map_stack_facts(resolved, layers, extra_facts))
     if not entries:
         return None
-    from html import escape
-
-    return _STACK_CHUNK.replace("__ENTRIES__", _stack_panel_html(entries)).replace("__SUMMARY__", escape(_stack.summary(entries)))
+    return _fill(_STACK_CHUNK, {"ENTRIES": _stack_panel_html(entries), "SUMMARY": escape(_stack.summary(entries))})
 
 
 def _artifact_postcard(
@@ -2312,7 +2332,10 @@ def _artifact_postcard(
         _stack_credit_html({**facts, "snapshot": True}) if stack_layer else None,
         engine="STAC · MapLibre GL" if items else "MapLibre GL",
     )
-    card_path = postcard.get("out_path") or _artifact_path(None, "postcard", postcard["place"])
+    try:
+        card_path = _artifact_path(postcard.get("out_path"), "postcard", postcard["place"])
+    except ValueError as e:
+        return None, f"postcard skipped: {e}"
     Path(card_path).write_text(html, encoding="utf-8")
     return card_path, None
 
@@ -2397,20 +2420,18 @@ def render_map(
     first = next((l for l in layers if l.get("type") == "item"), None)
     stac_map_url = first and stac_map_link(first["catalog"], first["collection_id"], first["item_id"])
     html = (
-        _MAP_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
-        .replace("__TITLE__", title)
-        .replace("__SUBTITLE__", subtitle)
-        .replace("__LAYERS__", json.dumps(resolved))
-        .replace("__BBOX__", json.dumps(bbox))
-        .replace("__COMPARE__", json.dumps(compare))
-        .replace("__TLBAR__", "").replace("__TIMELAPSE__", "false").replace("__INTERVAL__", "0")
-        .replace("__STACMAP__", f'<a id="stacmap" href="{stac_map_url}" target="_blank">Open in stac-map</a>' if stac_map_url else "")
-        # __STACK__ goes last: its entries carry caller-supplied strings, and
-        # replacing it earlier would let a literal "__LAYERS__" inside them be
-        # macro-expanded by the later template substitutions
-        .replace("__STACK__", stack_html)
+        _fill(_MAP_TEMPLATE, {
+            "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
+            "LAYERS": _js(resolved), "BBOX": _js(bbox), "COMPARE": _js(compare),
+            "TLBAR": "", "TIMELAPSE": "false", "INTERVAL": "0",
+            "STACMAP": f'<a id="stacmap" href="{escape(stac_map_url)}" target="_blank">Open in stac-map</a>' if stac_map_url else "",
+            "STACK": stack_html,
+        })
     )
-    out_path = _artifact_path(out_path, "map", title)
+    try:
+        out_path = _artifact_path(out_path, "map", title)
+    except ValueError as e:
+        return {"error": str(e)}
     Path(out_path).write_text(html, encoding="utf-8")
     out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
     # The map's contents were previously legible only to a human opening the
@@ -2508,19 +2529,17 @@ def render_timelapse(
     if stack_layer:
         stack_html = _stack_chunk_for(resolved, frames, stack_facts) or ""
     html = (
-        _MAP_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
-        .replace("__TITLE__", title)
-        .replace("__SUBTITLE__", subtitle)
-        .replace("__LAYERS__", json.dumps(resolved))
-        .replace("__BBOX__", json.dumps(bbox))
-        .replace("__COMPARE__", "false")
-        .replace("__TLBAR__", _TIMELAPSE_BAR)
-        .replace("__TIMELAPSE__", "true")
-        .replace("__INTERVAL__", str(int(interval_ms)))
-        .replace("__STACMAP__", "")
-        .replace("__STACK__", stack_html)
+        _fill(_MAP_TEMPLATE, {
+            "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
+            "LAYERS": _js(resolved), "BBOX": _js(bbox), "COMPARE": "false",
+            "TLBAR": _TIMELAPSE_BAR, "TIMELAPSE": "true", "INTERVAL": str(int(interval_ms)),
+            "STACMAP": "", "STACK": stack_html,
+        })
     )
-    out_path = _artifact_path(out_path, "timelapse", title)
+    try:
+        out_path = _artifact_path(out_path, "timelapse", title)
+    except ValueError as e:
+        return {"error": str(e)}
     Path(out_path).write_text(html, encoding="utf-8")
     return {
         "map_path": out_path,
@@ -2730,32 +2749,28 @@ def render_map_3d(
     extras = [_resolve_layer(l) for l in (extra_layers or [])]
     extra_html = ""
     if extras:
-        extra_html = _EXTRA_CHUNK.replace("__N__", str(len(extras))).replace(
-            "__EXTRAS__",
-            json.dumps([
-                {"tiles": e["tiles"], "opacity": e.get("opacity", 1),
-                 **({"bounds": e["bounds"]} if e.get("bounds") else {})}
-                for e in extras
-            ]),
-        )
+        extra_html = _fill(_EXTRA_CHUNK, {"N": str(len(extras)), "EXTRAS": _js([
+            {"tiles": e["tiles"], "opacity": e.get("opacity", 1),
+             **({"bounds": e["bounds"]} if e.get("bounds") else {})}
+            for e in extras
+        ])})
     stack_html, stack_note = "", None
     if stack_layer:
         stack_html = _stack_chunk_for([resolved, *extras], [layer, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True})
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     html = (
-        _MAP3D_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
-        .replace("__TITLE__", title)
-        .replace("__SUBTITLE__", subtitle)
-        .replace("__STYLE__", json.dumps(style))
-        .replace("__BBOX__", json.dumps(bbox))
-        .replace("__EXAGGERATION__", json.dumps(round(float(exaggeration), 2)))
-        .replace("__EXTRA__", extra_html)
-        # __STACK__ last, same trust boundary as render_map: entries carry
-        # caller-supplied collection ids that must never be macro-expanded
-        .replace("__STACK__", stack_html)
+        _fill(_MAP3D_TEMPLATE, {
+            "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
+            "STYLE": _js(style), "BBOX": _js(bbox),
+            "EXAGGERATION": json.dumps(round(float(exaggeration), 2)),
+            "EXTRA": extra_html, "STACK": stack_html,
+        })
     )
-    out_path = _artifact_path(out_path, "map3d", title)
+    try:
+        out_path = _artifact_path(out_path, "map3d", title)
+    except ValueError as e:
+        return {"error": str(e)}
     Path(out_path).write_text(html, encoding="utf-8")
     out = {"path": out_path, "title": title}
     # Same reasoning as render_map's state, with 3D's own facts: the vertical
@@ -2866,8 +2881,6 @@ def _stack_credit_html(facts: dict[str, Any]) -> str | None:
     map exercised. Links stay out on purpose: the card's no-live-URLs
     guarantee covers the credit block too.
     """
-    from html import escape
-
     from groundstation import stack as _stack
 
     try:
@@ -2989,17 +3002,15 @@ def _postcard_html(
     import base64
 
     return (
-        _POSTCARD_TEMPLATE.replace("__BRAND__", _BRAND_CSS)
-        .replace("__ENGINE__", engine)
-        .replace("__IMAGE__", base64.b64encode(png).decode())
-        .replace("__PLACE__", place)
-        .replace("__DATE__", date)
-        .replace("__COLLECTION__", collection_id)
-        .replace("__SOURCE__", source)
-        .replace("__CAPTION__", f'<p class="caption">{caption}</p>' if caption else "")
-        .replace("__LICENSE__", f"<div>license: {license_}</div>" if license_ else "")
-        # __STACK__ last: its lines carry the caller-supplied collection id
-        .replace("__STACK__", stack_html or "")
+        _fill(_POSTCARD_TEMPLATE, {
+            "BRAND": _BRAND_CSS, "ENGINE": escape(engine),
+            "IMAGE": base64.b64encode(png).decode(),
+            "PLACE": escape(place), "DATE": escape(date),
+            "COLLECTION": escape(collection_id), "SOURCE": escape(source),
+            "CAPTION": f'<p class="caption">{escape(caption)}</p>' if caption else "",
+            "LICENSE": f"<div>license: {escape(license_)}</div>" if license_ else "",
+            "STACK": stack_html or "",
+        })
     )
 
 
@@ -3114,10 +3125,10 @@ def render_postcard(
         _catalog_source(catalog, collection_id), caption, license_, stack_html,
         engine="STAC · rio-tiler" if mosaic_scenes else "STAC · TiTiler",
     )
-    if out_path is None:
-        out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = str(out_dir / f"postcard-{slugify(place)}-{slugify(date)}.html")
+    try:
+        out_path = _artifact_path(out_path, "postcard", f"{place}-{date}")
+    except ValueError as e:
+        return {"error": str(e)}
     Path(out_path).write_text(html, encoding="utf-8")
     out = {"path": out_path}
     if mosaic_scenes:

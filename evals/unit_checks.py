@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import sys
 import tempfile
@@ -20,6 +21,11 @@ from groundstation import tools  # noqa: E402
 from groundstation.tools import _bbox_coverage_pct, _expression_to_bands  # noqa: E402
 import brief  # noqa: E402
 import brief_checks  # noqa: E402
+
+# artifacts may only land under GROUNDSTATION_OUT or the cwd tree; the suite's
+# tempdirs are neither, so the suite's out root is the system tempdir
+os.environ["GROUNDSTATION_OUT"] = tempfile.gettempdir()
+
 
 def _offline(*a, **k):
     raise RuntimeError("offline suite: no network")
@@ -2171,6 +2177,60 @@ def t_timelapse_page_controls_and_cap():
         assert "__" not in html.replace("__proto__", ""), "unfilled template marker"
         over = tools.render_timelapse("tl", [0, 0, 1, 1], _stub_frames(9), out_path=str(Path(d) / "u.html"))
         assert "error" in over and "cap of 8" in over["error"] and not (Path(d) / "u.html").exists(), over
+
+
+XSS = "<script>alert(1)</script>"
+
+
+def _hostile_pages(d):
+    raster = {"type": "raster", "name": "</script>" + XSS, "tiles": "https://t.example/{z}/{x}/{y}.png"}
+    main = {"type": "raster", "name": "m", "tiles": "https://t.example/{z}/{x}/{y}.png"}
+    pages = [
+        tools.render_map(XSS, [0, 0, 1, 1], [raster], subtitle=XSS, out_path=str(Path(d) / "a.html"))["map_path"],
+        tools.render_map_3d(XSS, [0, 0, 10, 10], main, subtitle=XSS, out_path=str(Path(d) / "b.html"))["path"],
+        tools.render_timelapse(XSS, [0, 0, 1, 1], [raster, raster], out_path=str(Path(d) / "c.html"))["map_path"],
+    ]
+    card = tools._postcard_html(b"x", XSS, XSS, XSS, XSS, XSS, XSS)
+    return [Path(p).read_text(encoding="utf-8") for p in pages] + [card]
+
+
+def t_renderers_escape_titles_and_names():
+    with tempfile.TemporaryDirectory() as d:
+        pages = _hostile_pages(d)
+    for html in pages:
+        assert XSS not in html and "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    for html in (pages[0], pages[2]):
+        # a layer name cannot end the JSON block: the raw closer appears only
+        # for the template's own script tags, the name's one is \\u003c
+        assert "\\u003c/script>" in html
+
+
+def t_fill_never_reexpands_values():
+    assert tools._fill("__A__ __B__ __C__", {"A": "__B__", "B": "x"}) == "__B__ x __C__"
+
+
+def t_artifact_path_confined():
+    with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+        old_out, old_cwd = os.environ["GROUNDSTATION_OUT"], os.getcwd()
+        os.environ["GROUNDSTATION_OUT"] = out
+        os.chdir(d)
+        try:
+            main = {"type": "raster", "name": "m", "tiles": "https://t.example/{z}/{x}/{y}.png"}
+            with tempfile.TemporaryDirectory() as elsewhere:
+                link = Path(d) / "link.html"
+                link.symlink_to(Path(elsewhere) / "target.html")
+                bad = [str(Path(elsewhere) / "x.html"), "../../x.html", str(Path(d) / "x.txt"), str(link)]
+                for p in bad:
+                    r = tools.render_map("t", [0, 0, 1, 1], [main], out_path=p)
+                    assert "error" in r and "map_path" not in r, (p, r)
+                assert not list(Path(elsewhere).iterdir())
+            (Path(d) / "docs").mkdir()
+            for p in (Path(d) / "docs" / "ok.html", Path(out) / "ok.html"):
+                ok = tools.render_map("t", [0, 0, 1, 1], [main], out_path=str(p))
+                assert Path(ok["map_path"]).exists(), ok
+        finally:
+            os.chdir(old_cwd)
+            os.environ["GROUNDSTATION_OUT"] = old_out
 
 
 def t_versions_agree():
