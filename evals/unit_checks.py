@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 import base64
 import json
 import os
@@ -1945,9 +1946,28 @@ def t_geocode_candidates_carry_kind_and_feature_word_picks():
     _scored_on_its_inputs(out)
     assert out["candidates"][0]["kind"] == "volcano" and not out.get("ambiguous"), out
     assert out["candidates"][0]["extent"] == [0.0001, 0.0001] and "bbox_note" in out, "a node is a point, widened"
-    assert abs(out["bbox"][2] - out["bbox"][0] - 0.3) < 1e-9, out
+    assert out["extent_basis"] == "kind" and abs((out["bbox"][3] - out["bbox"][1]) * 111.32 / 2 - 5) < 1e-6, ("a volcano node is 5 km half-width", out)
     out, _ = _with_geocoders({"ids": []}, [_KILAUEA_VILLAGE, _KILAUEA_VOLCANO], lambda: tools.geocode("Kilauea volcano, Hawaii"))
     assert out["candidates"][0]["kind"] == "volcano" and not out.get("ambiguous"), out
+
+
+def t_geocode_point_extent_comes_from_its_kind():
+    # Stop 27: a point is padded by what it is, not one 0.3 deg square
+    def half_km(out):
+        return round((out["bbox"][3] - out["bbox"][1]) * 111.32 / 2, 3)
+    pt = lambda kind, lat=37.0: _nom("Foo, Utah, United States", kind, [-111.0, lat, -111.0, lat], 0.4)
+    for kind, km in [("bay", 2), ("town", 5), ("city", 10)]:
+        out, _ = _with_geocoders({"ids": []}, [pt(kind)], lambda: tools.geocode("Foo, Utah"))
+        assert out["extent_basis"] == "kind" and out["candidates"][0]["extent_basis"] == "kind" and half_km(out) == km, (kind, out)
+        assert abs((out["bbox"][2] - out["bbox"][0]) / (out["bbox"][3] - out["bbox"][1]) - 1 / math.cos(math.radians(37.0))) < 1e-6, out
+    out, _ = _with_geocoders({"ids": []}, [pt("quux")], lambda: tools.geocode("Foo, Utah"))
+    assert out["extent_basis"] == "default" and abs(out["bbox"][2] - out["bbox"][0] - 0.3) < 1e-9, out
+    out, _ = _with_geocoders({"ids": []}, [pt("bay", 90.0)], lambda: tools.geocode("Foo, Utah"))
+    w, s, e, n = out["bbox"]
+    assert s < n <= 90.0 and w < e and e - w <= 360.0, ("a pole stays a box, not inverted or infinite", out)
+    own = _nom("Foo, Utah, United States", "bay", [-111.2, 36.9, -111.0, 37.1], 0.4)
+    out, _ = _with_geocoders({"ids": []}, [own], lambda: tools.geocode("Foo, Utah"))
+    assert out["extent_basis"] == "own" and out["bbox"] == [-111.2, 36.9, -111.0, 37.1] and "bbox_note" not in out, out
 
 
 def t_geocode_feature_word_yields_to_a_place_named_for_it():

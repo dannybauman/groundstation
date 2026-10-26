@@ -87,6 +87,15 @@ _FEATURE_KINDS = {
 }
 
 
+# a point candidate's half-width in km by kind. Nominatim pads its own place
+# nodes (a town node came back 0.08 deg), so city and town here are for a source that does not
+_KIND_HALF_KM = {
+    **dict.fromkeys(("bay", "marina", "harbour", "beach", "village", "hamlet", "mine", "pit"), 2.0),
+    **dict.fromkeys(("town", "volcano", "mountain", "peak", "lake", "reservoir", "water"), 5.0),
+    "city": 10.0,
+}
+
+
 _PHYSICAL_KINDS = set().union(*_FEATURE_KINDS.values())
 
 
@@ -111,6 +120,9 @@ def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
     both bonuses, the Shasta Lake reservoir at 0.34 beats the town at 0.44
     with them, and the Kilauea volcano at 0.48 clears the village at 0.35
     by more than AMBIGUITY_MARGIN without a feature word
+
+    extent_basis says where the box comes from: own, or for a point (extent
+    under POINT_DEG) kind when _KIND_HALF_KM sizes it, else default (the 0.3 deg square)
     """
     w, s, e, n = bbox
     width, height = e - w + (360 if e < w else 0), n - s  # west > east crosses the dateline
@@ -118,8 +130,10 @@ def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
     score = (importance or 0.0) + 0.03 * math.log10(max(km2, 1.0))
     if kind in _PHYSICAL_KINDS:
         score += 0.1 + (0.2 if kind in want else 0.0)
+    basis = "own" if max(width, height) >= POINT_DEG else "kind" if kind in _KIND_HALF_KM else "default"
     return dict(name=name, bbox=bbox, source=source, where=where, kind=kind,
-                extent=[round(width, 4), round(height, 4)], importance=importance, score=round(score, 3))
+                extent=[round(width, 4), round(height, 4)], importance=importance, score=round(score, 3),
+                extent_basis=basis)
 
 
 # the boxes geocode returned, with the source that answered, so a caller's stack_facts can claim a geocode
@@ -543,7 +557,10 @@ def geocode(query: str) -> dict[str, Any]:
     physical-feature kind, and a feature word in the query (lake, volcano,
     river, peak...) that names the candidate's kind. Lake, reservoir and water
     count as one kind. The top score is the result; its bbox is the
-    candidate's own however small, widened only when it is a point. ambiguous
+    candidate's own however small, widened only when it is a point: by
+    its kind's half-width (a bay 2 km, a town or volcano 5, a city 10),
+    or the 0.3 deg square when the kind is unknown. extent_basis on the result
+    and each candidate says which: own, kind or default. ambiguous
     is true when a candidate in another place scores within AMBIGUITY_MARGIN
     of the top; each candidate's where then names its state and country, and
     the place-taking tools refuse the name until a fuller name or bbox is passed.
@@ -711,12 +728,16 @@ def _settle(out: dict[str, Any], cands: list[dict[str, Any]]) -> bool:
     # a point (Mount Rainier came back 0.0001 deg wide). A degenerate bbox makes
     # a useless imagery search and an empty 3D scene, so widen it and say so. A
     # real extent stays however small: the Berkeley Pit is 0.024 by 0.013 deg
-    if max(top["extent"]) < POINT_DEG:
-        d = 0.15
-        out["bbox"] = [out["lon"] - d, out["lat"] - d, out["lon"] + d, out["lat"] + d]
+    out["extent_basis"] = top["extent_basis"]
+    if top["extent_basis"] != "own":
+        half_km = _KIND_HALF_KM.get(top["kind"]) if top["extent_basis"] == "kind" else None
+        dlat = half_km / 111.32 if half_km else 0.15
+        dlon = min(dlat / max(math.cos(math.radians(out["lat"])), 0.01), 180.0) if half_km else 0.15
+        out["bbox"] = [out["lon"] - dlon, max(out["lat"] - dlat, -90.0), out["lon"] + dlon, min(out["lat"] + dlat, 90.0)]
         out["bbox_note"] = (
-            "geocoder returned a point, not an extent — widened to a "
-            f"{2 * d:g} deg box around it. Pass your own bbox if the subject is bigger"
+            "geocoder returned a point, not an extent — widened to "
+            + (f"{2 * half_km:g} km across for a {top['kind']}" if half_km else "a 0.3 deg box")
+            + " around it. Pass your own bbox if the subject is bigger"
         )
     return ambiguous
 
