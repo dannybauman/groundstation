@@ -2795,8 +2795,9 @@ def t_layer_panel_folds_at_phone_width_like_the_legend():
     assert '<details class="fold" open>' in t and 'innerWidth <= 500' in t and "#panel details" in t
     assert "max-width: calc(100vw - 150px)" in t  # clear of the STACK button
     assert "#panel details:has(#toggles:empty) { display: none; }" in t  # a timelapse has no rows
-    rule = "@media (max-width: 500px) { #credit { bottom: 60px; max-width: 40vw; } }"
-    assert rule in t and rule in tools._MAP3D_TEMPLATE  # credit rides above the attribution on a phone
+    for tpl in (t, tools._MAP3D_TEMPLATE):  # the credit folds into MapLibre's attribution on a phone
+        assert "@media (max-width: 500px) { #credit { display: none; } }" in tpl
+        assert 'attributionControl: { customAttribution: document.getElementById("credit").textContent }' in tpl
 
 
 def t_next_pass_names_the_night_passes_it_dropped():
