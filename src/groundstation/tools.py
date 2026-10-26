@@ -1445,21 +1445,28 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
             f"{own} but covers {cov(best):.1f}% of the area; "
             f"the clearest scene ({cloud(clearest):.1f}% cloud) covers {cov(clearest):.1f}%"
         )
-    newest = max(items, key=lambda it: it.get("datetime") or "")
-    if (newest.get("datetime") or "") != (best.get("datetime") or ""):
-        # name the one step that dropped the newest scene, so "why not the latest" is answered
-        nd, nc = (newest.get("datetime") or "")[:10], cloud(newest)
-        if not all_cloudy and nc is not None and nc > RECOMMEND_MAX_CLOUD:
-            why = f"cloud: {nc:.1f}%, over the {RECOMMEND_MAX_CLOUD:.0f}% ceiling"
-        elif cov(newest) < top - RECOMMEND_COVERAGE_TIE:
-            why = f"coverage: {cov(newest):.1f}% against the pick's {cov(best):.1f}%, outside the {RECOMMEND_COVERAGE_TIE:.0f}-point band"
-        elif newest not in near and nc is not None and least is not None:
-            ref = "the pick's" if bc == least else "the band's"
-            why = f"cloud: {nc:.1f}% against {ref} {least:.1f}%, outside the {RECOMMEND_CLOUD_TIE:.0f}-point tie"
-        else:
-            why = None
+    newest_day = max((it.get("datetime") or "")[:10] for it in items)
+    if newest_day and newest_day != (best.get("datetime") or "")[:10]:
+        # name the first step, in the order above, that dropped the newest scene, so "why not the latest" is answered
+        def lost(it: dict[str, Any]) -> tuple[int, str | None]:
+            c = cloud(it)
+            if not all_cloudy and c is not None and c > RECOMMEND_MAX_CLOUD:
+                return 0, f"cloud: {c:.1f}%, over the {RECOMMEND_MAX_CLOUD:.0f}% ceiling"
+            if cov(it) < top - RECOMMEND_COVERAGE_TIE:
+                ref = "the pick's" if cov(best) == top else "the best-covering scene's"
+                return 1, f"coverage: {cov(it):.1f}% against {ref} {top:.1f}%, outside the {RECOMMEND_COVERAGE_TIE:.0f}-point band"
+            if all(it is not n for n in near) and c is not None and least is not None:
+                ref = "the pick's" if bc == least else "the band's"
+                return 2, f"cloud: {c:.1f}% against {ref} {least:.1f}%, outside the {RECOMMEND_CLOUD_TIE:.0f}-point tie"
+            return 3, None
+        # two scenes can share the newest day and STAC order is not stable: explain the one that got furthest
+        newest = max(
+            (it for it in items if (it.get("datetime") or "")[:10] == newest_day),
+            key=lambda it: (lost(it)[0], cov(it), -(cloud(it) or 0.0), str(it.get("id"))),
+        )
+        why = lost(newest)[1]
         if why:
-            reason += f"; the newest, {nd}, lost on {why}"
+            reason += f"; the newest, {newest_day}, lost on {why}"
     if all_cloudy:
         reason = f"every scene is over {RECOMMEND_MAX_CLOUD:.0f}% cloud, so this is the least bad: " + reason
     return {"id": best["id"], "covers_aoi_pct": cov(best), "cloud_cover": bc, "reason": reason}

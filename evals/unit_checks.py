@@ -1816,6 +1816,8 @@ def t_recommended_names_the_step_that_dropped_the_newest_scene():
     assert rec["id"] == "LC09_L2SP_012030_20261005_02_T1", rec
     assert "the newest, 2026-10-21, lost on cloud: 23.0% against the pick's 15.3%, outside the 5-point tie" in rec["reason"], rec
     assert "the clearest scene (0.3% cloud) covers 84.2%" in rec["reason"], rec
+    # two scenes share Oct 21 and STAC order is not stable: either order explains the one that got furthest
+    assert tools._recommend([casco[1], casco[0]] + casco[2:])["reason"] == rec["reason"]
 
 
 def t_recommended_names_the_ceiling_and_coverage_steps():
@@ -1836,6 +1838,21 @@ def t_recommended_names_the_ceiling_and_coverage_steps():
     # the newest scene won: no clause
     assert "newest, " not in tools._recommend([{"id": "a", "datetime": "2026-01-02", "cloud_cover": 1.0, "covers_aoi_pct": 100.0},
                                                {"id": "b", "datetime": "2026-01-01", "cloud_cover": 9.0, "covers_aoi_pct": 100.0}])["reason"]
+    # the coverage band is measured from the best cover, not the pick, when the cloud tie dropped the best cover
+    band = [
+        {"id": "top", "datetime": "2026-10-05", "cloud_cover": 20.0, "covers_aoi_pct": 100.0},
+        {"id": "pick", "datetime": "2026-10-04", "cloud_cover": 1.0, "covers_aoi_pct": 96.0},
+        {"id": "new", "datetime": "2026-10-21", "cloud_cover": 1.0, "covers_aoi_pct": 93.0},
+    ]
+    rec = tools._recommend(band)
+    assert rec["id"] == "pick" and "lost on coverage: 93.0% against the best-covering scene's 100.0%, outside the 5-point band" in rec["reason"], rec
+    # every scene over the ceiling: never blame the ceiling; no cloud figure or no datetime: no crash
+    cloudy = [{"id": "new", "datetime": "2026-10-21", "cloud_cover": 90.0, "covers_aoi_pct": 100.0},
+              {"id": "old", "datetime": "2026-10-05", "cloud_cover": 40.0, "covers_aoi_pct": 100.0}]
+    assert "ceiling" not in tools._recommend(cloudy)["reason"].split("; the newest")[-1]
+    sar = [{"id": "new", "datetime": "2026-10-21", "cloud_cover": None, "covers_aoi_pct": 50.0},
+           {"id": "old", "datetime": None, "cloud_cover": None, "covers_aoi_pct": 100.0}]
+    assert "lost on coverage: 50.0%" in tools._recommend(sar)["reason"]
 
 
 def t_stack_panel_credits_the_geocoder_that_answered():
