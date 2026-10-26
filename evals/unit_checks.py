@@ -1722,6 +1722,31 @@ def t_nominatim_fallback_says_what_it_matched():
     assert note.count("Ashburn, Virginia, United States") == 1, ("the same place twice is not two other places", note)
 
 
+def _nom(name, kind, box, imp=0.5):
+    return {"boundingbox": [str(box[1]), str(box[3]), str(box[0]), str(box[2])], "lat": "0", "lon": "0",
+            "display_name": name, "addresstype": kind, "importance": imp}
+
+
+def t_geocode_candidates_carry_kind_and_feature_word_picks():
+    # Field test No.12: "Shasta Lake" landed on the town, and Kilauea's candidates
+    # said nothing about which was the volcano
+    town = _nom("Shasta Lake, Shasta County, California, United States", "town", [-122.4, 40.5, -122.3, 40.6], 0.6)
+    res = _nom("Shasta Lake, Shasta County, California, United States", "reservoir", [-122.5, 40.6, -122.1, 40.9], 0.5)
+    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta Lake, California"))
+    assert out["candidates"][0]["kind"] == "reservoir" and out["bbox"][2] - out["bbox"][0] > 0.3, out
+    assert [c["kind"] for c in out["candidates"]] == ["reservoir", "town"] and not out.get("ambiguous"), out
+    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta, California"))
+    assert out["candidates"][0]["kind"] == "town", "no feature word: the source's order stands"
+    kau = _nom("Kilauea, Kauai County, Hawaii, United States", "locality", [-159.4, 22.2, -159.3, 22.3], 0.5)
+    vol = _nom("Kilauea, Hawaii County, Hawaii, United States", "volcano", [-155.4, 19.3, -155.2, 19.5], 0.5)
+    out, _ = _with_geocoders({"ids": []}, [kau, vol], lambda: tools.geocode("Kilauea, Hawaii"))
+    assert out["ambiguous"] and [c["kind"] for c in out["candidates"]] == ["locality", "volcano"], out
+    err = tools._ambiguous_error("Kilauea, Hawaii", out)["error"]
+    assert "locality (Kauai County) or volcano (Hawaii County)?" in err, err
+    out, _ = _with_geocoders({"ids": []}, [kau, vol], lambda: tools.geocode("Kilauea volcano, Hawaii"))
+    assert out["candidates"][0]["kind"] == "volcano" and not out["ambiguous"], out
+
+
 def t_gdacs_feed_is_windowed_and_counted():
     # Field test No.8: days=7 and days=30 both returned 100 GDACS events. The
     # feed is a current-events list; the window is applied here and reported.

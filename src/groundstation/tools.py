@@ -69,9 +69,28 @@ def slugify(text: str, max_len: int = 60) -> str:
     return "".join(ch if ch.isalnum() else "-" for ch in text.lower())[:max_len].strip("-")
 
 
+# a feature word in the ask -> the candidate kinds that count as that feature
+_FEATURE_KINDS = {
+    **dict.fromkeys(("lake", "reservoir"), {"lake", "reservoir"}),
+    **dict.fromkeys(("mountain", "mount", "peak"), {"mountain", "peak", "volcano"}),
+    **{w: {w} for w in ("volcano", "river", "glacier", "bay", "island", "crater", "dam", "mine")},
+    "falls": {"waterfall"},
+}
+
+
+def _nominatim_kind(r: dict[str, Any]) -> str:
+    return str(r.get("addresstype") or r.get("type") or "place").lower()
+
+
+def _kind_where(c: dict[str, Any]) -> str:
+    county = next((p for p in c["name"].split(", ") if p.endswith(("County", "Parish"))), None)
+    return county or c.get("where") or ""
+
+
 def _ambiguous_error(place: str, g: dict[str, Any]) -> dict[str, Any]:
+    which = " or ".join(f"{c.get('kind', 'place')} ({_kind_where(c)})" for c in g["candidates"])
     return dict(
-        error=f"{place!r} matches more than one place; pass a fuller name or a bbox",
+        error=f"{place!r} matches more than one place: {which}? Pass a fuller name or a bbox",
         candidates=g["candidates"],
         geocode_note=g.get("geocode_note"),
     )
@@ -298,7 +317,11 @@ def geocode(query: str) -> dict[str, Any]:
     names ("Barotse Floodplain", "Chelan County") rather than long phrases.
     Returns {name, lat, lon, bbox: [w, s, e, n], source, candidates}, plus
     geocode_note when several places match the name and one was picked.
-    candidates lists up to 4 {name, bbox, source, where}; ambiguous is true
+    candidates lists up to 4 {name, bbox, source, where, kind}, kind being the
+    source's own word lowercased (Gazet subtype, Nominatim addresstype or type:
+    volcano, reservoir, town, county...) or "place". A feature word in the query
+    (lake, volcano, river, peak...) makes the one candidate of that kind the
+    chosen result and clears ambiguous; the others stay listed. ambiguous is true
     when the top two are real contenders in different places, and the
     place-taking tools then refuse the name until a fuller name or bbox is passed.
     """
@@ -347,7 +370,8 @@ def geocode(query: str) -> dict[str, Any]:
                 "bbox": [w, s, e, n],
                 "source": "gazet",
             }
-            cands = [dict(name=out["name"], bbox=[w, s, e, n], source="gazet", where=_at(h))]
+            cands = [dict(name=out["name"], bbox=[w, s, e, n], source="gazet", where=_at(h),
+                          kind=str(h.get("subtype") or "place").lower())]
             # Jaro-Winkler ties are real places sharing a name (Loja Province and
             # Loja Canton both score 1.0). Picking one silently is the geocoder
             # deciding for the caller, so say which and name the rest. Field test
@@ -362,7 +386,7 @@ def geocode(query: str) -> dict[str, Any]:
                 )
                 cands += [
                     dict(name=f"{o.get('name')} ({_where(o)})", bbox=[float(x) for x in o["bbox"]],
-                         source="gazet", where=_at(o))
+                         source="gazet", where=_at(o), kind=str(o.get("subtype") or "place").lower())
                     for o in ties[:3]
                 ]
                 # ties share a similarity score, so each is a real contender. Any one
@@ -407,6 +431,12 @@ def geocode(query: str) -> dict[str, Any]:
             break
     if not results:
         return {"error": f"No geocoding result for {query!r}"}
+    # a feature word in the ask picks the one result of that kind ("Shasta Lake"
+    # is the reservoir, not the town). Stay with the source's order otherwise
+    want = next((_FEATURE_KINDS[t] for t in re.findall(r"[a-z]+", query.lower()) if t in _FEATURE_KINDS), None)
+    hit = [r for r in results if want and _nominatim_kind(r) in want]
+    if len(hit) == 1:
+        results = hit + [r for r in results if r is not hit[0]]
     r0 = results[0]
     s, n, w, e = (float(x) for x in r0["boundingbox"])
     lat, lon = float(r0["lat"]), float(r0["lon"])
@@ -423,19 +453,19 @@ def geocode(query: str) -> dict[str, Any]:
     mine = _short(r0.get("display_name", ""))
     others = list(dict.fromkeys(_short(r.get("display_name", "")) for r in results[1:]))
     others = [o for o in others if o != mine][:3]
-    seen = {mine}
-    cands = [dict(name=out["name"], bbox=[w, s, e, n], source="nominatim", where=mine)]
+    seen = {(mine, _nominatim_kind(r0))}
+    cands = [dict(name=out["name"], bbox=[w, s, e, n], source="nominatim", where=mine, kind=_nominatim_kind(r0))]
     for r in results[1:]:
         sh = _short(r.get("display_name", ""))
-        if sh in seen or len(cands) == 4:
+        if (sh, _nominatim_kind(r)) in seen or len(cands) == 4:
             continue
-        seen.add(sh)
+        seen.add((sh, _nominatim_kind(r)))
         bb = [float(x) for x in r["boundingbox"]]
         cands.append(dict(name=r.get("display_name", sh), bbox=[bb[2], bb[0], bb[3], bb[1]],
-                          source="nominatim", where=sh))
+                          source="nominatim", where=sh, kind=_nominatim_kind(r)))
         if len(cands) == 2:
             contender = abs(float(r0.get("importance") or 0) - float(r.get("importance") or 0)) <= AMBIGUITY_MARGIN
-            out["ambiguous"] = contender and not _bboxes_overlap(cands[0]["bbox"], cands[1]["bbox"])
+            out["ambiguous"] = contender and not _bboxes_overlap(cands[0]["bbox"], cands[1]["bbox"]) and len(hit) != 1
     out["candidates"] = cands
     if matched != query or others or out.get("ambiguous"):
         out["geocode_note"] = (
