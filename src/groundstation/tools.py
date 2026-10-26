@@ -1445,6 +1445,21 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
             f"{own} but covers {cov(best):.1f}% of the area; "
             f"the clearest scene ({cloud(clearest):.1f}% cloud) covers {cov(clearest):.1f}%"
         )
+    newest = max(items, key=lambda it: it.get("datetime") or "")
+    if (newest.get("datetime") or "") != (best.get("datetime") or ""):
+        # name the one step that dropped the newest scene, so "why not the latest" is answered
+        nd, nc = (newest.get("datetime") or "")[:10], cloud(newest)
+        if not all_cloudy and nc is not None and nc > RECOMMEND_MAX_CLOUD:
+            why = f"cloud: {nc:.1f}%, over the {RECOMMEND_MAX_CLOUD:.0f}% ceiling"
+        elif cov(newest) < top - RECOMMEND_COVERAGE_TIE:
+            why = f"coverage: {cov(newest):.1f}% against the pick's {cov(best):.1f}%, outside the {RECOMMEND_COVERAGE_TIE:.0f}-point band"
+        elif newest not in near and nc is not None and least is not None:
+            ref = "the pick's" if bc == least else "the band's"
+            why = f"cloud: {nc:.1f}% against {ref} {least:.1f}%, outside the {RECOMMEND_CLOUD_TIE:.0f}-point tie"
+        else:
+            why = None
+        if why:
+            reason += f"; the newest, {nd}, lost on {why}"
     if all_cloudy:
         reason = f"every scene is over {RECOMMEND_MAX_CLOUD:.0f}% cloud, so this is the least bad: " + reason
     return {"id": best["id"], "covers_aoi_pct": cov(best), "cloud_cover": bc, "reason": reason}
