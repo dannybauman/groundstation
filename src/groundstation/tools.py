@@ -4057,6 +4057,7 @@ def compare_dates(
 
     Means are physical by default (scale and offset applied on both dates, so a scene from
     before 2022 and one from after compare fairly); scaling_applied says so once.
+    band_scaling rides with each date and scaling_note names the factors in words.
     apply_scaling=False gives raw digital numbers, with scaling_note naming what was not applied.
 
     A caveat list comes back when the delta shouldn't be read at face value —
@@ -4101,12 +4102,15 @@ def compare_dates(
     a, b = pick(after_items), pick(before_items)
 
     scope: dict[str, Any] = {}
+    scaling: dict[str, list[dict[str, Any]]] = {}
 
     def _mean(it: dict[str, Any]) -> float | None:
         try:
             # without the bbox the mean is the whole Sentinel-2 tile, not the place asked about
             s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox, apply_scaling=apply_scaling)
             scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_applied", "scaling_note") if k in s})
+            if s.get("band_scaling"):
+                scaling[it["id"]] = s["band_scaling"]
             return round(next(iter(s.values()))["mean"], 4)
         except Exception:
             return None
@@ -4149,11 +4153,33 @@ def compare_dates(
         "map_path": m["map_path"],
         **scope,
     }
+    for side, it in (("after", a), ("before", b)):
+        if it["id"] in scaling:
+            out[side]["band_scaling"] = scaling[it["id"]]
+    if scope.get("scaling_applied") and "scaling_note" not in scope and len(scaling) == 2:
+        out["scaling_note"] = _applied_scaling_words(
+            [(x["datetime"][:10], scaling[x["id"]]) for x in (a, b)]
+        )
     caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"), (a["id"], b["id"]))
     if caveats:
         out["caveat"] = caveats
     _notes_result(out, notes, stack_facts, bbox)
     return out
+
+
+def _applied_scaling_words(dated: list[tuple[str, list[dict[str, Any]]]]) -> str:
+    big = [(d, max(gs, key=lambda g: len(g["bands"]))) for d, gs in dated]
+    key = lambda g: (g.get("scale"), g.get("declared_offset", g.get("offset")), len(g["bands"]))
+    same = len({key(g) for _, g in big}) == 1
+    parts = []
+    for dates, g in [(" and ".join(d for d, _ in big), big[0][1])] if same else [(d, g) for d, g in big]:
+        off = g.get("declared_offset", g.get("offset"))
+        parts.append(f"scale {g.get('scale')} and offset {off} applied on {len(g['bands'])} bands for {dates}")
+    done = "; ".join(parts)
+    for d, g in big:
+        if "declared_offset" in g:
+            done += f" (Earth Search already took the {g['declared_offset']} offset out of the {d} pixels, so 0 was added there)"
+    return done
 
 
 # ---------------------------------------------------------------- monitoring
