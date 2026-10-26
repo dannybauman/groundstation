@@ -2590,6 +2590,11 @@ def _hole_text(aoi: list[float], shapes: list[Any]) -> str:
     return f"{pct:.0f}% of the view is uncovered, mostly {where}"
 
 
+def _dated_name(collection: str, date: str) -> str:
+    t = LEGENDS.get(collection, {}).get("title") or ""
+    return f"{t[:-4]}{date[:4]}" if t[-4:].isdigit() else f"{t or collection} {date}"
+
+
 def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[str, Any]:
     """An {"type": "item"} layer becomes a raster layer with tiles + scene bounds.
 
@@ -2604,10 +2609,12 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
     if not rescale and l.get("expression"):
         rescale, basis = "-1,1", "default for an index expression"
     item_bounds = l.get("bbox")
+    item: dict[str, Any] = {}
     if item_bounds is None:
         # scene footprint bounds stop the map requesting (and the tiler
         # serving 404s for) every out-of-footprint tile in the viewport
-        item_bounds = (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("bbox")
+        item = _item(l["catalog"], l["collection_id"], l["item_id"]) or {}
+        item_bounds = item.get("bbox")
     fallback = _fallback_tiles(l)
     tiles = tile_url_template(
         l["catalog"],
@@ -2620,13 +2627,14 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
         bbox=view or l.get("bbox"),
     )
     # a caller who passed bbox wants no fetch at all, so only the bbox-less path reads the item
-    geom = l.get("footprint") or (None if l.get("bbox") else (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("geometry"))
+    geom = l.get("footprint") or item.get("geometry")
     if isinstance(geom, dict) and geom.get("type") in ("Polygon", "MultiPolygon"):
         _LAYER_FOOTPRINTS[tiles] = geom
+    date = ((item.get("properties") or {}).get("datetime") or "")[:10]
     return {
         "type": "raster",
-        "name": l.get("name") or l["item_id"],
-        **({"detail": l["detail"]} if l.get("detail") else {}),
+        "name": l.get("name") or (_dated_name(l["collection_id"], date) if date else l["item_id"]),
+        **({"detail": l.get("detail") or l["item_id"]} if l.get("detail") or (date and not l.get("name")) else {}),
         "tiles": tiles,
         "opacity": l.get("opacity", 1),
         **({"bounds": item_bounds} if item_bounds else {}),
@@ -2649,7 +2657,8 @@ def _expand_coverage_set(layer: dict[str, Any]) -> list[dict[str, Any]]:
     items = (layer.get("set") or {}).get("items") or []
     if not items:
         raise ValueError("coverage_set layer has no items — pass search_imagery's full_coverage_set")
-    prefix = layer.get("name") or (layer.get("set") or {}).get("date") or "coverage"
+    date = (layer.get("set") or {}).get("date")
+    prefix = layer.get("name") or (_dated_name(items[0]["collection"], date) if date else "coverage")
     params = {k: layer[k] for k in ("assets", "expression", "colormap_name", "rescale", "opacity") if k in layer}
     out = []
     for it in items:

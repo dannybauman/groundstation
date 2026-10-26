@@ -206,6 +206,16 @@ def t_coverage_set_expands_to_item_layers():
         pass
 
 
+def t_coverage_set_nameless_reads_collection_and_date():
+    def names(coll, date, **kw):
+        fcs = {"date": date, "items": [{"catalog": "planetary-computer", "collection": coll, "id": "T1", "bbox": [0, 0, 1, 1]}]}
+        return [(l["name"], l["detail"]) for l in tools._expand_coverage_set({"type": "coverage_set", "set": fcs, **kw})]
+    assert names("esa-worldcover", "2021-01-01") == [("ESA WorldCover 2021", "T1")]
+    assert names("esa-worldcover", "2020-01-01") == [("ESA WorldCover 2020", "T1")]
+    assert names("esa-worldcover", "2021-01-01", name="Mine") == [("Mine", "T1")]
+    assert names("sentinel-2-l2a", "2024-05-01") == [("sentinel-2-l2a 2024-05-01", "T1")]
+
+
 def t_next_pass_pure_helpers():
     # one dip under the swath line = one pass; a shallow approach = none
     assert tools._pass_minima([300, 100, 50, 100, 300], 145) == [2]
