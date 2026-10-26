@@ -2510,6 +2510,68 @@ def t_zarr_uncurated_variable_in_store_is_accepted():
     assert "total_precipitation_6hr" in tools.describe_collection("zarr", "weatherbench2-era5")["variables"]
 
 
+def t_date_only_window_becomes_rfc3339():
+    assert tools._rfc3339_window("2024-10-01/2024-10-20") == "2024-10-01T00:00:00Z/2024-10-20T23:59:59Z"
+    full = "2026-06-01T00:00:00Z/2026-07-09T00:00:00Z"
+    assert tools._rfc3339_window(full) == full
+
+
+def t_compare_dates_default_path_per_box_and_out_path():
+    item = lambda i, d: {"id": i, "datetime": f"{d}T10:00:00Z", "collection": "sentinel-2-l2a", "bbox": [0, 0, 1, 1], "cloud_cover": 1}
+    saved = tools.search_imagery, tools.compute_statistics, tools._coverage
+    tools.search_imagery = lambda *a, **k: {"items": [item("S2B_31TBF_20240101_0_L2A", "2024-01-01")]}
+    tools.compute_statistics = lambda *a, **k: {"x": {"mean": 0.5}}
+    tools._coverage = lambda *a, **k: 1.0
+    try:
+        w = dict(window_before="2024-01-01/2024-01-02", window_after="2024-02-01/2024-02-02")
+        p1 = tools.compare_dates(bbox=[0, 0, 1, 1], stack_layer=False, **w)["map_path"]
+        p2 = tools.compare_dates(bbox=[5, 5, 6, 6], stack_layer=False, **w)["map_path"]
+        assert p1 != p2, p1
+        want = str(Path(tempfile.gettempdir()) / "mine.html")
+        assert tools.compare_dates(bbox=[0, 0, 1, 1], stack_layer=False, out_path=want, **w)["map_path"] == want
+    finally:
+        tools.search_imagery, tools.compute_statistics, tools._coverage = saved
+
+
+def t_brief_page_and_conditions_brief_share_one_radius():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("brief", Path(__file__).resolve().parents[1] / "briefing" / "brief.py")
+    src = Path(spec.origin).read_text()
+    assert "pad = tools.BRIEF_PAD_DEG" in src and "pad=BRIEF_PAD_DEG" in Path(tools.__file__).read_text()
+    saved = tools._get_json
+    tools._get_json = lambda *a, **k: {"events": []}
+    try:
+        assert tools.active_events(bbox=[0, 0, 1, 1], pad=tools.BRIEF_PAD_DEG)["pad_deg"] == tools.BRIEF_PAD_DEG == 1.0
+    finally:
+        tools._get_json = saved
+
+
+def t_same_collection_layers_get_distinct_names():
+    items = [{"catalog": "planetary-computer", "collection": "esa-worldcover", "id": f"ESA_WorldCover_10m_2021_v200_{t}_Map", "bbox": [0, 0, 1, 1]}
+             for t in ("N45W123", "N45W120", "N42W123", "N42W120", "N39W123", "N39W120")]
+    out = tools._expand_coverage_set({"type": "coverage_set", "set": {"items": items}, "name": "WorldCover 2021"})
+    assert len({l["name"] for l in out}) == 6, [l["name"] for l in out]
+
+
+def t_next_pass_names_the_night_passes_it_dropped():
+    tle = Path(tempfile.mkdtemp()) / "tle.txt"
+    tle.write_text("ISS\n1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927\n"
+                   "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537\n")
+    cfg = {"x": {"norad_ids": [25544], "swath_km": 40000, "reach_km": 20000, "optical": True}}
+    saved = tools._load_constellations, tools._fetch_tles, tools._TLE_CACHE
+    tools._load_constellations = lambda: (cfg, "test", [])
+    tools._fetch_tles = lambda c, p: []
+    tools._TLE_CACHE = tle.with_name("tle.txt")
+    tle.rename(tle.with_name("tle-eo-predictor.txt"))
+    try:
+        r = tools.next_pass(0.0, 0.0, days=3)
+    finally:
+        tools._load_constellations, tools._fetch_tles, tools._TLE_CACHE = saved
+    night = r["optical_passes_at_night_list"]
+    assert night and len(night) == r["optical_passes_at_night"], r
+    assert all({"satellite", "time_utc", "sun_elevation_deg"} <= set(n) and n["sun_elevation_deg"] <= 0 for n in night), night
+
+
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files

@@ -10,6 +10,7 @@ that scaffold as a toolset later.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -121,6 +122,16 @@ def _resolve_bbox(place: str | None, bbox: list[float] | None) -> list[float] | 
     if bbox is None:
         return {"error": "Provide bbox or place"}
     return bbox
+
+
+def _rfc3339_window(window: str) -> str:
+    """Date-only ends ("2024-10-01/2024-10-20") become the full-day RFC3339 range STAC servers accept."""
+    lo, sep, hi = window.partition("/")
+    if len(lo) == 10:
+        lo += "T00:00:00Z"
+    if len(hi) == 10:
+        hi += "T23:59:59Z"
+    return lo + sep + hi
 
 
 def last_days_window(days: int, end_days_ago: int = 0) -> str:
@@ -1283,7 +1294,7 @@ def write_archive(
         out_path = str(out_dir / "archives" / f"{slug}.parquet")
     body: dict[str, Any] = {"collections": collections, "bbox": bbox, "limit": min(limit, 100)}
     if datetime_range:
-        body["datetime"] = datetime_range
+        body["datetime"] = _rfc3339_window(datetime_range)
     if max_cloud_cover is not None:
         body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
     url = f"{CATALOGS[catalog]['stac']}/search"
@@ -1354,7 +1365,7 @@ def search_imagery(
         "sortby": [{"field": "properties.datetime", "direction": "desc"}],
     }
     if datetime_range:
-        body["datetime"] = datetime_range
+        body["datetime"] = _rfc3339_window(datetime_range)
     if max_cloud_cover is not None:
         body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
     archive = None
@@ -2229,10 +2240,14 @@ def _expand_coverage_set(layer: dict[str, Any]) -> list[dict[str, Any]]:
     prefix = layer.get("name") or (layer.get("set") or {}).get("date") or "coverage"
     params = {k: layer[k] for k in ("assets", "expression", "colormap_name", "rescale", "opacity") if k in layer}
     out = []
-    for it in items:
+    tags = [it["id"].split("_")[1] if "_" in it["id"] else it["id"] for it in items]
+    # a collection whose ids share their second segment (WorldCover) would name every layer alike
+    if len(set(tags)) < len(tags):
+        tags = [it["id"] for it in items]
+    for it, tag in zip(items, tags):
         out.append({
             "type": "item",
-            "name": f"{prefix} · {it['id'].split('_')[1] if '_' in it['id'] else it['id']}",
+            "name": f"{prefix} · {tag}",
             "catalog": it["catalog"],
             "collection_id": it["collection"],
             "item_id": it["id"],
@@ -3482,6 +3497,7 @@ def compare_dates(
     label: str | None = None,
     stack_layer: bool = True,
     stack_facts: dict[str, Any] | None = None,
+    out_path: str | None = None,
 ) -> dict[str, Any]:
     """Compare two time windows over a place: matched scenes, index delta, swipe map.
 
@@ -3491,6 +3507,8 @@ def compare_dates(
     earlier. Picks Sentinel-2 scenes from the SAME MGRS tile (best AOI coverage,
     lowest cloud), computes the expression's stats for both dates, and writes a
     side-by-side swipe map. Returns scenes, means, delta, and map_path.
+    out_path sets where the map is written (default: a name carrying a short hash of the box,
+    so two boxes over the same dates do not overwrite each other).
     stack_layer and stack_facts pass through to the swipe map, and since this tool geocodes
     the place itself, the panel truthfully claims Gazet/Nominatim.
 
@@ -3558,8 +3576,12 @@ def compare_dates(
             "collection_id": it["collection"], "item_id": it["id"], "bbox": it["bbox"],
             "expression": expression, "rescale": "-1,1", "colormap_name": "rdylgn",
         }
+    title = f"{label or place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}"
+    if not out_path:
+        out_path = _artifact_path(None, "map", f"{title} {hashlib.sha1(repr(bbox).encode()).hexdigest()[:6]}")
     m = render_map(
-        title=f"{label or place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}",
+        title=title,
+        out_path=out_path,
         subtitle=f"{expression} · means over the area · drag the divider · tile {best_tile}",
         bbox=bbox,
         layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
@@ -3586,6 +3608,9 @@ def compare_dates(
 # ---------------------------------------------------------------- monitoring
 
 
+BRIEF_PAD_DEG = 1.0  # one radius for the brief page and conditions_brief
+
+
 def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 0.0) -> dict[str, Any]:
     """Current natural events and disaster alerts, optionally filtered to a bbox.
 
@@ -3594,9 +3619,10 @@ def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 
     degrees on every side (nearby events matter). Returns compact event lists
     with coordinates suitable for mapping.
     """
-    if bbox and pad:
+    padded = bool(bbox and pad)
+    if padded:
         bbox = [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad]
-    out: dict[str, Any] = {"eonet": [], "gdacs": []}
+    out: dict[str, Any] = {"eonet": [], "gdacs": [], **({"pad_deg": pad} if padded else {})}
     try:
         params: dict[str, Any] = {"days": days, "status": "open"}
         if bbox:
@@ -3962,7 +3988,8 @@ def next_pass(
     band sweeps the point in the next `days` (max 7). Every pass carries
     `sun_elevation_deg` and `daylight` (sun above the horizon at the point at
     pass time). Optical passes with the sun down are dropped, since optical
-    sensors do not acquire at night, and counted in `optical_passes_at_night`;
+    sensors do not acquire at night, and counted in `optical_passes_at_night` and named in
+    `optical_passes_at_night_list` (satellite, time_utc, sun_elevation_deg);
     radar (Sentinel-1) is kept day or night and carries the flag too.
 
     Honest limits, and say them when it matters: this is swath geometry, not
@@ -4001,7 +4028,7 @@ def next_pass(
     target = wgs84.latlon(lat, lon)
 
     passes = []
-    at_night = 0
+    at_night: list[dict[str, Any]] = []
     for cname in wanted:
         cfg = cfgs.get(cname)
         if not cfg:
@@ -4025,7 +4052,7 @@ def next_pass(
                 utc = t.utc_datetime()
                 sun = _sun_elevation_deg(utc, lat, lon)
                 if cfg["optical"] and sun <= 0:
-                    at_night += 1
+                    at_night.append({"satellite": sat.name, "time_utc": utc.strftime("%Y-%m-%d %H:%M"), "sun_elevation_deg": round(sun, 1)})
                     continue  # optical only acquires in daylight
                 passes.append(
                     {
@@ -4044,7 +4071,8 @@ def next_pass(
         "point": {"lat": lat, "lon": lon},
         "window_days": days,
         "passes": passes,
-        "optical_passes_at_night": at_night,
+        "optical_passes_at_night": len(at_night),
+        "optical_passes_at_night_list": at_night,
         "constellations_source": source,
         "constellations_available": list(cfgs),
         "skipped": skipped,
@@ -4258,9 +4286,9 @@ def conditions_brief(
 
     # 2. active events
     try:
-        events_data = active_events(bbox=bbox, pad=1.5)
+        events_data = active_events(bbox=bbox, pad=BRIEF_PAD_DEG)
         brief["events"] = events_data
-        for k in ("sources", "all_clear", "all_clear_note"):
+        for k in ("sources", "all_clear", "all_clear_note", "pad_deg"):
             if k in events_data:
                 brief[k] = events_data[k]
     except Exception as e:

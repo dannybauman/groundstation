@@ -276,7 +276,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     if "error" in g:
         raise SystemExit(g["error"])
     bbox = g["bbox"]
-    pad = 0.4  # look slightly beyond the AOI for nearby events
+    pad = tools.BRIEF_PAD_DEG  # look slightly beyond the AOI for nearby events, same radius as conditions_brief
     ev_bbox = [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad]  # map extent
 
     print("[2/5] gathering events + weather...")
