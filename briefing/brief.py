@@ -28,6 +28,8 @@ exactly these sections:
 
 ## TL;DR
 2-3 sentences: overall situation, the one thing that needs attention, alert level (CALM / WATCH / ACT).
+A source that failed (an "error" or "sources" entry with ok false) means at least WATCH: an empty
+list from a source that did not answer is not CALM, so name the source that did not answer.
 
 ## What changed
 Bullets on events (fires, floods, storms) in or near the AOI — name, how close, trend if inferable.
@@ -217,6 +219,17 @@ def _ensure_transition_note(md: str, prev_alert: str | None) -> str:
     )
 
 
+def _ensure_source_honesty(md: str, data: dict) -> str:
+    """Deterministic: a CALM TL;DR over a source that did not answer becomes WATCH.
+    The prompt asks for it; this guarantees it."""
+    down = [n.upper() for n, v in ((data.get("events") or {}).get("sources") or {}).items() if not v.get("ok")]
+    down += [k[:-6] for k in ("weather_error", "smoke_error", "imagery_error") if data.get(k)]
+    m = re.search(r"\b(CALM|WATCH|ACT)\b", md)
+    if not down or (m and m.group(1) != "CALM"):
+        return md
+    return md.replace("## TL;DR\n", f"## TL;DR\nWATCH — {' and '.join(down)} did not answer; CALM is unconfirmed. ", 1)
+
+
 def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
     """NDVI delta between the newest scene and a same-tile baseline ~1 month back."""
     tile = tools._mgrs_tile(best["id"])
@@ -384,6 +397,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         except Exception:
             pass
     md = synthesize(data)
+    md = _ensure_source_honesty(md, data)
     md = _ensure_transition_note(md, (data.get("previous_run") or {}).get("alert"))
 
     html = (
@@ -403,7 +417,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     tldr_m = re.search(r"## TL;DR\s*\n(.+?)(?=\n## |\Z)", md, re.S)
     result = {
         "place": place,
-        "alert": alert_m.group(1) if alert_m else "CALM",
+        "alert": alert_m.group(1) if alert_m else "WATCH",
         "tldr": (tldr_m.group(1).strip() if tldr_m else "")[:400],
         "brief": brief_path.name,
         "map": map_path.name,
