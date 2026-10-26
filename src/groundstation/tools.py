@@ -3345,6 +3345,9 @@ map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
 map.on("load", () => {
   map.setTerrain({ source: "dem", exaggeration });
   map.easeTo({ center: CENTER, pitch: 60, duration: 0 });
+  // MapLibre 4 reads the ground height under the camera only in setTerrain and eased moves, and
+  // on load no DEM tile is in yet, so a tight box (zoom 14+) leaves the camera under the relief
+  map.once("idle", () => map.setTerrain({ source: "dem", exaggeration }));
 });
 
 const slider = document.getElementById("exaggeration");

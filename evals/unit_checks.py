@@ -785,6 +785,13 @@ def t_render_map_3d_controls():
     assert 'value="2.5"' in html and "let exaggeration = 2.5" in html
 
 
+def t_render_map_3d_camera_lifts_to_terrain():
+    # field test 15: the Berkeley Pit box at zoom 14.5 put the camera at 1195 m under
+    # 2865 m of exaggerated ground; terrain re-applied once the DEM is in lifts it
+    js = _render_3d().split('map.on("load"')[1].split("\n});")[0]
+    assert 'map.once("idle", () => map.setTerrain({ source: "dem", exaggeration }))' in js
+
+
 # ---- stack layer (epic G) ----
 
 from groundstation import stack as gstack  # noqa: E402
