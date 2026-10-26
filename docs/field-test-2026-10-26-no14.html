@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>groundstation field test №14: the 18 cards stops 10 to 16 set out to fix, re-run on 0.35.0</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
+  --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
+  --calm: #2e7d32; --blue: #1d4e8f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
+header { border-bottom: 2px solid var(--ink); padding: 42px 24px 30px; }
+.wrap { max-width: 1060px; margin: 0 auto; }
+header h1 { font: 700 34px/1.1 'Roboto Condensed', sans-serif; margin: 0 0 6px; letter-spacing: .02em; }
+header h1 .dot { display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); margin-right: 12px; }
+header .sub { font: 500 11.5px 'Roboto Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--mid); }
+header p.lede { max-width: 760px; font-size: 16px; margin: 16px 0 0; color: var(--mid); }
+.stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 26px auto 0; max-width: 1060px; padding: 0; }
+.stat { flex: 1; min-width: 160px; background: var(--white); border: 1px solid var(--rule); border-top: 3px solid var(--accent); padding: 12px 16px; }
+.stat b { display: block; font: 600 30px 'Roboto Condensed', sans-serif; color: var(--accent); }
+.stat span { font-size: 12px; color: var(--mid); }
+main { padding: 10px 24px 60px; }
+h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
+  display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
+h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(480px, 100%), 1fr)); gap: 16px; }
+@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.card .top { display: flex; align-items: center; gap: 10px; }
+.card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.card .tag { font: 500 10px 'Roboto Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); border: 1px solid var(--rule); padding: 3px 8px; }
+.card .who { margin-left: auto; font: 400 10.5px 'Roboto Mono', monospace; color: var(--muted); }
+.label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
+.returned { font: 400 12px/1.5 'Roboto Mono', monospace; background: #fbfaf7; border: 1px solid var(--rule); border-left: 3px solid var(--mid); padding: 8px 12px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+details.data summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; margin-bottom: 3px; }
+.answer { font-size: 13.5px; color: var(--mid); }
+.answer b { color: var(--ink); }
+.learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
+.learning b { color: var(--accent); font-style: normal; }
+.shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
+.fig { position: relative; display: block; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; }
+.fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
+  background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
+.fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 0 40px; }
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <h1><span class="dot"></span>THE FIELD TEST №14</h1>
+  <div class="sub">groundstation · 18 prompts re-run · 8 live artifacts: 3 3D views, 2 postcards, 2 maps, 1 swipe · 7 fixed, 5 partly, 6 the same · October 26, 2026 · Development Seed labs</div>
+  <p class="lede">The 18 cards from field tests 12 and 13 that stops 10 to 16 were charted to fix, asked again in the same words on main at 0.35.0 (PRs 69 to 75, one stop each, all merged this morning UTC), plus the 4 findings nobody charted yet. Each learning opens with the verdict: <b>7 fixed, 5 partly, 6 the same</b>. Fixed: the ERA5 and MUR stores now say what they hold and refuse a date outside it with the range named; HRRR refuses a snap of more than one step instead of answering the wrong day; every pass carries daylight and sun elevation and the night optical passes are counted; the Mt Bachelor 3D view loads at 100% with the same-day sibling draped; the Phoenix postcard is the heat crop that was asked for and the Casco Bay postcard honours its box; Lake Charles is the city again and Lake Powell is the reservoir first. Partly: the WorldCover legend is there with 11 classes but the 6 layers still share one name; statistics say in words that Sentinel-2 scale and offset are unapplied, which is the caveat stop 12 promised and not the fix; the Cooley pass does not name which 2 night passes it dropped; the brief page and conditions_brief still pad by 0.4 and 1.5 degrees; Lake Powell, Utah is still a box far larger than Wahweap. The same: the Berkeley Pit candidate carries its tight box and the top-level bbox is still the 0.3 degree point-rule box; the Portland refusal still names no state, because that rule reaches Nominatim candidates and Gazet is what answers a bare name; a MODIS tile that is empty over the Central Valley is still the recommendation at covers_aoi_pct 92.6; compare_dates still has no out_path and no renderer has a place for a caller's own notes; and the Valencia tile flip did not reproduce in 3 identical runs, which is not evidence it is gone. New since 13: date-only windows that worked on field test 13 now raise an uncaught HTTP 400 in compare_dates, and the Casco Bay card is about 45% no-data behind a covers_aoi_pct of 100, which measures box overlap, not pixels. One phone-width screenshot (390 px) of the Lake Victoria legend is on its card. Every returned block is verbatim tool output and every card keeps its stumble. A field test is a showcase, not CI: it shows what the tools do today.</p>
+</div></header>
+
+<div class="stats wrap" style="padding: 0 24px">
+  <div class="stat"><b>18</b><span>cards from field tests 12 and 13 asked again on 0.35.0</span></div>
+  <div class="stat"><b>7 · 5 · 6</b><span>fixed · partly · the same, each verdict grounded in the new output</span></div>
+  <div class="stat"><b>8</b><span>live artifacts: 3 3D views, 2 postcards, 2 maps, 1 swipe, plus 1 phone screenshot</span></div>
+  <div class="stat"><b>2</b><span>new findings: date-only windows now 400, a 45% no-data postcard behind covers_aoi_pct 100</span></div>
+</div>
+
+<main class="wrap">
+<h2 class="round">Round 1 — the stores</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">1</div><div class="tag">rain two years</div><div class="who">hydrologist</div></div>
+<div><div class="label">Input</div><div class="prompt">ERA5: how did total precipitation over the Sacramento Valley in October 2026 compare with October 2025?</div></div>
+<div class="answer"><div class="label">Our read</div><b>Not computable from this ERA5 store, and now the tools say so up front.</b> Both October dates (2026-10-15 12Z and 2025-10-15 12Z) are refused by <code>compute_statistics</code> and <code>tile_url_template</code> with the same message: the time is outside the store's range, 1959-01-01 to 2023-01-10T18:00, and no statistics or tile URL come back. The store does list precipitation (<code>total_precipitation_6hr</code>, metres over the 6 h ending at the step), so the earlier "no precipitation" reading is gone, but the record ends in January 2023, so there is no Sacramento Valley rainfall figure for October 2026 or October 2025 from it. I did not pull any other source, so this card has no rainfall number.</div>
+<details class="data"><summary>show the data</summary><div class="returned">describe_collection("zarr", "weatherbench2-era5")
+  title: ERA5 reanalysis, 1959 to 2023-01-10, 6-hourly, 1.5 degrees (WeatherBench 2)
+  variables: 2m_temperature (K) / 2m_dewpoint_temperature (K) / 10m_wind_speed (m s-1) / total_precipitation_6hr (m, total precipitation over the 6 h ending at the step) / mean_sea_level_pressure (Pa) / sea_surface_temperature (K, NaN over land)   [one line per variable in the output, joined here]
+  variables_note: the store holds 62 variables; compute_statistics accepts any of them by its store name, and the ones listed here are the ones groundstation has checked and can draw
+  sel: time (UTC, 6-hourly, ends 2023-01-10): history, not a forecast
+  time_range: ["1959-01-01T00:00", "2023-01-10T18:00"]
+  coverage: global, 1.5 degrees (~165 km), longitudes 0 to 360
+  stats: true   tiles: true
+
+[valley box set by hand as in the earlier card: [-122.4, 38.6, -121.4, 40.0]]
+compute_statistics("zarr", "weatherbench2-era5", "total_precipitation", bbox=valley, sel={"time": "2026-10-15T12:00"})
+  {"error": "time 2026-10-15T12:00 is outside weatherbench2-era5's range (1959-01-01T00:00 to 2023-01-10T18:00); no statistics returned"}
+compute_statistics("zarr", "weatherbench2-era5", "total_precipitation", bbox=valley, sel={"time": "2025-10-15T12:00"})
+  {"error": "time 2025-10-15T12:00 is outside weatherbench2-era5's range (1959-01-01T00:00 to 2023-01-10T18:00); no statistics returned"}
+compute_statistics("zarr", "weatherbench2-era5", "2m_temperature", bbox=valley, sel={"time": "2026-10-15T12:00"})
+  {"error": "time 2026-10-15T12:00 is outside weatherbench2-era5's range (1959-01-01T00:00 to 2023-01-10T18:00); no statistics returned"}
+compute_statistics("zarr", "weatherbench2-era5", "2m_temperature", bbox=valley, sel={"time": "2025-10-15T12:00"})
+  {"error": "time 2025-10-15T12:00 is outside weatherbench2-era5's range (1959-01-01T00:00 to 2023-01-10T18:00); no statistics returned"}
+tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel={"time": "2026-10-15T12:00"})
+  time 2026-10-15T12:00 is outside weatherbench2-era5's range (1959-01-01T00:00 to 2023-01-10T18:00); pick a time inside it, no tile URL returned
+tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel={"time": "2025-10-15T12:00"})
+  time 2025-10-15T12:00 is outside weatherbench2-era5's range (1959-01-01T00:00 to 2023-01-10T18:00); pick a time inside it, no tile URL returned</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> Earlier: <code>tile_url_template</code> "accepted a 2026 time with no warning" and <code>compute_statistics</code> snapped to 2023-01-10 18:00 "off by 1373 days" with only a caveat, returning a January temperature to an October question. Now both tools refuse with the store's range in the message and return no numbers and no URL (seen above for 2026 and 2025, statistics and tile). Also changed: <code>describe_collection</code> now carries the time range as its own field (<code>time_range</code>) and lists 6 variables including <code>total_precipitation_6hr</code> and <code>sea_surface_temperature</code>, with a note that the store holds 62; the "[the only variable listed]" mark on the no12 sea surface card's ERA5 call no longer holds. Unverified: I asked for <code>total_precipitation</code> (the earlier name) and the range check fired before any variable check, so I did not see what a wrong variable name now says; and I ran no in-range precipitation read, so the metres unit is from the description only. Not re-run: the earlier card's other trap, "Sacramento Valley" geocoding to a train station; the valley box was set by hand again.</div>
+<div class="shows">describe_collection time range and variable list · zarr range refusal in compute_statistics and tile_url_template</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">2</div><div class="tag">sea surface</div><div class="who">fisheries officer</div></div>
+<div><div class="label">Input</div><div class="prompt">How warm is the sea surface off Monterey Bay this week compared with the same week last year?</div></div>
+<div class="answer"><div class="label">Our read</div><b>Not computable from MUR, and the refusal now names the real reason.</b> The store ends 2020-01-20, so there is no sea surface temperature for the week of 2026-10-20 or for the same week of 2025. Asked for 2026-10-20, the tool says the time is outside the store's range (2002-06-01 to 2020-01-20) and returns no statistics. I did not pull a sea surface number from any other source, so there is no Monterey Bay warmer-or-cooler answer on this card.</div>
+<details class="data"><summary>show the data</summary><div class="returned">[Monterey Bay box as in the earlier card: [-122.0510668, 36.6499557, -121.75106679999999, 36.9499557]]
+describe_collection("zarr", "nasa-mur-sst")
+  title: NASA MUR sea surface temperature, 1 km daily
+  url: s3://mur-sst/zarr-v1   region: us-west-2
+  variables: analysed_sst (analysed sea surface temperature, kelvin)
+  sel: time (daily, 2002-06-01 to 2020-01-20)
+  time_range: ["2002-06-01", "2020-01-20"]
+  coverage: global ocean, 0.01 degrees
+  chunks: 5 days x 1799 x 3600 per chunk, about 123 MB: one cell costs a whole chunk
+  stats: false
+  stats_note: the record ends 2020-01-20, and one cell costs a 123 MB chunk read, so statistics are not offered
+  tiles: false
+  tiles_note: titiler.xyz does not reach this bucket, and a 123 MB chunk makes a tile read slow
+
+compute_statistics("zarr", "nasa-mur-sst", "analysed_sst", bbox=bay, sel={"time": "2026-10-20"})
+  {"error": "time 2026-10-20 is outside nasa-mur-sst's range (2002-06-01 to 2020-01-20); no statistics returned"}
+compute_statistics("zarr", "nasa-mur-sst", "analysed_sst", bbox=bay, sel={"time": "2019-10-20"})
+  {"error": "statistics are not offered for NASA MUR sea surface temperature, 1 km daily: the record ends 2020-01-20, and one cell costs a 123 MB chunk read, so statistics are not offered"}</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> Earlier: the refusal "talked about chunk size when the real reason was the store ends 2020-01-20". Now a 2026 date gets the range message first ("outside nasa-mur-sst's range (2002-06-01 to 2020-01-20)"), and <code>describe_collection</code> carries a <code>time_range</code> field and a <code>stats_note</code> that opens with "the record ends 2020-01-20" before the 123 MB chunk point. Seen in output. Still true: statistics stay off for this store, so even an in-range date (I tried 2019-10-20) is refused, though that message now leads with the record's end and then the chunk cost. Not tried: any other sea surface source, so the fisheries question itself is still unanswered.</div>
+<div class="shows">MUR store refusal reason · describe_collection stats_note and time_range</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">3</div><div class="tag">store says no</div><div class="who">vineyard manager</div></div>
+<div><div class="label">Input</div><div class="prompt">Can you map the air temperature over my vineyards for last Tuesday (2026-10-20)? Walla Walla, Washington.</div></div>
+<div class="answer"><div class="label">Our read</div><b>I still cannot map the air temperature for 2026-10-20, but HRRR no longer hands back another day's numbers.</b> Asked for 2026-10-20 21:00, the tool refuses: the time is 5 days 16:00 from the nearest time the store holds (2026-10-26 13:00), more than one step (1 hour), and the message adds that the store holds only the newest run, 2026-10-26 13:00 to 2026-10-28 12:00, and past dates are not in it. No min or max comes back. A time inside the range returns numbers with an empty caveat list (2026-10-26 21:00: 281.0 to 283.2 K over the vineyard box). The HRRR tile call cannot draw a map, so there is no map on this card either.</div>
+<details class="data"><summary>show the data</summary><div class="returned">[vineyard box as in the earlier card: [-118.50, 45.98, -118.25, 46.12]; today is 2026-10-26]
+describe_collection("zarr", "noaa-hrrr-forecast")
+  title: NOAA HRRR forecast, 2 m temperature (University of Utah)
+  sel: valid_time (UTC); the newest 00/06/12/18z run is used, up to 48 h ahead
+  time_range_note: the range is rolling: the store holds the newest run only, up to 48 h ahead, and past dates are not in this store
+  coverage: CONUS only, 3 km Lambert conformal grid
+  chunks: 48 steps x 150 x 150 per chunk
+  stats: true   tiles: false
+  tiles_note: titiler.xyz opens the group but fails on its projected x/y coordinates, which are not stored in the group
+
+[the earlier card's exact request, 2026-10-20T21:00]
+compute_statistics("zarr", "noaa-hrrr-forecast", "TMP", bbox=vineyards, sel={"valid_time": "2026-10-20T21:00"})
+  {"error": "NOAA HRRR forecast, 2 m temperature (University of Utah): time 2026-10-20T21:00 is 5 days 16:00:00 from the nearest time in this store (2026-10-26 13:00:00), more than one step (0 days 01:00:00); the store holds time 2026-10-26 13:00:00 to 2026-10-28 12:00:00; the range is rolling: the store holds the newest run only, up to 48 h ahead, and past dates are not in this store; no statistics returned"}
+
+[control 1: a time inside the range]
+compute_statistics("zarr", "noaa-hrrr-forecast", "TMP", bbox=vineyards, sel={"valid_time": "2026-10-26T21:00"})
+  TMP: min 280.9945373535156  max 283.1820373535156  mean 282.53918021065846  median 282.6195373535156  std 0.4776577098248305  count 49
+  units: K   sel: {"time": "2026-10-26 21:00:00"}   clipped_to: [-118.5, 45.98, -118.25, 46.12]
+  caveats: []
+
+[control 2: half a step off]
+compute_statistics("zarr", "noaa-hrrr-forecast", "TMP", bbox=vineyards, sel={"valid_time": "2026-10-26T20:30"})
+  TMP: min 282.12432861328125  max 283.93682861328125  mean 283.3500939194037  median 283.37432861328125  std 0.41760835208974256  count 49
+  sel: {"time": "2026-10-26 20:00:00"}
+  caveats: ["time 2026-10-26T20:30 snapped to 2026-10-26 20:00:00, off by 0 days 00:30:00"]
+
+tile_url_template("zarr", "noaa-hrrr-forecast", "TMP", sel={"valid_time": "2026-10-20T21:00"})
+  titiler.xyz opens the group but fails on its projected x/y coordinates, which are not stored in the group</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> Earlier: HRRR "returned a full set of numbers for 2026-10-26 01:00 when asked for 2026-10-20", and only the caveats line said it snapped 5 days 4 hours. Now the same request (2026-10-20T21:00, same box) returns an error and no statistics; the message gives the gap (5 days 16:00), the one-step limit (1 hour), the store's actual range and why it is rolling. A snap within a step still works and still says so in a caveat (20:30 became 20:00, off by 30 minutes), and an in-range time has an empty caveat list. The date used is the earlier card's own, 2026-10-20, because it is still more than 5 days past the oldest time the store holds today. Not re-run: the weather_summary and brief pages from the earlier card, which are what actually answered the vineyard manager, and an HRRR map, which this store cannot draw.</div>
+<div class="shows">HRRR snap-past-one-step refusal · rolling-range message · within-step snap caveat</div>
+</div>
+</div>
+
+<h2 class="round">Round 2 — passes and 3D</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">4</div><div class="tag">polar pass</div><div class="who">a field team lead</div></div>
+<div><div class="label">Input</div><div class="prompt">When does Sentinel-2 next pass over Longyearbyen, and is it worth it this time of year?</div></div>
+<div class="answer"><div class="label">Our read</div><b>There is no usable Sentinel-2 pass over Longyearbyen in the next 3 days: the tool kept none, and counted 53 optical passes it dropped because the sun was below the horizon.</b> Every pass it did return is radar (Sentinel-1A and 1C, NISAR), each with <code>daylight: false</code> and a sun elevation between -3.7 and -23.6 degrees, so the answer to worth it is no for optical, and radar is the instrument that works in this dark. Sentinel-1A at 2026-10-27 08:30 UTC is the nearest Sentinel pass, 153.8 km off track. Caveats from the tool: a pass is a possible capture from swath geometry, not the acquisition plan, and imagery reaches the catalogs hours to a day later.</div>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Longyearbyen, Svalbard") -> 78.2231558, 15.6463656  source: nominatim
+next_pass(78.2231558, 15.6463656, days=3)
+  constellations_source: developmentseed/eo-predictor   skipped: []
+  optical_passes_at_night: 53
+  passes (14, every one daylight false, none optical):
+  NISAR         2026-10-26 20:05  sun_elevation_deg -22.5  daylight false  track 73.8 km   radar
+  SENTINEL-1A   2026-10-27 08:30  sun_elevation_deg -3.8   daylight false  track 153.8 km  radar
+  SENTINEL-1C   2026-10-27 08:33  sun_elevation_deg -3.7   daylight false  track 161.8 km  radar
+  SENTINEL-1A   2026-10-27 13:22  sun_elevation_deg -4.7   daylight false  track 172.9 km  radar
+  SENTINEL-1C   2026-10-27 13:26  sun_elevation_deg -4.8   daylight false  track 144.0 km  radar
+  NISAR         2026-10-28 01:58  sun_elevation_deg -21.5  daylight false  track 14.5 km   radar
+  SENTINEL-1A   2026-10-28 07:32  sun_elevation_deg -6.0   daylight false  track 116.8 km  radar
+  SENTINEL-1C   2026-10-28 07:36  sun_elevation_deg -5.8   daylight false  track 66.7 km   radar
+  SENTINEL-1A   2026-10-28 14:02  sun_elevation_deg -6.4   daylight false  track 92.3 km   radar
+  SENTINEL-1C   2026-10-28 14:06  sun_elevation_deg -6.6   daylight false  track 75.9 km   radar
+  NISAR         2026-10-28 20:21  sun_elevation_deg -23.6  daylight false  track 104.4 km  radar
+  SENTINEL-1A   2026-10-29 08:12  sun_elevation_deg -4.9   daylight false  track 101.0 km  radar
+  SENTINEL-1C   2026-10-29 08:17  sun_elevation_deg -4.8   daylight false  track 128.8 km  radar
+  note: "swath geometry from live TLEs, not the acquisition plan — a pass is a possible capture, and imagery reaches public catalogs hours to a day later. Optical passes are kept only when the sun is above the horizon at the point; a low sun (under about 10 degrees) gives a dim image. Commercial sensors only image if tasked. ..."</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> The earlier card said the result had "no field saying the sun was below the horizon" and that I computed sun elevation myself. Now each pass carries <code>sun_elevation_deg</code> and <code>daylight</code>, and the result carries <code>optical_passes_at_night: 53</code>, so the dark optical passes are counted instead of silently listed or silently missing. The Sentinel-2 rows that used to show at 12:29 UTC are gone from the list, which matches the earlier hand arithmetic of about -1.6 degrees. One thing to read carefully: this run is a day later than the old one, so the pass list is not the same set; the verdict rests on the new fields, not on a row-for-row diff. The earlier note about 2 calls minutes apart giving different track distances was not re-tested here.</div>
+<div class="shows">next_pass sun_elevation_deg and daylight per pass · optical_passes_at_night count · radar kept at night, optical dropped</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">5</div><div class="tag">next clear pass</div><div class="who">incident commander</div></div>
+<div><div class="label">Input</div><div class="prompt">When does the next Sentinel-2 or Landsat pass come over, and will it be in daylight?</div></div>
+<div class="answer"><div class="label">Our read</div><b>The next pass is Sentinel-2B on 2026-10-28 at 19:13 UTC, and it is in daylight: the tool puts the sun 36.1 degrees up.</b> Track distance is 79.5 km from the fire point. No Landsat pass is in the list; the tool also reports 2 optical passes in the window that it dropped because the sun was down, but does not say which satellites those were. As before, this is swath geometry, a possible capture and not a promise, and imagery reaches public catalogs hours to a day later.</div>
+<details class="data"><summary>show the data</summary><div class="returned">next_pass(38.819722, -123.188056, constellations=["sentinel-2", "landsat"], days=3)
+  point: {"lat": 38.819722, "lon": -123.188056}   window_days: 3
+  passes: [{"constellation": "sentinel-2", "satellite": "SENTINEL-2B", "time_utc": "2026-10-28 19:13", "sun_elevation_deg": 36.1, "daylight": true, "track_distance_km": 79.5, "kind": "optical", "access": "open"}]
+  optical_passes_at_night: 2
+  constellations_source: developmentseed/eo-predictor   skipped: []
+  note: swath geometry from live TLEs, not the acquisition plan — a pass is a possible capture, and imagery reaches public catalogs hours to a day later. Optical passes are kept only when the sun is above the horizon at the point; a low sun (under about 10 degrees) gives a dim image. Commercial sensors only image if tasked. Richer view: https://developmentseed.org/eo-predictor</div></details>
+<div class="learning"><b>Learning →</b> <b>Partly.</b> The daylight stumble is fixed: the earlier card said "no daylight flag" and that I worked sunrise and sunset out by hand (sun about 37 degrees at pass time). The pass now carries <code>daylight: true</code> and <code>sun_elevation_deg: 36.1</code>, which agrees with that hand figure, and no arithmetic was needed. The second stumble, that Landsat's absence was ambiguous, is only partly answered: <code>optical_passes_at_night: 2</code> says the filter did drop 2 passes, so absence is no longer silent, but the reply still does not name them, so I cannot say whether either was Landsat. Not re-run here: the render_map with the passes fact.</div>
+<div class="shows">next_pass daylight flag and sun elevation · optical_passes_at_night count · same point as the no13 card</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">6</div><div class="tag">snow 3d</div><div class="who">ski resort operations</div></div>
+<div><div class="label">Input</div><div class="prompt">Is there snow on the upper mountain at Mt Bachelor yet, and what does the model say for the next 2 days?</div></div>
+<div class="answer"><div class="label">Our read</div><b>Same snow reading as before: mostly bare on the upper mountain on the clear 2026-10-23 Sentinel-2 look.</b> The index over the summit box averaged -0.32 (median -0.33), with the top 2% of pixels above 0.10 and a few bright pixels to 0.84; identical numbers to the earlier card. The statistics now say in words that the values are raw digital numbers, with scale 0.0001 and offset -0.1 on 24 bands and nothing applied, so read the index as direction, not as a snow-cover percentage. The 3D view now reports 100% coverage on load with the second tile S2C_10TEP_20261023_0_L2A draped beneath the main scene. The 2-day model half was not re-run.</div>
+<a class="fig" href="img/ft14-bachelor-ndsi-3d.html" target="_blank" title="open the live artifact"><img src="img/ft14-bachelor-ndsi-3d.png" alt="artifact produced by example 6" loading="lazy"><span class="open">3D: Mt Bachelor snow index, sibling tile on load ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Mount Bachelor, Oregon") reused from the earlier card: lat 43.9793848  lon -121.6885078
+  [upper-mountain box set by hand around the summit point: [-121.70, 43.96, -121.67, 43.99]]
+
+search_imagery("earth-search", ["sentinel-2-l2a"], bbox=upper, datetime_range="2026-10-01T00:00:00Z/2026-10-26T00:00:00Z", max_cloud_cover=30, limit=5)
+  S2C_10TEP_20261023_0_L2A  cloud 8.323914   covers_aoi_pct 100.0
+  S2C_10TFP_20261023_0_L2A  cloud 0.020296   covers_aoi_pct 100.0
+  S2B_10TEP_20261018_0_L2A  cloud 1.112594   covers_aoi_pct 100.0
+  S2B_10TFP_20261018_0_L2A  cloud 5.032135   covers_aoi_pct 100.0
+  S2A_10TEP_20261015_1_L2A  cloud 0.094147   covers_aoi_pct 100.0
+  recommended: S2C_10TFP_20261023_0_L2A, clearest (0.0% cloud) and best-covering (100.0% of the area), not a tradeoff
+
+compute_statistics("earth-search", "sentinel-2-l2a", "S2C_10TFP_20261023_0_L2A", expression="(green-swir16)/(green+swir16)", bbox=upper)
+  b1: min -0.9984139571768438  max 0.8446395317903698  mean -0.3198622771102794  median -0.3258897418004187
+      std 0.21667131235292447  count 77701.5625  valid_percent 100.0  percentile_2 -0.7268128161888702  percentile_98 0.10416666666666667
+  clipped_to: [-121.7, 43.96, -121.67, 43.99]
+  band_scaling: 3 entries (scale 0.001 offset 0 on aot; scale 0.0001 offset -0.1 on 24 reflectance bands; scale 0.001 offset 0 unit cm on wvp)
+  scaling_note: values are raw digital numbers: the item's raster:bands give scale 0.0001 and offset -0.1 on 24 bands (physical = raw * scale + offset), and nothing here applies them; with an expression a non-zero offset shifts the index too
+
+render_map_3d("Mt Bachelor: snow index (NDSI) on terrain, 2026-10-23", bbox=[-121.80, 43.90, -121.55, 44.05], layer=S2C_10TFP_20261023_0_L2A green+swir16 index, no extra_layers, exaggeration=1.5)
+  path: docs/img/ft14-bachelor-ndsi-3d.html
+  state.layers: S2C_10TFP_20261023_0_L2A (bounds -121.767937,43.241684,-120.373367,44.246542); S2C_10TEP_20261023_0_L2A (bounds -123.000238,43.256803,-121.625073,44.253409, reason "same-day sibling filling the view")
+  state.coverage_pct: 100.0
+  filled_with: ["S2C_10TEP_20261023_0_L2A"]
+
+HTML read-back (grep of docs/img/ft14-bachelor-ndsi-3d.html): style layers on load: basemap, sibling0, imagery; both tile ids present once each; no "Load full coverage" text
+
+[HRRR forecast half not re-run: not under test]</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> Both findings tested here are gone. (a) Stop 13: the earlier card said the drape "covers 87% of the view on load" and the neighbor tile 10TEP sat "behind a click". The new render reports <code>coverage_pct: 100.0</code> with <code>filled_with</code> naming S2C_10TEP_20261023_0_L2A, and the HTML read-back shows 3 style layers on load (basemap, sibling0, imagery) and no Load full coverage control, so the gap is closed without a click. I did not render a still, so I have not looked at the picture itself. (b) Stop 12: the earlier card had to say in prose that the scale and offset were "passed through, not applied"; now compute_statistics returns a <code>scaling_note</code> that says it, with the 0.0001 and -0.1 figures and the line that a non-zero offset shifts an index. <code>band_scaling</code> still comes back in process as a 3-entry list next to the note; whether the MCP layer collapses it is unverified. The note says the offset shifts the index but does not say by how much for this NDSI. Not re-run: the earlier card's point that a 0.03 degree summit box holds 1 HRRR cell.</div>
+<div class="shows">render_map_3d fill_coverage draping the same-day sibling on load · coverage_pct and filled_with · compute_statistics scaling_note · HTML grep of layers on load</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">7</div><div class="tag">burn scar 3d</div><div class="who">forester</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me the Flat Fire burn scar in 3D</div></div>
+<div class="answer"><div class="label">Our read</div><b>The Mustang burn index reads the same as before, now with the raw-value caveat stated by the tool.</b> Box mean -0.18, 2nd to 98th percentile -0.38 to -0.06, from the 2026-10-07 Sentinel-2 scene, which covers the whole box. The statistics carry a note that these are raw digital numbers, scale 0.0001 and offset -0.1 on 24 bands, not applied, and that the offset shifts an index. The 3D view reports 100% coverage from the single scene. Carried from the earlier card and not re-checked here: EONET had no Flat Fire in Oregon. Still true on this card: the burn colouring is not calibrated, and this is one date with no pre-fire scene.</div>
+<a class="fig" href="img/ft14-mustang-3d.html" target="_blank" title="open the live artifact"><img src="img/ft14-mustang-3d.png" alt="artifact produced by example 7" loading="lazy"><span class="open">3D: Mustang burn index ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">[active_events ranking not re-run; same scene and box as the earlier card: MUSTANG fire, Malheur County, item S2C_11TMH_20261007_0_L2A, bbox [-117.56, 42.55, -117.32, 42.78]]
+
+compute_statistics(earth-search, sentinel-2-l2a, S2C_11TMH_20261007_0_L2A, expression="(nir-swir22)/(nir+swir22)", bbox=[-117.56, 42.55, -117.32, 42.78])
+  b1: min -0.8122743682310469  max 0.4316644113667118  mean -0.17967865089908563  median -0.15737137916126243  std 0.08075738763225114
+      percentile_2 -0.3845419847328244  percentile_98 -0.0609067912045145  count 251189.34375  valid_percent 100.0
+  clipped_to: [-117.56, 42.55, -117.32, 42.78]
+  band_scaling: 3 entries
+  scaling_note: values are raw digital numbers: the item's raster:bands give scale 0.0001 and offset -0.1 on 24 bands (physical = raw * scale + offset), and nothing here applies them; with an expression a non-zero offset shifts the index too
+
+render_map_3d(title="MUSTANG fire, Malheur County, Oregon: burn index in 3D", bbox=[-117.56, 42.55, -117.32, 42.78], layer={item S2C_11TMH_20261007_0_L2A, assets nir+swir22, expression "(b1-b2)/(b1+b2)", rescale "-0.4,0.8", colormap rdylgn})
+  path: docs/img/ft14-mustang-3d.html
+  state.layers: S2C_11TMH_20261007_0_L2A (bounds -118.234293,42.357645,-116.879579,43.352783)
+  state.coverage_pct: 100.0
+  [no filled_with key; no sibling layer]</div></details>
+<div class="learning"><b>Learning →</b> <b>Partly.</b> The earlier card said the index was computed on raw values and the offset "is not applied", which I had to read out of an omitted band_scaling list. Now <code>scaling_note</code> says it in the result itself: that part is <b>Fixed</b>. Coverage was not an earlier stumble: the new 3D reports <code>coverage_pct: 100.0</code> with one layer and no sibling, because the scene covers the box, so stop 13's drape had nothing to do here and this card does not test it. Unverified: the note does not give the size of the shift on this index, so the -0.18 mean is still a relative number. The earlier card's lead stumble, that active_events carries no acreage and so could not rank fires, was not re-run, and no stop from 10 to 16 addressed it, so it is not shown fixed; that is why this card is Partly.</div>
+<div class="shows">compute_statistics scaling_note on a burn index · render_map_3d single-scene coverage unchanged</div>
+</div>
+</div>
+
+<h2 class="round">Round 3 — legend and postcards</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">8</div><div class="tag">land cover legend</div><div class="who">geographer</div></div>
+<div><div class="label">Input</div><div class="prompt">Land cover around the shores of Lake Victoria, with a legend.</div></div>
+<div class="answer"><div class="label">Our read</div><b>The Lake Victoria map now carries a legend with all 11 WorldCover classes and their colours</b>: tree cover dark green (#006400), shrubland orange (#ffbb22), grassland yellow (#ffff4c), cropland pink (#f096ff), built-up red (#fa0000), permanent water bodies blue (#0064c8), and the other 5. The tool result also returns the same table under <code>legend</code>, so the answer can name the classes without the HTML. In the 390 px screenshot the lake is blue and the surrounding land is pink and yellow, matching those rows. Caveats: at phone width the legend starts closed, so the classes show only after a tap on the chip (I did not tap it, so the opened state at 390 px is unseen); and the 6 toggle layers are still all named 'WorldCover 2021 · WorldCover'.</div>
+<a class="fig" href="img/ft14-victoria-landcover.html" target="_blank" title="open the live artifact"><img src="img/ft14-victoria-legend-390.png" alt="artifact produced by example 8" loading="lazy"><span class="open">map: Lake Victoria, ESA WorldCover 2021, with legend ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("planetary-computer", ["esa-worldcover"], bbox=[31.6, -3.1, 34.9, 0.6], datetime_range="2021-01-01T00:00:00Z/2021-12-31T23:59:59Z", limit=10)
+  count: 6   full_coverage_set: date 2021-01-01, union_covers_aoi_pct 100.0
+render_map("Lake Victoria shores, ESA WorldCover 2021", bbox=[31.6, -3.1, 34.9, 0.6], [coverage_set layer, assets ["map"], colormap_name "esa-worldcover"], out_path="docs/img/ft14-victoria-landcover.html")
+  map_path: docs/img/ft14-victoria-landcover.html
+  layers: ['WorldCover 2021 · WorldCover' x 6]
+  legend: {colormap_name: esa-worldcover, title: "ESA WorldCover 2021", classes: 11 entries, value/name/color, e.g. {10, "Tree cover", "#006400"} {20, "Shrubland", "#ffbb22"} {40, "Cropland", "#f096ff"} {50, "Built-up", "#fa0000"}}
+
+grep of the map HTML: "legend" appears 10 times; one block <div id="legends" aria-label="Legend"><details class="legend" open><summary>ESA WorldCover 2021</summary> with these rows:
+  #006400 Tree cover | #ffbb22 Shrubland | #ffff4c Grassland | #f096ff Cropland | #fa0000 Built-up | #b4b4b4 Bare / sparse vegetation | #f0f0f0 Snow and ice | #0064c8 Permanent water bodies | #0096a0 Herbaceous wetland | #00cf75 Mangroves | #fae6a0 Moss and lichen
+  inline script: if (innerWidth <= 500) document.querySelectorAll(".legend").forEach(d => d.removeAttribute("open"))
+
+screenshot, headless Chromium 390 x 844, 6 s after load, via the control tower:
+  legend <details> has attribute open: False
+  seen: top-left layer panel titled "Lake Victoria shores, ESA WorldCover 2021" with 6 checkboxes, every one reading "WorldCover 2021 · WorldCover"; bottom-right a closed chip reading "▸ ESA WorldCover 2021"
+
+review, the PNG (img/ft14-victoria-legend-390.png) opened: the lake is solid blue, the land around it mostly pink, yellow, orange and dark green; the STACK button sits over the right end of the layer panel's title; the closed legend chip at the bottom right sits over land, clear of the lake</div></details>
+<div class="learning"><b>Learning →</b> <b>Partly.</b> Earlier stumble: 'the map HTML has no legend ... nothing in the tool result lists the classes'. Now the HTML has a legend block with 11 class rows (grepped, quoted above) and render_map returns a <code>legend</code> object, so the main ask is fixed. On the screenshot: at 390 by 844 the legend is a small closed chip at the bottom right and does not cover the lake; the page itself shows the layer panel crowding the top-left, with the STACK button sitting over its title. Readability of the OPEN legend at 390 px is unverified, because the page closes it below 500 px and I took 1 screenshot, not a tap. Not fixed: the other stumble, 'the 6 toggle layers are all named WorldCover 2021 · WorldCover', is unchanged, with the same 6 identical names in the result and in the screenshot checkboxes. Also new: the legend is a single block for 6 layers, so toggling tiles off does not change it, which is right for one colormap.</div>
+<div class="shows">legend on render_map (stop 14) · esa-worldcover class table · coverage_set layer names · 390 px headless screenshot</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">9</div><div class="tag">urban heat</div><div class="who">city sustainability office</div></div>
+<div><div class="label">Input</div><div class="prompt">Which neighborhoods in Phoenix ran hottest on a clear afternoon this past August? I want a picture, not a table.</div></div>
+<div class="answer"><div class="label">Our read</div><b>This time the postcard is a heat picture of central Phoenix</b>: Landsat 9 surface temperature (<code>lwir11</code>) for 2026-08-17, in the inferno colormap, cropped to the box [-112.35, 33.3, -111.85, 33.75] as a 1024 x 1024 square. Hot ground is the bright orange to yellow, cool is dark purple, and the mountain park and the canal read cooler. Caveats: the card has no colour bar or temperature labels, so a reader cannot turn the colours into degrees; the scene was taken at 18:03 UTC (from the earlier card's search_imagery row for this scene, not re-run here; 11:03 in Phoenix, my arithmetic), so it is late morning and not the afternoon peak; and the image alone does not name neighborhoods.</div>
+<a class="fig" href="img/ft14-heat-phoenix.html" target="_blank" title="open the live artifact"><img src="img/ft14-heat-phoenix.png" alt="artifact produced by example 9" loading="lazy"><span class="open">postcard: Phoenix surface temperature, Landsat 9, 2026-08-17 ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">render_postcard("planetary-computer", "landsat-c2-l2", "LC09_L2SP_037037_20260817_02_T1", "Phoenix, Arizona", "2026-08-17", assets=["lwir11"], rescale="48000,57000", colormap_name="inferno", bbox=[-112.35, 33.3, -111.85, 33.75], out_path="docs/img/ft14-heat-phoenix.html")
+  {"path": "docs/img/ft14-heat-phoenix.html"}
+  [no "dropped" key, no note in the result]
+
+card HTML (decoded, not eyeballed): file 2010961 bytes, 1 embedded image/png, 1024 x 1024, 1505439 bytes; no http URLs anywhere in the file (image is a data URI, so there is no tile or render URL to read)
+  card text: "Phoenix, Arizona · 2026-08-17 ... landsat-c2-l2 via Microsoft Planetary Computer" plus the stack list; no line naming the asset, rescale, colormap or bbox
+
+grep -n 'if dropped' -A1 src/groundstation/tools.py (render_postcard, review)
+  3429:    if dropped:
+  3430:        out["dropped"] = dropped
+
+earlier card (ft13-heat-phoenix.png) for size: 1000 x 700 natural-colour whole scene
+
+the embedded image, opened: black-purple through orange to pale yellow (inferno), bright orange fields, dark purple on the mountain at the lower edge and the canal and ponds as near-black; no natural colours</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> Earlier stumble: the card 'holds the scene's pre-rendered natural-colour picture', ignoring assets, rescale, colormap and bbox, and the thermal ask 'was lost silently'. Now the embedded image is 1024 x 1024 heat-coloured and cropped (earlier: 1000 x 700 natural colour, whole scene), so all 4 asks are honoured in the pixels and nothing was lost. Stop 15 promised to honour the ask and say what it dropped; the code adds a <code>dropped</code> key only when something was dropped (the grep above), and the which portland card's probe shows it naming <code>fill_item_ids</code> when one was, so the bare <code>{"path": ...}</code> here means nothing was dropped. Still missing, though the stop did not promise it: no list of applied settings in the result or the card text, so a caller confirms the heat rendering only by opening the image. Not re-run: the earlier card's 16 unlabeled band_scaling entries. Also new: the card has no colour bar, so the inferno colours carry no scale.</div>
+<div class="shows">render_postcard asset, rescale, colormap and bbox on Planetary Computer (stop 15) · dropped list · decoded card image size</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">10</div><div class="tag">which portland</div><div class="who">harbor pilot</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me the harbor approaches at Portland from the latest Landsat pass.</div></div>
+<div class="answer"><div class="label">Our read</div><b>The Casco Bay card is now cropped to the bay, but nearly half of it is black because the Landsat pass does not cover the southern part of the box.</b> The picture shows the islands, the shore and the inland country in true colour from the 2026-10-21 Landsat 9 pass, in a 4:3 frame. Below a diagonal line running across the frame there is no data, so the open water seaward of the islands, the part a pilot would want for approaches, is missing. There is also some cloud in the lower right. I cannot say from the picture where Portland harbor lies relative to the black edge; it sits near it. This is a 30 m satellite picture and not for navigation.</div>
+<a class="fig" href="img/ft14-place-casco.html" target="_blank" title="open the live artifact"><img src="img/ft14-place-casco.png" alt="artifact produced by example 10" loading="lazy"><span class="open">postcard: Casco Bay, Landsat 9, 2026-10-21 ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">[geocoding of Portland not re-run; the Casco Bay box from the earlier card is used directly: casco = [-70.40, 43.55, -69.90, 43.85]]
+
+render_postcard("planetary-computer", "landsat-c2-l2", "LC09_L2SP_012029_20261021_02_T1", "Casco Bay, Portland, Maine", "2026-10-21", assets=["red","green","blue"], rescale="7000,16000", bbox=casco, caption="Casco Bay and Portland, Maine, Landsat 9 true color, 2026-10-21", out_path="docs/img/ft14-place-casco.html")
+  {"path": "docs/img/ft14-place-casco.html"}
+  [no "dropped" key, no note in the result]
+
+card HTML (decoded): file 1369345 bytes, 1 embedded image/png, 1024 x 768, 1024138 bytes, no http URLs
+earlier card (ft13-place-casco): file 1553429 bytes, embedded png 1012 x 1024
+
+the embedded image, opened: Casco Bay's islands and shore, true colour; about the lower 45 percent of the frame is solid black in a diagonal wedge (slanted edge from the left at about 50 percent height down to the right at about 80 percent); wisps of cloud at the lower right
+
+grep -n 'diagonal' -B3 -A1 src/groundstation/tools.py (render_postcard, review)
+  3350:        # clamp to the scenes' union bbox so an AOI hanging off the data
+  3351:        # can't print a nodata band — center-preserving, so the subject
+  3352:        # stays in the middle of the frame. ponytail: bbox math only — a
+  3353:        # diagonal swath edge (footprint != bbox) can still clip a corner
+  3354:        # on single-scene cards; fills exist for exactly that case
+
+probe, same card plus fill_item_ids=["LC09_L2SP_012030_20261021_02_T1"]:
+  {'path': 'docs/img/ft14-place-casco-fillprobe.html', 'dropped': [{'param': 'fill_item_ids', 'why': 'mosaic cards need direct COG access, which planetary-computer does not offer'}], 'note': 'mosaic cards need direct COG access; planetary-computer fell back to the single scene'}
+  [probe file deleted after reading the result]</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> Earlier stumble: the postcard 'ignored the bbox', so 'the card came back uncropped with no warning'. Now the embedded image is 1024 x 768 and shows the bay, not the whole scene (earlier 1012 x 1024), so the bbox is honoured. The result is still just <code>{"path": ...}</code>, which by stop 15's design means nothing was dropped. New problem: about 45 percent of the cropped frame is black no-data, because the scene's footprint is slanted and the box straddles its edge, while search_imagery had reported <code>covers_aoi_pct 100.0</code> for this scene on the earlier card, a bounding-box overlap and not pixel coverage. Neither the result nor the card text warns of it. The code comment above the crop already names this as a known gap for 'a diagonal swath edge'; the fix it offers, <code>fill_item_ids</code>, is dropped on Planetary Computer (the probe above shows the dropped entry and the single-scene fallback), so a Planetary Computer user has no way to fill the wedge from the card tool. Not part of this run: the earlier card's earth-search Landsat 500 was not re-run, and its state-less refusal is the Portland refusal card.</div>
+<div class="shows">render_postcard bbox on Planetary Computer (stop 15) · covers_aoi_pct versus real footprint · fill_item_ids dropped on PC · nodata wedge</div>
+</div>
+</div>
+
+<h2 class="round">Round 4 — the geocoder</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">11</div><div class="tag">brief with sources</div><div class="who">parish emergency manager</div></div>
+<div><div class="label">Input</div><div class="prompt">Give me this morning's brief for Lake Charles: anything active, weather, smoke.</div></div>
+<div class="answer"><div class="label">Our read</div><b>Lake Charles now resolves to the city, and the brief for it reports one open event: the same Texas prescribed fire as last time.</b> <code>geocode</code> returned Gazet's Lake Charles (US, locality) with a box about 0.19 by 0.15 degrees, a town-sized box instead of the earlier 0.03 degree lake. <code>conditions_brief</code> reported <code>all_clear: false</code> because EONET listed Prescribed Fire Rx Polk 9275 (Polk, Texas, dated 2026-10-16); both feeds answered (<code>ok: true</code>), so no source was down. Dry for 7 days, peak wind 15.9 km/h from the east today. I did not re-run the brief page this round, so whether the page now agrees with the tool is unchecked.</div>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Lake Charles")
+  source: gazet   name: Lake Charles (US, locality)
+  lat: 30.19840431213379   lon: -93.22285079956055
+  bbox: [-93.3168716430664, 30.12449836730957, -93.12882995605469, 30.272310256958008]
+  candidates: [{"name": "Lake Charles (US, locality)", "source": "gazet", "where": "US, at 30.2N 93.2W", "kind": "locality"}]
+  (no geocode_note, no ambiguous flag; candidates carry no importance field)
+
+conditions_brief(place="Lake Charles", days_back=7)
+  dryness: {"total_precipitation": 0.0, "days_since_last_rain": null, "days_back": 7}
+  wind.today: {"wind_speed_max": 15.9, "wind_direction_dominant": 92, "wind_direction_compass": "from the E"}
+  events.eonet: [{"title": "Prescribed Fire Rx Polk 9275, Polk, Texas", "category": "Wildfires", "date": "2026-10-16T08:31:00Z", "coordinates": [-94.72916667, 30.57111111]}]
+  sources: {"eonet": {"ok": true, "listed": 1, "error": null}, "gdacs": {"ok": true, "listed": 0, "error": null}}
+  all_clear: false
+  all_clear_note: "1 EONET events in the box"
+  latest_look: {"id": "S2C_15RVP_20261024_0_L2A", "date": "2026-10-24", "cloud": 0.004831, "covers_aoi_pct": 100.0}
+  signals: ["no rain >=1mm in the last 7 days", "peak wind today 16 km/h from the E", "1 active wildfire within ~150 km"]
+
+grep pad (src/groundstation/tools.py, conditions_brief)
+  4261:        events_data = active_events(bbox=bbox, pad=1.5)
+grep pad (briefing/brief.py)
+  279:    pad = 0.4  # look slightly beyond the AOI for nearby events
+  283:    events = tools.active_events(bbox=bbox, days=30, pad=pad)</div></details>
+<div class="learning"><b>Learning →</b> <b>Partly.</b> The earlier card had 2 stumbles, and one is fixed. The lake one: "lake" in Lake Charles "picked the lake candidate, a 0.03 degree box, over the city". Now <code>geocode("Lake Charles")</code> returns the Gazet locality at 30.198N 93.223W with a 0.19 by 0.15 degree box and a single candidate. 2 caveats: the candidates carry no importance field, so the margin rule stop 16 names cannot be seen in the output, only its result; and with Gazet answering there was no Nominatim lake to yield, so I did not see the rule fire against a competing lake. <b>The pad split, the earlier card's lead stumble, is unchanged (no stop was charted for it):</b> briefing/brief.py line 279 still has <code>pad = 0.4</code> and tools.py line 4261 still has <code>active_events(bbox=bbox, pad=1.5)</code>. The box got bigger but the pads did not move, so the page (0.4 degree pad) and the tool (1.5 degree pad) still search different areas, and the Texas burn at -94.73 lon is about 1.4 degrees west of this wider box's west edge (-93.32), inside the tool's pad and outside the page's. Not fixed, only recorded.</div>
+<div class="shows">geocode feature word yields to a town (0.35.0) · conditions_brief sources + all_clear · pad values 0.4 vs 1.5 still apart</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">12</div><div class="tag">superfund pit 3d</div><div class="who">Superfund community liaison, Butte</div></div>
+<div><div class="label">Input</div><div class="prompt">Give me a 3D view of the Berkeley Pit so residents can see how the pit lake sits relative to town.</div></div>
+<div class="answer"><div class="label">Our read</div><b>The 3D view is ready: a Sentinel-2 true-colour scene from 2026-10-21 (4.7% cloud) draped over terrain at 2x stretch, framed by hand on the Berkeley Pit and Butte.</b> The tool reports coverage_pct 100.0 for my box. The geocoder gave me the same hand-framing problem as before, so I used the same hand box. The view shows where the pit sits, not the pit lake's level, depth or water quality. I did not open the 3D view in a browser, so how the 2x stretch reads is unchecked.</div>
+<a class="fig" href="img/ft14-mine-berkeley3d.html" target="_blank" title="open the live artifact"><img src="img/ft14-mine-berkeley3d.png" alt="artifact produced by example 12" loading="lazy"><span class="open">3D map: Berkeley Pit and Butte, 2026-10-21 ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Berkeley Pit, Butte, Montana")
+  source: nominatim   name: Berkeley Pit, Butte, Silver Bow County, Montana, United States
+  lat: 46.0171513   lon: -112.511732
+  bbox: [-112.661732, 45.8671513, -112.36173199999999, 46.1671513]
+  candidates: [{"name": "Berkeley Pit, Butte, Silver Bow County, Montana, United States", "bbox": [-112.5235427, 46.0107713, -112.4990514, 46.0234592], "source": "nominatim", "where": "Berkeley Pit, Montana, United States", "kind": "water"}]
+  bbox_note: geocoder returned a point, not an extent — widened to a 0.3 deg box around it. Pass your own bbox if the subject is bigger
+
+geocode("Berkeley Pit lake, Butte, Montana")
+  source: nominatim   (same name, lat, lon, top-level bbox [-112.661732, 45.8671513, -112.36173199999999, 46.1671513] and single candidate, kind: water, as above)
+  geocode_note: matched 'Berkeley Pit Butte Montana' after simplifying 'Berkeley Pit lake, Butte, Montana'. Pass a state or country if another was meant
+  bbox_note: geocoder returned a point, not an extent — widened to a 0.3 deg box around it. Pass your own bbox if the subject is bigger
+  [view box chosen by hand, same as the earlier card: [-112.58, 45.97, -112.44, 46.06]]
+
+search_imagery("earth-search", ["sentinel-2-l2a"], bbox=view, datetime_range="2026-08-15T00:00:00Z/2026-10-26T23:59:59Z", max_cloud_cover=5, limit=8)
+  S2C_12TUS_20261021_0_L2A 2026-10-21 cloud 4.704387 covers_aoi_pct 100.0
+  S2B_12TUR_20261019_0_L2A 2026-10-19 cloud 3.496362 covers_aoi_pct 86.2
+  S2B_12TUS_20261019_0_L2A 2026-10-19 cloud 3.534195 covers_aoi_pct 100.0
+  S2A_12TUR_20261016_0_L2A 2026-10-16 cloud 0.087828 covers_aoi_pct 86.2   [other rows omitted]
+  S2B_12TUS_20261009_0_L2A 2026-10-09 cloud 1.796988 covers_aoi_pct 100.0
+  S2B_12TUS_20261006_0_L2A 2026-10-06 cloud 0.887136 covers_aoi_pct 100.0
+
+render_map_3d("Berkeley Pit and Butte, 3D", bbox=view, layer=<S2C_12TUS_20261021_0_L2A, visual>, exaggeration=2.0, subtitle="Sentinel-2 true colour, 2026-10-21, terrain x2.0", stack_facts={"scene": "S2C_12TUS_20261021_0_L2A", "cloud cover %": "4.7"})
+  path: docs/img/ft14-mine-berkeley3d.html   title: Berkeley Pit and Butte, 3D
+  state: {"bbox": [-112.58, 45.97, -112.44, 46.06], "exaggeration": 2.0, "terrain": true, ..., "coverage_pct": 100.0}</div></details>
+<div class="learning"><b>Learning →</b> <b>Same.</b> The earlier card's stumble was "the one candidate carried a tight bbox ... but the top-level bbox was the 0.3 degree point-rule box". Live, both queries (the new "Berkeley Pit, Butte, Montana" and the earlier "Berkeley Pit lake, Butte, Montana") still return the 0.3 degree top-level box [-112.661732, 45.8671513, -112.36173199999999, 46.1671513] with the tight 0.024 by 0.013 degree box only on the single candidate, still kind <code>water</code>. Stop 16's fold of water into lake could not be shown: Nominatim returned one candidate, so there was no lake-versus-water contest to see, and I have not verified the fold offline here. Whether the point rule should read the candidate's own bbox is a separate matter that stop 16 did not touch. Side change: the newest 100% scene is now 2026-10-21, not 2026-10-09, because newer passes landed.</div>
+<div class="shows">render_map_3d (terrain, exaggeration, subtitle) · geocode top-level bbox vs candidate bbox · point-widening rule still unchanged</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">13</div><div class="tag">powell bathtub ring</div><div class="who">river journalist</div></div>
+<div><div class="label">Input</div><div class="prompt">Lake Powell: show me the low point of 2022 against this year, side by side, and tell me how much more water surface there is now.</div></div>
+<div class="answer"><div class="label">Our read</div><b>"Lake Powell" now resolves to the Utah reservoir, not the Australian locality.</b> The Gazet result is Powell (reservoir) at 37.4N 111.0W, with a box about 1.2 by 1.0 degrees; the Australian Lake Powell (locality, 34.7S 142.9E) stays listed second. The note still says the two match "equally well" but the call no longer carries <code>ambiguous</code>, so a place-taking tool should not refuse it (not run here). "Lake Powell, Utah" gives the same reservoir through Nominatim, with a similar box. Only the geocoding was under test; no imagery was run.</div>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Lake Powell")
+  source: gazet   name: Powell (reservoir)
+  lat: 37.42277244238477   lon: -110.95922907183393
+  bbox: [-111.55546361133912, 36.932214624519844, -110.36299453232873, 37.913330260249694]
+  geocode_note: 2 places match 'Lake Powell' equally well; using Powell (reservoir) at 37.4N 111.0W, not Lake Powell (AU, locality) at 34.7S 142.9E. Pass the fuller name if another was meant
+  candidates: Powell (reservoir) kind: reservoir, where at 37.4N 111.0W  |  Lake Powell (AU, locality) kind: locality, where AU, at 34.7S 142.9E, bbox [142.8666229248047, -34.7808723449707, 143.0175323486328, -34.647972106933594]
+  (no ambiguous key in the result; candidates carry no importance field)
+
+geocode("Lake Powell, Utah")
+  source: nominatim   name: Lake Powell, San Juan County, Utah, United States
+  lat: 37.3768572   lon: -110.726121
+  bbox: [-111.5674771, 36.8444117, -110.2867168, 37.9093781]
+  candidates: [{"name": "Lake Powell, San Juan County, Utah, United States", "source": "nominatim", "where": "Lake Powell, Utah, United States", "kind": "reservoir"}]</div></details>
+<div class="learning"><b>Learning →</b> <b>Partly.</b> The headline stumble is fixed; the box one is not. The earlier card's headline stumble was "'Lake Powell' went to Australia first, ambiguous: true". Now the first result is the reservoir, the <code>ambiguous</code> flag is absent, and the Australian locality is second. My reading, not shown in the output: the pick comes from the feature-word rule (one candidate of kind reservoir for the word "lake"), not from a ranking win: the note still calls the match equal, and the candidate is named "Powell (reservoir)" without the word Lake. Candidates carry no importance, so I cannot say what margin was involved. "Lake Powell, Utah" is unchanged: same Nominatim reservoir and a box about 1.3 by 1.1 degrees, still too big for a Wahweap-sized ask, which the point rule does not address, so that earlier stumble stands. Not re-run: the NDWI water-share step.</div>
+<div class="shows">geocode feature word picks the one candidate of that kind, clears ambiguous (0.28.0, 0.35.0) · candidate kind</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">14</div><div class="tag">Portland refusal</div><div class="who">harbor pilot</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me the harbor approaches at Portland from the latest Landsat pass.</div></div>
+<div class="answer"><div class="label">Our read</div><b>"Portland" is still ambiguous, and the geocode candidates now name a country and a position each but no state.</b> Gazet answered, and listed 4 candidates: 2 at 45.5N 122.7W (an urban centre and a locality) and 2 on the 43.6N to 43.7N, 70.2W to 70.3W side (a locality and an urban centre). A reader still has to know that 45.5N 122.7W is Oregon and 43.6N 70.2W is Maine. The note says 5 places match but lists 4 candidates. I did not run the follow-on search_imagery refusal this round, so the wording a place-taking tool returns is unchecked.</div>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Portland")
+  source: gazet   name: Portland (United States, urban_centre)   ambiguous: true
+  lat: 45.538030689845755   lon: -122.68500967242345
+  geocode_note: 5 places match 'Portland' equally well; using Portland (United States, urban_centre) at 45.5N 122.7W, not Portland (US, locality) at 45.5N 122.7W, Portland (US, locality) at 43.6N 70.2W, Portland (United States, urban_centre) at 43.7N 70.3W. Pass the fuller name if another was meant. ambiguous: pass the fuller name or a bbox
+  candidates (name | where | kind): Portland (United States, urban_centre) | United States, at 45.5N 122.7W | urban_centre  ||  Portland (US, locality) | US, at 45.5N 122.7W | locality  ||  Portland (US, locality) | US, at 43.6N 70.2W | locality  ||  Portland (United States, urban_centre) | United States, at 43.7N 70.3W | urban_centre
+
+grep -n 'def _kind_where' -A2 src/groundstation/tools.py (review)
+  91:def _kind_where(c: dict[str, Any]) -> str:
+  92:    """County, state and country for a Nominatim candidate; a Gazet record carries only its country and position"""
+  93:    if c.get("source") != "nominatim":</div></details>
+<div class="learning"><b>Learning →</b> <b>Same.</b> The earlier card's stumble was "the ambiguity refusal lists four candidates by kind and coordinates with no state named". Stop 16's title says refusals name the state, but the code names county, state and country only for a Nominatim candidate; "a Gazet record carries only its country and position" (the grep above), and Gazet answered bare "Portland". So each candidate's <code>where</code> adds the country ("United States, at 45.5N 122.7W", "US, at 43.6N 70.2W"), the geocode_note is word for word the earlier card's, and the Maine-versus-Oregon question still needs coordinates to answer. Not re-run: the search_imagery refusal itself, so its new wording is unseen. Naming a state would need a reverse lookup or the Nominatim path, which "Portland, Maine" took last time. Also still odd: the note counts 5 matches and lists 4.</div>
+<div class="shows">geocode ambiguity note with where (country and position, no state) · Gazet vs Nominatim as the answering source</div>
+</div>
+</div>
+
+<h2 class="round">Round 5 — the uncharted</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">15</div><div class="tag">flood aftermath</div><div class="who">European news desk editor</div></div>
+<div><div class="label">Input</div><div class="prompt">Valencia, Spain had the terrible flash flood in late October 2024. Show before and after over the Horta Sud towns south of the city.</div></div>
+<div class="answer"><div class="label">Our read</div><b>Over the hand-picked Horta Sud box the NDVI mean (the default expression) fell from 0.2933 on 2024-10-01 to 0.1406 on 2024-11-15, a drop of 0.1527 (-52.1%), and the tool again warns the November scene is 23% cloudy, so treat the size of the drop with care.</b> 3 identical calls returned the same tile (31SBD), the same 2 scenes and the same delta every time. NDVI does not map water or damage; a fall is consistent with mud and stripped fields but that is my reading. I kept the artifact from run 1; all 3 runs wrote to the same path, so it is also the file from runs 2 and 3.</div>
+<a class="fig" href="img/ft14-water-valencia.html" target="_blank" title="open the live artifact"><img src="img/ft14-water-valencia.png" alt="artifact produced by example 15" loading="lazy"><span class="open">swipe: Horta Sud NDVI, 2024-10-01 vs 2024-11-15 ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">compare_dates(bbox=[-0.46, 39.38, -0.35, 39.45], window_before="2024-10-01/2024-10-20", window_after="2024-11-05/2024-11-25")   [date-only ranges, as the earlier card wrote them]
+  httpx.HTTPStatusError: Client error '400 Bad Request' for url 'https://earth-search.aws.element84.com/v1/search'   (uncaught exception raised from search_imagery, not an error dict)
+
+compare_dates(bbox=[-0.46, 39.38, -0.35, 39.45], window_before="2024-10-01T00:00:00Z/2024-10-20T23:59:59Z", window_after="2024-11-05T00:00:00Z/2024-11-25T23:59:59Z")   [run 1]
+  tile: 31SBD
+  after:  S2A_31SBD_20241115_0_L2A  2024-11-15  cloud 22.916301  mean 0.1406
+  before: S2B_31SBD_20241001_0_L2A  2024-10-01  cloud 9.90776   mean 0.2933
+  delta: -0.1527   delta_pct: -52.1
+  caveat: ["cloud may be driving this delta (after scene 23%, threshold 20%). Cloud pushes a normalized index toward zero."]
+  map_path: demo/map-aoi---2024-11-15-vs-2024-10-01.html
+same call   [run 2]
+  tile: 31SBD
+  after:  S2A_31SBD_20241115_0_L2A  2024-11-15  cloud 22.916301  mean 0.1406
+  before: S2B_31SBD_20241001_0_L2A  2024-10-01  cloud 9.90776   mean 0.2933
+  delta: -0.1527   delta_pct: -52.1
+  caveat: ["cloud may be driving this delta (after scene 23%, threshold 20%). Cloud pushes a normalized index toward zero."]
+  map_path: demo/map-aoi---2024-11-15-vs-2024-10-01.html
+same call   [run 3]
+  tile: 31SBD
+  after:  S2A_31SBD_20241115_0_L2A  2024-11-15  cloud 22.916301  mean 0.1406
+  before: S2B_31SBD_20241001_0_L2A  2024-10-01  cloud 9.90776   mean 0.2933
+  delta: -0.1527   delta_pct: -52.1
+  caveat: ["cloud may be driving this delta (after scene 23%, threshold 20%). Cloud pushes a normalized index toward zero."]
+  map_path: demo/map-aoi---2024-11-15-vs-2024-10-01.html
+  also in each run: scaling_note: "values are raw digital numbers: the item's raster:bands give scale 0.0001 and offset -0.1 on 24 bands (physical = raw * scale + offset), and nothing here applies them; with an expression a non-zero offset shifts the index too"</div></details>
+<div class="learning"><b>Learning →</b> <b>Same.</b> No stop touched this, and nothing in the output explains why the earlier card's 2 runs differed (the box-near-the-meridian guess is still unconfirmed). This time the flip was not reproduced: 3 of 3 runs chose tile 31SBD with delta -0.1527, and 30SYJ with +0.0043 never appeared. 3 agreeing runs are not evidence it is gone, so the stumble stands as found. New against the earlier card: the date-only window strings the earlier card shows ("2024-10-01/2024-10-20") now raise an uncaught HTTP 400 from earth-search instead of returning an error dict (on the earlier card the same strings returned tile 31SBD), a regression, so I reran with full RFC3339 ranges; and the result now carries a <code>scaling_note</code> saying the means are raw digital numbers with an offset of -0.1 that is not applied. Not charted as a stop: a stop needs a run that actually flips.</div>
+<div class="shows">compare_dates repeatability · date-only window 400 · scaling_note · cloud caveat · swipe map</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">16</div><div class="tag">find lst data</div><div class="who">public health researcher</div></div>
+<div><div class="label">Input</div><div class="prompt">What datasets do you have for land surface temperature over California's Central Valley, and can you show one?</div></div>
+<div class="answer"><div class="label">Our read</div><b>Search again recommends the h07v05 scene, and a tile fetched over the Valley from it is empty (HTTP 204, 0 bytes).</b> The h08v05 item from the same day returns HTTP 200 with 31238 bytes at the same tile. The recommendation still reads 0% cloud and 92.6% coverage, but the h08v05 item has the same 92.6, so the coverage figure cannot tell the two apart. One change: the response now also carries a <code>full_coverage_set</code> (2026-10-24, union 100.0%), and it lists the h08v05 and h08v04 items, not h07v05. I did not render a map this round.</div>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("planetary-computer", ["modis-11A1-061"], bbox=[-122.4, 35.0, -118.6, 40.4], datetime_range="2026-10-20T00:00:00Z/2026-10-25T23:59:59Z", limit=10)
+  recommended: {"id": "MOD11A1.A2026297.h07v05.061.2026298094307", "covers_aoi_pct": 92.6, "cloud_cover": 0, "reason": "clearest (0.0% cloud) and best-covering (92.6% of the area), not a tradeoff"}
+  MOD11A1.A2026297.h08v05...  2026-10-24  bbox [-130.540729, 30.0, -103.923048, 40.0]  cloud 28  covers 92.6
+  MOD11A1.A2026297.h07v05...  2026-10-24  bbox [-143.594802, 30.0, -115.470054, 40.0]  cloud 0   covers 92.6
+  full_coverage_set: date 2026-10-24, union_covers_aoi_pct 100.0, items [MOD11A1.A2026297.h08v05.061.2026298094323, MOD11A1.A2026297.h08v04.061.2026298094315]
+
+tile_url_template("planetary-computer", "modis-11A1-061", "MOD11A1.A2026297.h07v05.061.2026298094307", assets=["LST_Day_1km"], rescale="14500,16000", colormap_name="inferno"); curl -s -o /dev/null -w '%{http_code} %{size_download}' -m 60, tile z7 x21 y49 (37.0 N, 120.5 W)
+  204 0
+same call for MOD11A1.A2026297.h08v05.061.2026298094323 (2026-10-24, cloud 28)
+  200 31238</div></details>
+<div class="learning"><b>Learning →</b> <b>Same.</b> The recommended item is still the empty tile: h07v05 returned HTTP 204, 0 bytes, over 37.0 N 120.5 W at z7, while h08v05 returned 200. covers_aoi_pct is still computed from the item's envelope box (h07v05 bbox [-143.594802, 30.0, -115.470054, 40.0] and h08v05 bbox [-130.540729, 30.0, -103.923048, 40.0] both read 92.6), so a 0-cloud scene whose data does not reach the Valley wins the tie. What is new since the earlier card: <code>full_coverage_set</code> appears in this response and points at the h08v05 item, so a caller who uses it gets a drawable scene; the <code>recommended</code> field itself is unchanged. The items were 1 day newer than the earlier card's (A2026297 vs A2026296), same behaviour.</div>
+<div class="shows">search_imagery recommended vs real coverage · full_coverage_set · tile_url_template (PC MODIS) · empty tile 204 vs 200</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">17</div><div class="tag">compare_dates out_path</div><div class="who">European news desk editor</div></div>
+<div><div class="label">Input</div><div class="prompt">Valencia, Spain had the terrible flash flood in late October 2024. Show before and after over the Horta Sud towns south of the city, and save the map where I tell you.</div></div>
+<div class="answer"><div class="label">Our read</div><b>No: compare_dates still takes no out_path, so the journalist cannot choose where the swipe map is saved.</b> Its parameters are place, bbox, window_before, window_after, expression, max_cloud_cover, label, stack_layer and stack_facts. The map lands in the default folder, <code>demo/</code> under the working directory (or GROUNDSTATION_OUT when set), named from the dates: <code>demo/map-aoi---2024-11-15-vs-2024-10-01.html</code>. render_map does accept out_path, so a caller who wants a chosen path has to call render_map again by hand.</div>
+<details class="data"><summary>show the data</summary><div class="returned">grep -n '^def compare_dates' -A10 src/groundstation/tools.py
+  compare_dates(place: str | None = None, bbox: list[float] | None = None, window_before: str = "", window_after: str = "", expression: str = "(nir-red)/(nir+red)", max_cloud_cover: float = 40, label: str | None = None, stack_layer: bool = True, stack_facts: dict[str, Any] | None = None) -> dict[str, Any]
+
+grep -n '^def render_map(' -A10 src/groundstation/tools.py
+  render_map(title: str, bbox: list[float], layers: list[dict[str, Any]], subtitle: str = "", out_path: str | None = None, compare: bool | None = None, stack_layer: bool = True, stack_facts: dict[str, Any] | None = None, postcard: dict[str, Any] | None = None) -> dict[str, Any]
+
+compare_dates run 1 (card "flood aftermath")
+  map_path: demo/map-aoi---2024-11-15-vs-2024-10-01.html
+
+grep of out_path in the other renderers' signatures (src/groundstation/tools.py, review)
+  render_timelapse: out_path: str | None = None,
+  render_map_3d: out_path: str | None = None,
+  render_postcard: out_path: str | None = None,
+grep -n 'GROUNDSTATION_OUT' src/groundstation/tools.py (_artifact_path, review)
+  2306:    out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))</div></details>
+<div class="learning"><b>Learning →</b> <b>Same.</b> compare_dates has no <code>out_path</code> in its signature; render_map, render_timelapse, render_map_3d and render_postcard all have one. The file name follows the same <code>map-&lt;title&gt;---&lt;after&gt;-vs-&lt;before&gt;</code> pattern as the earlier flood card's <code>/tmp/ft13r2/out/map-horta-sud-flood-ndvi---2024-11-15-vs-2024-10-01.html</code>. One detail this run showed: with no <code>label</code> and a bbox the file is named <code>map-aoi---...</code>, which suggests the title falls back to "aoi", so 2 different bbox runs with the same dates would overwrite one another. That overwrite is inferred from the filename pattern and not tested.</div>
+<div class="shows">compare_dates signature (no out_path) · default map_path under demo/ · render_map out_path</div>
+</div>
+
+<div class="card"><div class="top"><div class="num">18</div><div class="tag">notes beside the map</div><div class="who">West Virginia state reclamation inspector</div></div>
+<div><div class="label">Input</div><div class="prompt">Hobet mine in Boone County was supposed to be reclaimed. Is vegetation actually coming back on the old mountaintop removal area since 2016? I want my own note about the hand-picked box printed on the map.</div></div>
+<div class="answer"><div class="label">Our read</div><b>The note does not appear anywhere in the map.</b> I passed a free-text fact in stack_facts and a search of the output HTML for its text, its id (7731) and its key name found 0 matches, while the title I passed shows up twice and the real <code>geocoded</code> flag produced the Nominatim credit. Besides the title, the only free-text field that reaches the page is <code>subtitle</code>, so an inspector's note has to go there.</div>
+<a class="fig" href="img/ft14-mine-hobet-notes.html" target="_blank" title="open the live artifact"><img src="img/ft14-mine-hobet-notes.png" alt="artifact produced by example 18" loading="lazy"><span class="open">map: Hobet box with a note in stack_facts (note absent) ↗</span></a>
+<details class="data"><summary>show the data</summary><div class="returned">grep signatures (src/groundstation/tools.py)
+  render_map(title, bbox, layers, subtitle="", out_path=None, compare=None, stack_layer=True, stack_facts=None, postcard=None)
+  compare_dates(place=None, bbox=None, window_before="", window_after="", expression=..., max_cloud_cover=40, label=None, stack_layer=True, stack_facts=None)
+  render_timelapse(title, bbox, frames, subtitle="", out_path=None, interval_ms=1200, max_frames=8, stack_layer=True, stack_facts=None)
+  no parameter named notes, note or annotations in any of the three; caption exists only on render_postcard and as a key of render_map's postcard dict (share card only)
+
+render_map("Hobet notes test", bbox=[-81.78, 38.0, -81.66, 38.1], layers=[raster osm], out_path=docs/img/ft14-mine-hobet-notes.html, stack_facts={"geocoded": "nominatim", "inspector note": "BOXHAND-PICKED-NOTE-7731 no 2016 scene exists"})
+  map_path: /Users/Danny/Source/groundstation/docs/img/ft14-mine-hobet-notes.html   layers: ["osm"]
+grep -c 'BOXHAND\|7731\|inspector note' ft14-mine-hobet-notes.html
+  0
+grep -c 'Hobet notes test' ft14-mine-hobet-notes.html
+  2
+grep -o -i 'nominatim...' : "Nominatim" present (from the true geocoded flag)</div></details>
+<div class="learning"><b>Learning →</b> <b>Same.</b> The unknown stack_facts key is dropped silently: no error, no echo in the result, 0 matches in the HTML. None of render_map, compare_dates or render_timelapse has a notes, note or annotations parameter; caption exists only on render_postcard and inside render_map's postcard dict, which makes a share card, not a note on the live map. Only <code>subtitle</code> (render_map and render_timelapse) carries text, and compare_dates has no subtitle at all, so compare_dates callers have only <code>label</code>. Whether a custom key could reach the panel through some other path I did not test beyond this one render.</div>
+<div class="shows">stack_facts passthrough drops unknown keys · no notes parameter · subtitle as the only text field · render_map</div>
+</div>
+</div>
+<div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
+bash scripts/doctor.sh                      # walks the setup chain, prints the fix
+uv run evals/unit_checks.py                 # 158 offline checks
+uv run scripts/field_test.py docs/field-test-2026-10-26-no14.cases.json   # renders this page and its stills</code></div>
+</main>
+
+<footer>field test №14 · October 26, 2026 · run on main at 0.35.0 · 18 cards re-run, 7 fixed, 5 partly, 6 the same · groundstation · Development Seed labs</footer>
+
+</body>
+</html>
