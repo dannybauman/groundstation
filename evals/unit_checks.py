@@ -2723,11 +2723,18 @@ def t_brief_page_and_conditions_brief_share_one_radius():
         tools._get_json = saved
 
 
-def t_same_collection_layers_get_distinct_names():
+def t_same_collection_layers_read_as_collection_and_date_with_the_id_in_the_detail():
     items = [{"catalog": "planetary-computer", "collection": "esa-worldcover", "id": f"ESA_WorldCover_10m_2021_v200_{t}_Map", "bbox": [0, 0, 1, 1]}
              for t in ("N45W123", "N45W120", "N42W123", "N42W120", "N39W123", "N39W120")]
     out = tools._expand_coverage_set({"type": "coverage_set", "set": {"items": items}, "name": "WorldCover 2021"})
-    assert len({l["name"] for l in out}) == 6, [l["name"] for l in out]
+    assert {l["name"] for l in out} == {"WorldCover 2021"}, [l["name"] for l in out]
+    assert len({l["detail"] for l in out}) == 6 and all("_Map" in l["detail"] for l in out)
+
+
+def t_layer_panel_folds_at_phone_width_like_the_legend():
+    t = tools._MAP_TEMPLATE
+    assert '<details class="fold" open>' in t and 'innerWidth <= 500' in t and "#panel details" in t
+    assert "max-width: calc(100vw - 150px)" in t  # clear of the STACK button
 
 
 def t_next_pass_names_the_night_passes_it_dropped():
