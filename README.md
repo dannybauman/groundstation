@@ -21,7 +21,7 @@ Everything runs against public, keyless endpoints, so it demos anywhere with not
 
 ## Real examples
 
-All 3 are real runs on real data.
+All 3 are real runs on real data. The screenshots and the examples here come from the field tests: quick examples that open the door to digging in further, and a way to learn which stack to consider for your own use case. The newest page is `docs/field-test-2026-10-26-no18.html`; `docs/examples.md` is the first edition.
 
 **"What's burning near Chelan County?"** One scan found the 2 active wildfires (Navarre Coulee, Chelan Hills), correlated them with 14 straight days of zero rain and a 33°C heat peak in the forecast, and pointed at the 3 sub-1%-cloud scenes from ignition day.
 
@@ -140,7 +140,7 @@ Any TiTiler deployment with the `/stac` router works. One caveat: NAIP and Lands
 
 ## More
 
-- `docs/field-test-2026-10-26-no14.html`: the newest field test (№14). Real prompts run through the agent and graded, with the fixes each round produced; `docs/examples.md` is the first edition. The pages are at `/docs/field-test.html` when the console is running
+- `docs/field-test-2026-10-26-no18.html`: the newest field test (№18). Real prompts run through the agent and graded, with the fixes each round produced; `docs/examples.md` is the first edition. The pages are at `/docs/field-test.html` when the console is running
 - `docs/architecture.md`: how it fits together, the design decisions, and what is deliberately not built
 - `docs/plan-2026-10-devseed-stack.md`: where it is going next: Zarr through titiler.xyz, HRRR smoke in the briefs, cross-catalog discovery, stac-geoparquet archives, and a hosted toolset on mcp-toolsets-runtime, each tied to the Development Seed work it rides on
 - Deep exploration hands off to [stac-map](https://github.com/developmentseed/stac-map) (Pete Gadomski), which renders COGs client-side with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster) (Kyle Barron). Tiling and pixel math ride [TiTiler](https://github.com/developmentseed/titiler)
