@@ -102,12 +102,31 @@ Then restart Claude Code. `scripts/doctor.sh` says which copy you are running an
 
 ## Things to ask it
 
-- "Find the clearest Sentinel-2 scene of Lake Chelan from the past 2 weeks, tell me what's burning nearby, and give me a map I can share."
-- "How much surface water is on the Barotse Floodplain right now vs early March? Use NDWI, give me numbers and a swipe map."
-- "What does NASA VEDA have on the Caldor fire? Put the burn severity layer over a current scene."
-- "Any active flood alerts along the Rio Grande between El Paso and Laredo? Alerts, week-ahead rain, latest usable imagery, one map."
-- "Give me a 3D fly-through of Torres del Paine."
-- "Make me a postcard of that I could post."
+Paste any of these into your agent as is.
+
+```text
+Find the clearest Sentinel-2 scene of Lake Chelan from the past 2 weeks, tell me what's burning nearby, and give me a map I can share.
+```
+
+```text
+How much surface water is on the Barotse Floodplain right now vs early March? Use NDWI, give me numbers and a swipe map.
+```
+
+```text
+What does NASA VEDA have on the Caldor fire? Put the burn severity layer over a current scene.
+```
+
+```text
+Any active flood alerts along the Rio Grande between El Paso and Laredo? Alerts, week-ahead rain, latest usable imagery, one map.
+```
+
+```text
+Give me a 3D fly-through of Torres del Paine.
+```
+
+```text
+Make me a postcard of that I could post.
+```
 
 The first `search_datasets` call takes 20 to 30 seconds while collection lists cache. After that it is instant.
 
