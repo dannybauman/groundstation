@@ -2,7 +2,7 @@
 
 Earth data, agent ready. A [Development Seed](https://developmentseed.org) MCP prototype giving easy access to a variety of cloud-native geospatial stacks, with visual examples and repeatable scenario workflows called "field tests".
 
-Ask a question about any place on Earth. groundstation finds the satellite imagery, active fires and disaster alerts, weather, does the pixel math, and returns data, stories, and interactive maps. 3 ways in:
+Ask a question about any place on Earth. groundstation finds satellite imagery, active fires, disaster alerts and weather, does the pixel math, and returns data, stories and interactive maps. 3 ways in:
 
 ```mermaid
 flowchart LR
@@ -33,7 +33,7 @@ All 3 are real runs on real data.
 
 ## Quickstart
 
-You need [uv](https://docs.astral.sh/uv/). Then, in Claude Code:
+You need [uv](https://docs.astral.sh/uv/). In Claude Code, install the plugin:
 
 ```
 /plugin marketplace add dannybauman/groundstation
@@ -62,6 +62,21 @@ uv run --group web groundstation-web
 uv run briefing/brief.py --place "Chelan County, Washington" --days 10
 uv run briefing/brief.py --fleet briefing/fleet.json
 ```
+
+Any other MCP client (Codex, Gemini CLI, Cursor, Claude Desktop, a local model's client) takes the same command. Most read a config like this:
+
+```json
+{
+  "mcpServers": {
+    "groundstation": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/groundstation", "run", "groundstation"]
+    }
+  }
+}
+```
+
+The skills in `skills/` are plain markdown, so an agent without plugin support can read them as instructions.
 
 With the plugin installed you can also just ask. "demo groundstation", "is groundstation running", "open the field tests" and "brief me on Lisbon" all run through the `groundstation` skill, with no commands to remember.
 
@@ -115,7 +130,7 @@ The skills in `skills/` carry the judgment: which catalog for what, asset conven
 
 ## Earth briefs you
 
-The briefing engine inverts the interaction. Instead of you asking the right question, Earth reports in. Each brief has fresh scenes, events, weather, an NDVI change signal against last month, a CALM, WATCH or ACT level, and suggested next steps, as a shareable HTML page. It keeps a memory per place, so "what changed" means changed since the last run.
+Briefings run without anyone asking. Each brief has fresh scenes, events, weather, an NDVI change signal against last month, a CALM, WATCH or ACT level, and suggested next steps, as a shareable HTML page. It keeps a memory per place, so "what changed" means changed since the last run.
 
 Scheduling it with cron or launchd, Slack delivery, and running the synthesis on a local model are in `docs/briefing.md`.
 
@@ -132,7 +147,7 @@ Any TiTiler deployment with the `/stac` router works. One caveat: NAIP and Lands
 
 ## Reliability
 
-3 layers of checks, because a generative product without evals is a demo, not a tool:
+3 layers of checks:
 
 - `uv run evals/unit_checks.py`: offline and deterministic, runs in CI on every push
 - `uv run evals/run_evals.py`: live checks against the real endpoints, on demand and weekly in CI
@@ -140,7 +155,7 @@ Any TiTiler deployment with the `/stac` router works. One caveat: NAIP and Lands
 
 ## More
 
-- `docs/field-test-2026-10-26-no14.html`: the newest field test (№14). Real prompts run through the agent and graded, with the fixes each round produced; `docs/examples.md` is the first edition. The pages are at `/docs/field-test.html` when the console is running
+- `docs/field-test-*.html`: the field tests, one page per round, the highest № is the newest. Each runs real prompts through an agent, grades the answers, and lists the fixes that round produced. `docs/field-test.html` and `docs/examples.md` are the first edition, served at `/docs/field-test.html` when the console is running
 - `docs/architecture.md`: how it fits together, the design decisions, and what is deliberately not built
 - `docs/plan-2026-10-devseed-stack.md`: where it is going next: Zarr through titiler.xyz, HRRR smoke in the briefs, cross-catalog discovery, stac-geoparquet archives, and a hosted toolset on mcp-toolsets-runtime, each tied to the Development Seed work it rides on
 - Deep exploration hands off to [stac-map](https://github.com/developmentseed/stac-map) (Pete Gadomski), which renders COGs client-side with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster) (Kyle Barron). Tiling and pixel math ride [TiTiler](https://github.com/developmentseed/titiler)
