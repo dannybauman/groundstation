@@ -30,15 +30,15 @@ Everything runs against public, keyless endpoints, so it works anywhere with not
 
 ## Examples
 
-All 3 are real runs on real data. The screenshots and the examples here come from the field tests: quick examples that open the door to digging in further, and a way to learn which stack to consider for your own use case (`docs/field-test-*.html`, highest number is newest).
+The 3 examples are the cards from field test 20 ([`docs/field-test-2026-10-27-no20.html`](docs/field-test-2026-10-27-no20.html)), real runs on real data: quick examples that open the door to digging in further, and a way to learn which stack to consider for your own use case (`docs/field-test-*.html`, highest number is newest).
 
-"What's burning near Chelan County?" One scan found the 2 active wildfires (Navarre Coulee, Chelan Hills), correlated them with 14 straight days of zero rain and a 33°C heat peak in the forecast, and pointed at the 3 sub-1%-cloud scenes from ignition day.
+"Mt St Helens eruption 1980" The tools found 2 Landsat MSS scenes from the same orbit, 1979-09-12 and 1980-09-15, both 0.0% cloud. Over the box around the mountain the median vegetation index fell from 0.2691 to -0.0043. A swipe map puts the 2 scenes side by side. [Map](docs/img/ft20-st-helens-map.html)
 
-"How did vegetation change around Wenatchee?" One `compare_dates` call matched 2 scenes from the same Sentinel-2 tile (10TFT, both about 1% cloud) and answered: NDVI 0.46 → 0.63 between May 28 and July 5, a +36% spring green-up, with a swipe map to see it.
+"Hurricane Patricia 2015" Landsat 8 has the coast on 2015-10-13 and 2015-11-30, and the median vegetation index over a box on the land went from 0.8712 to 0.8226. The after scene is cloudier, so that number is a hint, not a damage measure. [Map](docs/img/ft20-patricia-map.html)
 
-"Watch these 4 places every morning." The fleet sweep triaged Chelan ACT (fires + heat), Efate and Laredo WATCH, Barotse CALM ("NDVI 0.397 → 0.395, normal dry-season drift, not a distress signal"). On its second run the Chelan brief opened with *"unchanged since this morning's earlier run"*. It remembers yesterday and only makes noise about what's new.
+"Switzerland's glaciers are disappearing at an alarming rate, losing more than 5% of their ice volume in 2026 alone" Sentinel-2 has the Great Aletsch glacier on 2017-08-23 and 2026-08-30, and the late-summer snow and ice index rose 7.9%. That is snow on the day, not ice volume, so the 5% volume loss stays with the glacier monitoring network's measurement. The tools showed the glacier on both dates with a swipe map. [Map](docs/img/ft20-aletsch-map.html)
 
-<img src="docs/img/swipe-compare.jpg" width="680" alt="NDVI swipe comparison over Portland">
+<img src="docs/img/ft20-st-helens-map.png" width="680" alt="Mt St Helens before and after the 1980 eruption, Landsat MSS swipe">
 
 ## Quickstart
 
@@ -152,7 +152,7 @@ The first `search_datasets` call takes a few seconds while collection lists cach
 
 Numbers come with caveats. If a change figure sits on a cloudy scene, or a statistic covers a whole tile, or the tiler could not read a scene, the tool says so next to the number. Details in `docs/adr-caveats.md`.
 
-Every map, postcard and brief has a Stack panel. It lists what made it, in order. `docs/stack.md` is the list, and a new tool is one line.
+Every map and postcard has a Stack panel, and a brief has it on its map, not on the page. It lists what made it, in order. `docs/stack.md` is the list, and a new tool is one line.
 
 The skills in `skills/` tell the agent which catalog to use, how assets are named, how to compute the common indexes, and to end every spatial answer with a map.
 
@@ -175,7 +175,7 @@ Any TiTiler with the `/stac` router works. One catch: NAIP and Landsat on Earth 
 
 ## Checks
 
-- `uv run evals/unit_checks.py`: offline, runs in CI on every push
+- `uv run evals/unit_checks.py`: offline, runs in CI on pushes to main and on pull requests
 - `uv run evals/run_evals.py`: live, against the real endpoints, on demand and weekly in CI
 - `uv run evals/brief_checks.py`: every event a brief mentions has to be in its input data
 
@@ -183,7 +183,7 @@ Any TiTiler with the `/stac` router works. One catch: NAIP and Landsat on Earth 
 
 - `docs/field-test-*.html`: the field tests, one page per round, highest № is newest. Real prompts, graded answers, and what got fixed. `docs/field-test.html` and `docs/examples.md` are the first edition, served at `/docs/field-test.html` when the console is running
 - `docs/architecture.md`: how it fits together and what is left out on purpose
-- `docs/plan-2026-10-devseed-stack.md`: what is next: Zarr through titiler.xyz, HRRR smoke in briefs, cross-catalog discovery, stac-geoparquet archives, a hosted toolset on mcp-toolsets-runtime
+- `docs/plan-2026-10-devseed-stack.md`: the plan, most of it shipped (the smoke forecast, Zarr stores, cross-catalog search, stac-geoparquet archives); the open items are at the end
 - For deeper exploration, [stac-map](https://github.com/developmentseed/stac-map) renders COGs in the browser with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster). Tiles and pixel math use [TiTiler](https://github.com/developmentseed/titiler)
 
 MIT licensed, see `LICENSE`.
