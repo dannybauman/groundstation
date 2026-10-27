@@ -1904,7 +1904,8 @@ def compute_statistics(
     no_rb = bool(item) and not any(a.get("raster:bands") for a in item.get("assets", {}).values())
     convention: dict[str, tuple[float, float]] = {}
     baseline = str((item.get("properties") or {}).get("s2:processing_baseline") or "") if item else ""
-    if no_rb and catalog == "planetary-computer" and collection_id == "sentinel-2-l2a" and baseline:
+    bad_baseline = bool(baseline) and not re.fullmatch(r"\d\d\.\d\d", baseline)
+    if no_rb and catalog == "planetary-computer" and collection_id == "sentinel-2-l2a" and baseline and not bad_baseline:
         # PC pixels keep the +1000 (red median 1930 vs 926 on earth-search), so the offset is real from 04.00 on
         # ponytail: string compare on the NN.NN baseline, fine until a baseline passes 99.99
         off = -0.1 if baseline >= "04.00" else 0
@@ -1917,6 +1918,9 @@ def compute_statistics(
             if (sc, off) != (1, 0):
                 factors[key] = (sc, off)
     params: list[tuple[str, str]] = [("max_size", "512")]
+    if apply_scaling and convention:
+        # digital number 0 is nodata; masked in the read, or the offset would turn it into -0.1 and into the index
+        params.append(("nodata", "0"))
     corrected = False
     raw_expression = expression
     if expression:
@@ -2024,6 +2028,18 @@ def compute_statistics(
                 applied = True
         if corrected or applied:
             out["scaling_applied"] = True
+        # a pixel under digital number 1000 is below 0 after the -0.1 offset, so (a-b)/(a+b) is undefined there
+        flat = re.sub(r"\s+", "", raw_expression or "")
+        m = re.fullmatch(r"\((\w+)-(\w+)\)/\((\w+)\+(\w+)\)", flat)
+        st = out.get(raw_expression)
+        if corrected and any(o for _, o in factors.values()) and m and {m[3], m[4]} == {m[1], m[2]} and isinstance(st, dict):
+            lo, hi = st.get("min"), st.get("max")
+            if (lo is not None and lo < -1) or (hi is not None and hi > 1):
+                out["range_note"] = (
+                    f"the index ran from {lo:.4g} to {hi:.4g}, outside -1 to 1: dark pixels (digital number under 1000) "
+                    "go below 0 after the -0.1 offset, so the index is undefined there; the values are not clamped "
+                    "and the data is unchanged, read the percentiles for the usable range"
+                )
     try:
         item = item or {}
         if not aoi_geojson:
@@ -2061,6 +2077,8 @@ def compute_statistics(
         elif no_rb and collection_id.startswith("sentinel-2") and not out.get("scaling_applied"):
             out["scaling_applied"] = False
             out["scaling_note"] = (
+                f"processing baseline '{baseline}' is not in the NN.NN form the offset rule needs; statistics are raw digital numbers"
+                if bad_baseline and catalog == "planetary-computer" and collection_id == "sentinel-2-l2a" else
                 "values are raw digital numbers: this Sentinel-2 item carries no raster:bands and "
                 f"groundstation knows no scale or offset convention it can apply for {catalog} here, so nothing is applied"
             )
@@ -4217,7 +4235,7 @@ def compare_dates(
         try:
             # without the bbox the mean is the whole Sentinel-2 tile, not the place asked about
             s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox, apply_scaling=apply_scaling)
-            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_applied", "scaling_note") if k in s})
+            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_applied", "scaling_note", "range_note") if k in s})
             if s.get("band_scaling"):
                 scaling[it["id"]] = s["band_scaling"]
             return round(next(iter(s.values()))["mean"], 4)
