@@ -1195,6 +1195,36 @@ def t_ndvi_change_baseline_prefers_coverage():
         tools.search_imagery, tools.compute_statistics = saved
 
 
+def t_brief_ndvi_change_is_over_the_place():
+    # stop 35: both means are clipped to the place box, the label names the place and the covered share
+    saved = (tools.search_imagery, tools.compute_statistics)
+    box = [0, 0, 1, 1]
+    best = {"id": "S2A_10TFK_20260601_0_L2A", "collection": "sentinel-2-l2a", "datetime": "2026-06-01T18:00:00Z",
+            "cloud_cover": 3.0, "bbox": [-1, -1, 2, 2], "covers_aoi_pct": 47.6}
+    ref = {"id": "S2B_10TFK_20260503_0_L2A", "collection": "sentinel-2-l2a", "datetime": "2026-05-03T18:00:00Z",
+           "cloud_cover": 5.0, "bbox": [-1, -1, 2, 2]}
+    calls = []
+
+    def stats(cat, coll, iid, **kw):
+        calls.append((iid, kw.get("bbox")))
+        if kw.get("bbox") != box:
+            return {"nd": {"mean": 0.2}}  # the whole-tile number the brief must no longer carry
+        return {"nd": {"mean": 0.7 if iid == best["id"] else 0.5}}
+
+    tools.search_imagery = lambda *a, **kw: {"items": [ref]}
+    tools.compute_statistics = stats
+    try:
+        out = brief.ndvi_change(best, box, dt.date(2026, 6, 10), 14, "Chelan County")
+        assert sorted(calls) == sorted([(best["id"], box), (ref["id"], box)]), calls
+        assert out["current"]["mean"] == 0.7 and out["baseline"]["mean"] == 0.5 and out["delta"] == 0.2, out
+        assert out["metric"] == "NDVI (vegetation) over Chelan County, 47.6% of it covered", out["metric"]
+        full = brief.ndvi_change(dict(best, covers_aoi_pct=100.0), box, dt.date(2026, 6, 10), 14, "Chelan County")
+        assert full["metric"] == "NDVI (vegetation) over Chelan County", full["metric"]
+        assert "MGRS tile 10TFK" in brief.ndvi_change(best, box, dt.date(2026, 6, 10), 14)["metric"]
+    finally:
+        tools.search_imagery, tools.compute_statistics = saved
+
+
 def t_expression_defaults_rescale():
     t = tools.tile_url_template("earth-search", "sentinel-2-l2a", "X", expression="(nir-red)/(nir+red)")
     assert "rescale=-1%2C1" in t
