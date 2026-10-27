@@ -56,6 +56,8 @@ say each caveat in the same sentence as the delta.
 If a "previous_run" block is present, "What changed" means changed SINCE THAT RUN: name events that
 appeared, escalated, or cleared since it, and say plainly when today is calmer than the last run
 (e.g. "yesterday's WATCH stands down"). Deltas against the last run outrank everything else.
+Its "scene_vs_last_run" line is computed: say "nothing has changed" ONLY when it reads
+"same pick, same baseline, same mean"; otherwise say what it says.
 
 DATA:
 """
@@ -201,6 +203,44 @@ def synthesize(data: dict) -> str:
         for i in data["imagery"].get("items", [])[:5]
     ]
     return "\n".join(lines)
+
+
+SAME_SCENE = "same pick, same baseline, same mean"
+
+
+def _scene_vs_last_run(prev: dict, best: dict | None, change: dict | None) -> str:
+    """Deterministic: compare this run's pick, NDVI baseline and mean with the stored run."""
+    if "pick_id" not in prev:
+        return "the prior run carried no scene ids, so whether the pick or baseline moved is unknown"
+    pick, old_pick = (best["id"] if best else None), prev.get("pick_id")
+    base, old_base = (change["baseline"]["scene"] if change else None), prev.get("baseline_id")
+    mean, old_mean = (change["current"]["mean"] if change else None), prev.get("ndvi_mean")
+    out = []
+    if not pick or not old_pick:
+        if pick or old_pick:
+            out.append(f"{'this run has' if not pick else 'the last run had'} no scene pick, so unchanged cannot be claimed")
+    elif pick != old_pick:
+        out.append(f"pick changed: {old_pick} -> {pick}")
+    if None in (base, old_base, mean, old_mean):
+        who = "neither run has an" if base is None and old_base is None else "this run has no" if base is None else "the last run had no"
+        out.append(f"{who} NDVI comparison, so unchanged cannot be claimed")
+    else:
+        if base != old_base:
+            out.append(f"baseline changed: {old_base} -> {base}")
+        if mean != old_mean:
+            out.append(f"NDVI mean {old_mean} -> {mean}")
+    return "; ".join(out) or SAME_SCENE
+
+
+def _ensure_scene_note(md: str, line: str | None) -> str:
+    """Deterministic: a moved pick or baseline is said in the brief, not left to the model.
+    The prompt asks for it; this guarantees it."""
+    if not line or line == SAME_SCENE or line in md:
+        return md
+    note = f"Since the last run: {line}."
+    if "## What changed\n" in md:
+        return md.replace("## What changed\n", f"## What changed\n{note}\n", 1)
+    return f"{md.rstrip()}\n\n{note}\n"
 
 
 def _ensure_transition_note(md: str, prev_alert: str | None) -> str:
@@ -408,12 +448,16 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     state_path = Path(__file__).parent / "state" / f"{slug}.json"
     if state_path.exists():
         try:
-            data["previous_run"] = json.loads(state_path.read_text(encoding="utf-8"))
+            prev = json.loads(state_path.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            prev = None
+        if isinstance(prev, dict):
+            prev["scene_vs_last_run"] = _scene_vs_last_run(prev, best, change)
+            data["previous_run"] = prev
     md = synthesize(data)
     md = _ensure_source_honesty(md, data)
     md = _ensure_transition_note(md, (data.get("previous_run") or {}).get("alert"))
+    md = _ensure_scene_note(md, (data.get("previous_run") or {}).get("scene_vs_last_run"))
 
     html = (
         PAGE.replace("__PLACE__", place)
@@ -444,6 +488,8 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         "alert": result["alert"],
         "event_titles": [e.get("title") for e in events.get("eonet", []) + events.get("gdacs", [])][:20],
         "ndvi_mean": change["current"]["mean"] if change else None,
+        "pick_id": best["id"] if best else None,
+        "baseline_id": change["baseline"]["scene"] if change else None,
         "scene_count": imagery.get("count"),
         "tldr": result["tldr"][:200],
     }, indent=1), encoding="utf-8")
