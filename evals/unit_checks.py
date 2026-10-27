@@ -1316,6 +1316,12 @@ def t_brief_says_when_the_baseline_moved():
     assert same == "same pick, same baseline, same mean" and "changed" not in same, same
     old = brief._scene_vs_last_run({"ndvi_mean": 0.544}, best, change)
     assert "no scene ids" in old and "same" not in old, old
+    gone = brief._scene_vs_last_run(prev, best, None)
+    assert "this run has no NDVI comparison" in gone and "None" not in gone and "same" not in gone, gone
+    noted = brief._ensure_scene_note(GOOD_MD, out)
+    assert "## What changed\nSince the last run: baseline changed: S2B_10UFU_20261018 -> S2C_10UFU_20261003." in noted, noted
+    assert brief._ensure_scene_note(GOOD_MD, same) == GOOD_MD and brief._ensure_scene_note(noted, out) == noted
+    assert _fixture(noted, events=[{"title": "Wildfire NAVARRE COULEE, Chelan, Washington"}]) == []
 
 
 def t_brief_checks_pass():

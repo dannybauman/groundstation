@@ -56,8 +56,8 @@ say each caveat in the same sentence as the delta.
 If a "previous_run" block is present, "What changed" means changed SINCE THAT RUN: name events that
 appeared, escalated, or cleared since it, and say plainly when today is calmer than the last run
 (e.g. "yesterday's WATCH stands down"). Deltas against the last run outrank everything else.
-Its "scene_vs_last_run" line is computed, not a guess: say "nothing has changed" ONLY when it reads
-"same pick, same baseline, same mean"; when it names a changed pick or baseline, say that instead.
+Its "scene_vs_last_run" line is computed: say "nothing has changed" ONLY when it reads
+"same pick, same baseline, same mean"; otherwise say what it says.
 
 DATA:
 """
@@ -205,18 +205,37 @@ def synthesize(data: dict) -> str:
     return "\n".join(lines)
 
 
+SAME_SCENE = "same pick, same baseline, same mean"
+
+
 def _scene_vs_last_run(prev: dict, best: dict | None, change: dict | None) -> str:
     """Deterministic: compare this run's pick, NDVI baseline and mean with the stored run."""
     if "pick_id" not in prev:
         return "the prior run carried no scene ids, so whether the pick or baseline moved is unknown"
-    now = {"pick": best["id"] if best else None,
-           "baseline": change["baseline"]["scene"] if change else None,
-           "mean": change["current"]["mean"] if change else None}
-    old = {"pick": prev.get("pick_id"), "baseline": prev.get("baseline_id"), "mean": prev.get("ndvi_mean")}
-    out = [f"{k} changed: {old[k]} -> {now[k]}" for k in ("pick", "baseline") if now[k] != old[k]]
-    if now["mean"] != old["mean"]:
-        out.append(f"NDVI mean {old['mean']} -> {now['mean']}")
-    return "; ".join(out) or "same pick, same baseline, same mean"
+    pick, old_pick = (best["id"] if best else None), prev.get("pick_id")
+    base, old_base = (change["baseline"]["scene"] if change else None), prev.get("baseline_id")
+    mean, old_mean = (change["current"]["mean"] if change else None), prev.get("ndvi_mean")
+    out = [f"pick changed: {old_pick} -> {pick}"] if pick != old_pick else []
+    if None in (base, old_base, mean, old_mean):
+        who = "neither run has" if base is None and old_base is None else "this run has" if base is None else "the last run had"
+        out.append(f"{who} no NDVI comparison, so unchanged cannot be claimed")
+    else:
+        if base != old_base:
+            out.append(f"baseline changed: {old_base} -> {base}")
+        if mean != old_mean:
+            out.append(f"NDVI mean {old_mean} -> {mean}")
+    return "; ".join(out) or SAME_SCENE
+
+
+def _ensure_scene_note(md: str, line: str | None) -> str:
+    """Deterministic: a moved pick or baseline is said in the brief, not left to the model.
+    The prompt asks for it; this guarantees it."""
+    if not line or line == SAME_SCENE or line in md:
+        return md
+    note = f"Since the last run: {line}."
+    if "## What changed\n" in md:
+        return md.replace("## What changed\n", f"## What changed\n{note}\n", 1)
+    return f"{md.rstrip()}\n\n{note}\n"
 
 
 def _ensure_transition_note(md: str, prev_alert: str | None) -> str:
@@ -424,13 +443,16 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     state_path = Path(__file__).parent / "state" / f"{slug}.json"
     if state_path.exists():
         try:
-            data["previous_run"] = json.loads(state_path.read_text(encoding="utf-8"))
-            data["previous_run"]["scene_vs_last_run"] = _scene_vs_last_run(data["previous_run"], best, change)
+            prev = json.loads(state_path.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            prev = None
+        if isinstance(prev, dict):
+            prev["scene_vs_last_run"] = _scene_vs_last_run(prev, best, change)
+            data["previous_run"] = prev
     md = synthesize(data)
     md = _ensure_source_honesty(md, data)
     md = _ensure_transition_note(md, (data.get("previous_run") or {}).get("alert"))
+    md = _ensure_scene_note(md, (data.get("previous_run") or {}).get("scene_vs_last_run"))
 
     html = (
         PAGE.replace("__PLACE__", place)
