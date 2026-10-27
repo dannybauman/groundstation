@@ -1,6 +1,6 @@
 # groundstation
 
-Earth data, agent ready. A [Development Seed](https://developmentseed.org) MCP prototype giving easy access to a variety of cloud-native geospatial stacks, with visual examples and repeatable scenario workflows called "field tests".
+Earth data, agent ready. A [Development Seed](https://developmentseed.org) MCP prototype giving easy access to a variety of cloud-native geospatial stacks, with visual examples and repeatable workflows called "field tests".
 
 Ask a question about any place on Earth. groundstation finds the satellite imagery, active fires and disaster alerts, weather, does the pixel math, and returns data, stories, and interactive maps. 3 ways in:
 
