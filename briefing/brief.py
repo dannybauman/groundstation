@@ -56,6 +56,8 @@ say each caveat in the same sentence as the delta.
 If a "previous_run" block is present, "What changed" means changed SINCE THAT RUN: name events that
 appeared, escalated, or cleared since it, and say plainly when today is calmer than the last run
 (e.g. "yesterday's WATCH stands down"). Deltas against the last run outrank everything else.
+Its "scene_vs_last_run" line is computed, not a guess: say "nothing has changed" ONLY when it reads
+"same pick, same baseline, same mean"; when it names a changed pick or baseline, say that instead.
 
 DATA:
 """
@@ -201,6 +203,20 @@ def synthesize(data: dict) -> str:
         for i in data["imagery"].get("items", [])[:5]
     ]
     return "\n".join(lines)
+
+
+def _scene_vs_last_run(prev: dict, best: dict | None, change: dict | None) -> str:
+    """Deterministic: compare this run's pick, NDVI baseline and mean with the stored run."""
+    if "pick_id" not in prev:
+        return "the prior run carried no scene ids, so whether the pick or baseline moved is unknown"
+    now = {"pick": best["id"] if best else None,
+           "baseline": change["baseline"]["scene"] if change else None,
+           "mean": change["current"]["mean"] if change else None}
+    old = {"pick": prev.get("pick_id"), "baseline": prev.get("baseline_id"), "mean": prev.get("ndvi_mean")}
+    out = [f"{k} changed: {old[k]} -> {now[k]}" for k in ("pick", "baseline") if now[k] != old[k]]
+    if now["mean"] != old["mean"]:
+        out.append(f"NDVI mean {old['mean']} -> {now['mean']}")
+    return "; ".join(out) or "same pick, same baseline, same mean"
 
 
 def _ensure_transition_note(md: str, prev_alert: str | None) -> str:
@@ -409,6 +425,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     if state_path.exists():
         try:
             data["previous_run"] = json.loads(state_path.read_text(encoding="utf-8"))
+            data["previous_run"]["scene_vs_last_run"] = _scene_vs_last_run(data["previous_run"], best, change)
         except Exception:
             pass
     md = synthesize(data)
@@ -444,6 +461,8 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         "alert": result["alert"],
         "event_titles": [e.get("title") for e in events.get("eonet", []) + events.get("gdacs", [])][:20],
         "ndvi_mean": change["current"]["mean"] if change else None,
+        "pick_id": best["id"] if best else None,
+        "baseline_id": change["baseline"]["scene"] if change else None,
         "scene_count": imagery.get("count"),
         "tldr": result["tldr"][:200],
     }, indent=1), encoding="utf-8")

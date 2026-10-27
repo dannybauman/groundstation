@@ -1305,6 +1305,19 @@ def t_brief_calm_over_failed_source_becomes_watch():
     assert brief._ensure_source_honesty(md, {"weather_error": "x"}).count("WATCH") == 1
 
 
+def t_brief_says_when_the_baseline_moved():
+    best = {"id": "S2C_10UFU_20261024"}
+    change = {"baseline": {"scene": "S2C_10UFU_20261003"}, "current": {"mean": 0.544}}
+    prev = {"pick_id": "S2C_10UFU_20261024", "baseline_id": "S2B_10UFU_20261018", "ndvi_mean": 0.544}
+    out = brief._scene_vs_last_run(prev, best, change)
+    assert "baseline changed" in out and "S2B_10UFU_20261018" in out and "S2C_10UFU_20261003" in out, out
+    assert "pick changed" not in out and "same" not in out, out
+    same = brief._scene_vs_last_run(dict(prev, baseline_id="S2C_10UFU_20261003"), best, change)
+    assert same == "same pick, same baseline, same mean" and "changed" not in same, same
+    old = brief._scene_vs_last_run({"ndvi_mean": 0.544}, best, change)
+    assert "no scene ids" in old and "same" not in old, old
+
+
 def t_brief_checks_pass():
     problems = _fixture(GOOD_MD, events=[{"title": "Wildfire NAVARRE COULEE, Chelan, Washington"}])
     assert problems == [], problems
