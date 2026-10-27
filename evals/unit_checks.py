@@ -3092,6 +3092,28 @@ def t_search_imagery_names_an_empty_window_at_the_cap():
     assert "note" not in bare, bare
 
 
+def t_search_imagery_folds_reprocessed_duplicates():
+    # Field test 18: Planetary Computer served a reprocessed scene twice and the reason compared it with itself
+    saved = tools._client.post
+    box = {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}
+    feat = lambda i, base: {"id": i, "collection": "sentinel-2-l2a", "bbox": [0, 0, 1, 1], "geometry": box, "assets": {},
+                            "properties": {"datetime": "2023-08-18T16:38:41Z", "eo:cloud_cover": 0.0, "s2:mgrs_tile": "15SXS", "s2:processing_baseline": base}}
+    other = {**feat("S2A_OTHER_DAY", "05.09"), "properties": {"datetime": "2023-08-10T16:38:41Z", "eo:cloud_cover": 30.0, "s2:mgrs_tile": "15SXS"}}
+    class R:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"features": [feat("S2A_T15SXS_20230819", "05.09"), feat("S2A_T15SXS_20241026", "05.10"), other]}
+    tools._client.post = lambda *a, **k: R()
+    try:
+        out = tools.search_imagery("planetary-computer", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1])
+    finally:
+        tools._client.post = saved
+    ids = [i["id"] for i in out["items"]]
+    assert out["count"] == 2 and out["folded_duplicates"] == 1 and "S2A_T15SXS_20241026" in ids and "S2A_T15SXS_20230819" not in ids, out
+    assert "folded" in out["note"], out
+    assert "S2A_T15SXS_20241026" == out["recommended"]["id"] and "0.0% cloud but" not in out["recommended"]["reason"], out["recommended"]
+
+
 def t_compare_dates_cloud_caveat_names_side_and_scene():
     # Field test 15: Rolling Fork's before scene was 46% cloud and only the cloud field said so
     ok = lambda **kw: {"map_path": "x.html"}

@@ -1639,6 +1639,7 @@ def search_imagery(
             r = _client.post(f"{base}/search", json=body)
         r.raise_for_status()
         feats = r.json().get("features", [])
+    feats, folded = _fold_reprocessed(feats)
     items = [_compact_item(catalog, f) for f in feats]
     for it in items:
         if it.get("footprint"):
@@ -1651,6 +1652,10 @@ def search_imagery(
     if not feats and max_cloud_cover is not None:
         result["note"] = (f"this window returned 0 scenes at max_cloud_cover {max_cloud_cover:g}; "
                           "a higher cap or a wider window may find some")
+    if folded:
+        result["folded_duplicates"] = folded
+        result["note"] = (f"{folded} reprocessed cop{'y' if folded == 1 else 'ies'} folded into the original scene "
+                          "(same date, tile and footprint); the newest processing is kept")
     if archive:
         result["archive"] = archive
     readable = [it for it in items if "read_note" not in it]
@@ -4075,6 +4080,29 @@ def _delta_caveats(
             "absolute change reads as a large percentage. Trust delta over delta_pct."
         )
     return out
+
+
+def _fold_reprocessed(feats: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Collapse STAC features sharing date, MGRS tile and footprint to the newest processing
+    (higher s2:processing_baseline, then later id); a feature with no tile or bbox is never folded"""
+    kept: dict[Any, dict[str, Any]] = {}
+    out: list[Any] = []
+    for f in feats:
+        p = f.get("properties") or {}
+        tile = p.get("s2:mgrs_tile") or p.get("grid:code")
+        when = (p.get("datetime") or p.get("start_datetime") or "")[:10]
+        box = f.get("bbox")
+        if not (tile and when and box):
+            out.append(f)
+            continue
+        key = (when, tile, tuple(round(x, 3) for x in box))  # copies differ past the 4th decimal
+        old = kept.get(key)
+        if old is None:
+            kept[key] = f
+            out.append(key)
+        elif (str(p.get("s2:processing_baseline") or ""), f.get("id") or "") > (str((old.get("properties") or {}).get("s2:processing_baseline") or ""), old.get("id") or ""):
+            kept[key] = f
+    return [kept[o] if isinstance(o, tuple) else o for o in out], len(feats) - len(out)
 
 
 def _scene_key(it: dict[str, Any]) -> tuple[float, float, str]:
