@@ -15,7 +15,14 @@ flowchart LR
     T --> G["🗺 shareable map artifacts<br/>📄 draft briefs"]
 ```
 
-Everything runs against public, keyless endpoints, so it demos anywhere with nothing to sign up for.
+Everything runs against public, keyless endpoints, so it works anywhere with nothing to sign up for.
+
+## What it lets an agent do
+
+- **Answer a question about a place.** Find the right scene, do the pixel math, and come back with numbers, their caveats, and a map to share
+- **Think alongside you.** In a brainstorm or design session, pull real imagery and numbers for a place while the idea is still forming, and sketch a map the room can react to
+- **Explore before committing.** See what data exists for a place, at what resolution and how fresh, before anyone scopes a project around it
+- **Watch places and report back.** Brief you each morning on what changed, and stay quiet about what didn't
 
 ![the console scanning the Barotse Floodplain](docs/img/console.jpg)
 
