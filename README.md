@@ -2,7 +2,7 @@
 
 Earth data, agent ready. A [Development Seed](https://developmentseed.org) MCP prototype giving easy access to a variety of cloud-native geospatial stacks, with visual examples and repeatable workflows called "field tests".
 
-Cloud-native geospatial exists because the satellite archives grew to petabytes, and downloading whole scenes to look at one field stopped making sense. With STAC to find the data, cloud-optimized formats (COG, Zarr) to read only the pixels you need, and TiTiler to render them on demand, any question about any place can be answered in seconds against the open archive. That is the exciting part: an agent can now reach the whole Earth record as easily as it reaches a web page.
+Cloud-native geospatial exists because the satellite archives grew to petabytes, and downloading whole scenes to look at one field stopped making sense. With STAC to find the data, cloud-optimized formats (COG, Zarr) to read only the pixels you need, and TiTiler to render them on demand, most questions about a place can be answered in seconds against the open archive. That is the exciting part: an agent can now reach the whole Earth record as easily as it reaches a web page.
 
 Ask a question about any place on Earth. groundstation finds satellite imagery, active fires, disaster alerts and weather, does the pixel math, and returns data, stories and interactive maps. 3 ways in:
 
@@ -72,7 +72,7 @@ In Claude Code, the plugin brings the server and the skills in one step, with no
 
 The first launch builds the server's environment, so the tools appear a few seconds after the agent starts. With the plugin you can also just ask: "demo groundstation", "is groundstation running", "open the field tests" and "brief me on Lisbon" all run through the `groundstation` skill.
 
-If the tools don't show up, run the preflight. It walks the setup chain in the order it breaks (uv, server env, CLI, plugin wiring, endpoints) and prints the fix for the first broken link:
+If the tools don't show up, run the preflight. It walks the setup chain in the order it breaks (uv, server env, Claude Code CLI, plugin wiring, endpoints) and prints the fix for the first broken link:
 
 ```bash
 bash scripts/doctor.sh
@@ -128,7 +128,7 @@ Give me a 3D fly-through of Torres del Paine.
 Make me a postcard of that I could post.
 ```
 
-The first `search_datasets` call takes 20 to 30 seconds while collection lists cache. After that it is instant.
+The first `search_datasets` call takes a few seconds while collection lists cache. After that it is near instant for an hour.
 
 ## What an agent gets
 
@@ -158,7 +158,7 @@ The skills in `skills/` tell the agent which catalog to use, how assets are name
 
 ## Briefings
 
-A briefing runs on a schedule and says what changed at a place: new scenes, events, weather, NDVI against last month, a CALM, WATCH or ACT level, and what to look at next. It is an HTML page you can share. Each place remembers its last run, so "what changed" means since then.
+A briefing runs on a schedule and says what changed at a place: new scenes, events, weather, NDVI against last month, a CALM, WATCH or ACT level, and what to look at next. It is an HTML page you can share. Each place remembers its last run, so "what changed" means since then. The written summary comes from `claude -p` by default, or a local model if you set one up. Without either, you get a data-only brief.
 
 Scheduling, Slack delivery and local-model summaries are in `docs/briefing.md`.
 
@@ -184,6 +184,6 @@ Any TiTiler with the `/stac` router works. One catch: NAIP and Landsat on Earth 
 - `docs/field-test-*.html`: the field tests, one page per round, highest № is newest. Real prompts, graded answers, and what got fixed. `docs/field-test.html` and `docs/examples.md` are the first edition, served at `/docs/field-test.html` when the console is running
 - `docs/architecture.md`: how it fits together and what is left out on purpose
 - `docs/plan-2026-10-devseed-stack.md`: what is next: Zarr through titiler.xyz, HRRR smoke in briefs, cross-catalog discovery, stac-geoparquet archives, a hosted toolset on mcp-toolsets-runtime
-- For deeper exploration, [stac-map](https://github.com/developmentseed/stac-map) (Pete Gadomski) renders COGs in the browser with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster) (Kyle Barron). Tiles and pixel math use [TiTiler](https://github.com/developmentseed/titiler)
+- For deeper exploration, [stac-map](https://github.com/developmentseed/stac-map) renders COGs in the browser with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster). Tiles and pixel math use [TiTiler](https://github.com/developmentseed/titiler)
 
 MIT licensed, see `LICENSE`.
