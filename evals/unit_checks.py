@@ -2085,7 +2085,7 @@ def t_index_outside_its_range_after_the_offset_says_so():
 
 
 def t_baseline_not_in_nn_nn_form_is_raw_with_the_form_named():
-    # stop 36: a baseline like 5.09 used to get no offset and no word about it
+    # stop 36: a baseline like 5.09 used to get the -0.1 by a string compare that only worked by accident
     out, _ = _scaled_stats(_pc_item("5.09"), catalog="planetary-computer", assets=["B04"])
     assert out["scaling_applied"] is False and "'5.09' is not in the NN.NN form" in out["scaling_note"], out
     assert out["B04"]["mean"] == 2000.0 and "band_scaling" not in out, out
