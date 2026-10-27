@@ -1432,7 +1432,8 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
         else f"best on coverage, then cloud, of {len(band)} near-equal scenes within {RECOMMEND_RECENCY_DAYS} days of the newest"
     )
     with_cloud = [it for it in items if cloud(it) is not None]
-    clearest = min(with_cloud, key=lambda it: cloud(it) or 0.0) if with_cloud else None
+    # a tie at the 0.1% the reason prints goes to the pick, so it is never contrasted with a scene it equals
+    clearest = min(with_cloud, key=lambda it: (round(cloud(it) or 0.0, 1), it["id"] != best["id"])) if with_cloud else None
     bc = cloud(best)
     if clearest is None:
         reason = f"best-covering scene at {cov(best):.1f}% of the area; this collection reports no cloud cover"
@@ -1654,8 +1655,8 @@ def search_imagery(
                           "a higher cap or a wider window may find some")
     if folded:
         result["folded_duplicates"] = folded
-        result["note"] = (f"{folded} reprocessed cop{'y' if folded == 1 else 'ies'} folded into the original scene "
-                          "(same date, tile and footprint); the newest processing is kept")
+        result["note"] = (f"{folded} older processing{'' if folded == 1 else 's'} of the same scene "
+                          "(same sensing time, tile and footprint) dropped; only the newest processing of each scene is kept")
     if archive:
         result["archive"] = archive
     readable = [it for it in items if "read_note" not in it]
@@ -4083,14 +4084,22 @@ def _delta_caveats(
 
 
 def _fold_reprocessed(feats: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-    """Collapse STAC features sharing date, MGRS tile and footprint to the newest processing
-    (higher s2:processing_baseline, then later id); a feature with no tile or bbox is never folded"""
+    """Collapse STAC features sharing sensing time, MGRS tile and footprint to the newest processing
+    (higher s2:processing_baseline, then later generation or created time, then later id); a feature
+    with no tile, time or bbox is never folded"""
+    def newness(f: dict[str, Any]) -> tuple[str, str, str]:
+        p = f.get("properties") or {}
+        made = p.get("s2:generation_time") or p.get("processing:datetime") or p.get("created") or ""
+        return str(p.get("s2:processing_baseline") or ""), str(made), f.get("id") or ""
+
     kept: dict[Any, dict[str, Any]] = {}
     out: list[Any] = []
     for f in feats:
         p = f.get("properties") or {}
         tile = p.get("s2:mgrs_tile") or p.get("grid:code")
-        when = (p.get("datetime") or p.get("start_datetime") or "")[:10]
+        # to the second, not the day: a reprocessed copy keeps the sensing time to the millisecond,
+        # while a second pass over the same tile that day is minutes apart and is a different scene
+        when = (p.get("datetime") or p.get("start_datetime") or "")[:19]
         box = f.get("bbox")
         if not (tile and when and box):
             out.append(f)
@@ -4100,7 +4109,7 @@ def _fold_reprocessed(feats: list[dict[str, Any]]) -> tuple[list[dict[str, Any]]
         if old is None:
             kept[key] = f
             out.append(key)
-        elif (str(p.get("s2:processing_baseline") or ""), f.get("id") or "") > (str((old.get("properties") or {}).get("s2:processing_baseline") or ""), old.get("id") or ""):
+        elif newness(f) > newness(old):
             kept[key] = f
     return [kept[o] if isinstance(o, tuple) else o for o in out], len(feats) - len(out)
 
