@@ -68,14 +68,14 @@ details.more > * + * { margin-top: 10px; }
   .card .who { margin-left: 0; }
 }
 .repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
-.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
-.fig { position: relative; display: block; border: 1px solid var(--rule); text-decoration: none; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fig { position: relative; display: block; min-height: 44px; border: 1px solid var(--rule); text-decoration: none; }
 .fig img { width: 100%; display: block; aspect-ratio: 10/7; }
 .fig:not(:has(img)) { aspect-ratio: 16/10; background: var(--paper); }
 .fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
   background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
 .fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
-footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 0 40px; }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 16px 40px; }
 </style>
 </head>
 <body>

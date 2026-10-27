@@ -234,8 +234,8 @@ def _ensure_source_honesty(md: str, data: dict) -> str:
 COVERAGE_GAP_PCT = 20.0  # points of AOI coverage apart before the change block says so
 
 
-def ndvi_change(best: dict, aoi: list[float], today: dt.date, days: int) -> dict | None:
-    """NDVI delta between the brief's scene and a same-tile baseline ~1 month back, both ranked over the AOI."""
+def ndvi_change(best: dict, aoi: list[float], today: dt.date, days: int, place: str | None = None) -> dict | None:
+    """NDVI delta between the brief's scene and a same-tile baseline ~1 month back, both ranked and averaged over the AOI."""
     tile = tools._mgrs_tile(best["id"])
     if tile == best["id"]:
         return None
@@ -252,8 +252,8 @@ def ndvi_change(best: dict, aoi: list[float], today: dt.date, days: int) -> dict
         return None
     ref = min(tools._with_coverage(candidates, aoi), key=tools._scene_key)
     expr = "(nir-red)/(nir+red)"
-    now_s = tools.compute_statistics("earth-search", best["collection"], best["id"], expression=expr)
-    ref_s = tools.compute_statistics("earth-search", ref["collection"], ref["id"], expression=expr)
+    now_s = tools.compute_statistics("earth-search", best["collection"], best["id"], expression=expr, bbox=aoi)
+    ref_s = tools.compute_statistics("earth-search", ref["collection"], ref["id"], expression=expr, bbox=aoi)
     now_mean = next(iter(now_s.values()))["mean"]
     ref_mean = next(iter(ref_s.values()))["mean"]
     now_cov, ref_cov = best.get("covers_aoi_pct"), ref.get("covers_aoi_pct")
@@ -261,8 +261,11 @@ def ndvi_change(best: dict, aoi: list[float], today: dt.date, days: int) -> dict
     if now_cov is not None and ref_cov is not None and abs(now_cov - ref_cov) > COVERAGE_GAP_PCT:
         caveats.append(f"the 2 scenes cover different ground (current {now_cov:.0f}% of the area, baseline "
                        f"{ref_cov:.0f}%), so the 2 means are not over the same pixels")
+    where = place or "MGRS tile " + tile
+    if place and now_cov is not None and now_cov < 99:
+        where += f", {now_cov:.1f}% of it covered"
     return {
-        "metric": "NDVI (vegetation) over MGRS tile " + tile,
+        "metric": "NDVI (vegetation) over " + where,
         "current": {"scene": best["id"], "date": best["datetime"][:10], "cloud": best.get("cloud_cover"),
                     "covers_aoi_pct": best.get("covers_aoi_pct"), "mean": round(now_mean, 3)},
         "baseline": {"scene": ref["id"], "date": ref["datetime"][:10], "cloud": ref.get("cloud_cover"),
@@ -316,7 +319,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     if best:
         print("[3.5/5] computing NDVI change vs baseline...")
         try:
-            change = ndvi_change(best, bbox, today, days)
+            change = ndvi_change(best, bbox, today, days, place)
         except Exception as e:
             print(f"change detection skipped: {e}", file=sys.stderr)
 
