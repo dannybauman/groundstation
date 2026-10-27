@@ -635,11 +635,13 @@ def t_compare_dates_carries_band_scaling_and_names_factors():
         "S2A_10TFK_20230328_0_L2A": [{"scale": 0.0001, "declared_offset": -0.1, "offset": 0, "bands": ["a"] * 13}],
         "S2A_10TFK_20210203_0_L2A": [{"scale": 0.0001, "offset": -0.1, "bands": ["a"] * 13}],
     }
-    tools.compute_statistics = lambda cat, coll, iid, **kw: {"nd": {"mean": 0.5}, "scaling_applied": True, "band_scaling": groups[iid]}
+    tools.compute_statistics = lambda cat, coll, iid, **kw: {"nd": {"mean": 0.5}, "scaling_applied": True, "band_scaling": groups[iid],
+                                                             **({"range_note": "r"} if "2021" in iid else {})}
     tools.render_map = lambda **kw: {"map_path": "x.html"}
     try:
         out = tools.compare_dates(bbox=[-121.5, 39.4, -121.4, 39.5], window_before="a/b", window_after="c/d")
         assert out["after"]["band_scaling"][0]["declared_offset"] == -0.1 and out["before"]["band_scaling"][0]["offset"] == -0.1
+        assert out["before"]["range_note"] == "r" and "range_note" not in out["after"] and "range_note" not in out, "per date"
         n = out["scaling_note"]
         assert "offset -0.1 applied for 2021-02-03" in n and "offset 0 applied for 2023-03-28 (Earth Search already took the -0.1 offset out of its pixels)" in n, n
     finally:
@@ -1975,13 +1977,13 @@ def t_statistics_have_one_shape_clipped_or_not():
     assert "scaling_note" not in out, "scale 1 offset 0 is not a caveat"
 
 
-def _scaled_stats(item, catalog="earth-search", **kw):
+def _scaled_stats(item, catalog="earth-search", lo=1000.0, **kw):
     # one compute_statistics call against a fake tiler; returns (result, params the tiler was sent)
     # PC keys a band asset_b1 and an expression result by the expression it was sent, the tilers b1
     def _feature(p):
         key = "b1" if catalog != "planetary-computer" else p.get("expression") or f"{p['assets']}_b1"
         return {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
-                "properties": {"statistics": {key: {"count": 10, "min": 1000.0, "max": 3000.0, "mean": 2000.0, "std": 500.0,
+                "properties": {"statistics": {key: {"count": 10, "min": lo, "max": 3000.0, "mean": 2000.0, "std": 500.0,
                                                     "percentile_2": 1100.0, "percentile_98": 2900.0, "histogram": [1, 2]}}}}
     sent = {}
     saved_post, saved_json = tools._client.post, tools._get_json
@@ -2067,6 +2069,26 @@ def t_planetary_computer_sentinel2_gets_the_collection_convention():
     assert "B04*0.000100000000+0.000000000000" in params["expression"], params
     out, _ = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", assets=["B04"], apply_scaling=False)
     assert "scaling_applied" not in out and "collection convention" in out["scaling_note"], out
+
+
+def t_index_outside_its_range_after_the_offset_says_so():
+    # stop 36: field test 18's 2023 Rolling Fork NDVI ran -64.0 to 4.07; a dark pixel is below 0 after the -0.1 offset
+    out, params = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", lo=-64.0, expression="(B08-B04)/(B08+B04)")
+    assert out["(B08-B04)/(B08+B04)"]["min"] == -64.0, "not clamped"
+    assert "outside -1 to 1" in out["range_note"] and "-0.1 offset" in out["range_note"] and "not clamped" in out["range_note"], out
+    assert "under digital number 1000" in out["range_note"] and "median" in out["range_note"], out
+    assert params.get("nodata") == "0", "digital number 0 is masked before the offset"
+    out, _ = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", lo=-64.0, expression="(B03-B08)/(B03+B08)*2")
+    assert "range_note" not in out, "not a normalized index, so -1 to 1 is no claim to make"
+    out, _ = _scaled_stats(_pc_item("03.01"), catalog="planetary-computer", expression="(B08-B04)/(B08+B04)")
+    assert "range_note" not in out, "an index inside its range earns no note"
+
+
+def t_baseline_not_in_nn_nn_form_is_raw_with_the_form_named():
+    # stop 36: a baseline like 5.09 used to get the -0.1 by a string compare that only worked by accident
+    out, _ = _scaled_stats(_pc_item("5.09"), catalog="planetary-computer", assets=["B04"])
+    assert out["scaling_applied"] is False and "'5.09' is not in the NN.NN form" in out["scaling_note"], out
+    assert out["B04"]["mean"] == 2000.0 and "band_scaling" not in out, out
 
 
 def t_sentinel2_without_raster_bands_or_a_convention_says_raw():
