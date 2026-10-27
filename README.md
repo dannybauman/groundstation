@@ -2,6 +2,8 @@
 
 Earth data, agent ready. A [Development Seed](https://developmentseed.org) MCP prototype giving easy access to a variety of cloud-native geospatial stacks, with visual examples and repeatable workflows called "field tests".
 
+Cloud-native geospatial exists because the satellite archives grew to petabytes, and downloading whole scenes to look at one field stopped making sense. With STAC to find the data, cloud-optimized formats (COG, Zarr) to read only the pixels you need, and TiTiler to render them on demand, any question about any place can be answered in seconds against the open archive. That is the exciting part: an agent can now reach the whole Earth record as easily as it reaches a web page.
+
 Ask a question about any place on Earth. groundstation finds the satellite imagery, active fires and disaster alerts, weather, does the pixel math, and returns data, stories, and interactive maps. 3 ways in:
 
 ```mermaid
