@@ -12,7 +12,7 @@ flowchart LR
     T["groundstation tools"] --> D["STAC catalogs<br/>Earth Search · NASA VEDA<br/>Planetary Computer"]
     T --> E["TiTiler<br/>tiles · previews · band math"]
     T --> F["EONET · GDACS · Open-Meteo<br/>events & weather"]
-    T --> G["🗺 shareable map artifacts<br/>📄 decision-ready briefs"]
+    T --> G["🗺 shareable map artifacts<br/>📄 draft briefs"]
 ```
 
 Everything runs against public, keyless endpoints, so it demos anywhere with nothing to sign up for.
