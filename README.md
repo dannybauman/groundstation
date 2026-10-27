@@ -26,17 +26,23 @@ Everything runs against public, keyless endpoints, so it works anywhere with not
 - Explore before committing. See what data exists for a place, at what resolution and how fresh, before anyone scopes a project around it
 - Watch places and report back. Brief you each morning on what changed, and stay quiet about what didn't
 
-<img src="docs/img/field-test.jpg" width="680" alt="a field test page: 4 real asks, each with our read, the learning and a map">
+<img src="docs/img/field-test.jpg" width="680" alt="field test 20: the first 4 of its 6 cards, Mt St Helens 1980, Hurricane Patricia 2015, the Great Aletsch glacier and the Eagle Creek fire 2017, each with our read, the learning and a map">
 
 ## Examples
 
-The 3 examples are the cards from field test 20 ([`docs/field-test-2026-10-27-no20.html`](docs/field-test-2026-10-27-no20.html)), real runs on real data: quick examples that open the door to digging in further, and a way to learn which stack to consider for your own use case (`docs/field-test-*.html`, highest number is newest).
+The 6 examples are the cards from field test 20 ([`docs/field-test-2026-10-27-no20.html`](docs/field-test-2026-10-27-no20.html)), real runs on real data: quick examples that open the door to digging in further, and a way to learn which stack to consider for your own use case (`docs/field-test-*.html`, highest number is newest).
 
 "Mt St Helens eruption 1980" The tools found 2 Landsat MSS scenes from the same orbit, 1979-09-12 and 1980-09-15, both 0.0% cloud. Over the box around the mountain the median vegetation index fell from 0.2691 to -0.0043. A swipe map puts the 2 scenes side by side. [Map](docs/img/ft20-st-helens-map.html)
 
 "Hurricane Patricia 2015" Landsat 8 has the coast on 2015-10-13 and 2015-11-30, and the median vegetation index over a box on the land went from 0.8712 to 0.8226. The after scene is cloudier, so that number is a hint, not a damage measure. [Map](docs/img/ft20-patricia-map.html)
 
 "Switzerland's glaciers are disappearing at an alarming rate, losing more than 5% of their ice volume in 2026 alone" Sentinel-2 has the Great Aletsch glacier on 2017-08-23 and 2026-08-30, and the late-summer snow and ice index rose 7.9%. That is snow on the day, not ice volume, so the 5% volume loss stays with the glacier monitoring network's measurement. The tools showed the glacier on both dates with a swipe map. [Map](docs/img/ft20-aletsch-map.html)
+
+"Eagle Creek fire 2017, Columbia River Gorge" Sentinel-2 has the gorge on 2017-08-26, 7 days before the fire started, and on 2017-10-05, both under 0.4% cloud and from the same tile. Over the box the mean burn index (NBR) fell from 0.6415 to 0.4305, -32.9%, and the swipe map shows the burn south of the river. [Map](docs/img/ft20-eagle-creek-map.html)
+
+"Show me the light pollution problem around Mauna Kea's observatories" None of the 3 catalogs holds night-lights radiance over Hawaii: the Black Marble collections cover other places, most of them single disasters. The one night-lights layer that reaches the Big Island is a 2020 input to a deprivation index, and it has 0 valid pixels over the summit, so this one is not yet. [Map](docs/img/ft20-mauna-kea-map.html)
+
+"What's going on around Portland, Oregon right now: fires, floods, weather, and when the next clear satellite pass is" At 04:59 UTC on 2026-10-27, GDACS listed 0 active events but EONET returned a server error, so that is not an all-clear. It rained 15.1 mm on 2026-10-25 with more forecast, the next daylight pass is Landsat 8 at 18:56 UTC on 2026-10-27, and the clearest Sentinel-2 scene of the last 14 days is 2026-10-15 at 0.3% cloud. [Map](docs/img/ft20-portland-map.html)
 
 <img src="docs/img/ft20-st-helens-map.png" width="680" alt="Mt St Helens before and after the 1980 eruption, Landsat MSS swipe">
 

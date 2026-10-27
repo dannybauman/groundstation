@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="color-scheme" content="only light">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>groundstation field test №20: 3 places Danny knows, Mt St Helens 1980, Hurricane Patricia 2015 and the Swiss glaciers</title>
+<title>groundstation field test №20: 6 asks Danny brought, Mt St Helens 1980, Hurricane Patricia 2015, the Swiss glaciers, the Eagle Creek fire 2017, light pollution around Mauna Kea and Portland right now</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -82,18 +82,18 @@ footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var
 
 <header><div class="wrap">
   <h1><span class="dot"></span>THE FIELD TEST №20</h1>
-  <div class="sub">groundstation · 3 prompts · 3 live artifacts · 1 works, 2 partly, 0 not yet · October 27, 2026 · Development Seed labs</div>
-  <p class="lede">These 3 cards are the README's new front-page examples. The old 3 had no source in any field test: an audit found their numbers nowhere in docs/, so they are replaced by 3 real asks about places Danny knows, with every number on the README quoted from a card below. 2 of the 3 run on Landsat: Mt St Helens in 1980, years before Sentinel-2, on Landsat 2 and 3 MSS scenes, and Hurricane Patricia in 2015 on Landsat 8. Each learning opens with what the tools could do for the ask: <b>Works</b>, <b>Partly</b> or <b>Not yet</b>. Run on main at 0.59.0.</p>
+  <div class="sub">groundstation · 6 prompts · 6 live artifacts · 2 works, 3 partly, 1 not yet · October 27, 2026 · Development Seed labs</div>
+  <p class="lede">These 6 cards are the README's front-page examples. The old 3 had no source in any field test: an audit found their numbers nowhere in docs/, so they are replaced by real asks about places Danny knows, with every number on the README quoted from a card below. 2 of the 6 run on Landsat: Mt St Helens in 1980, years before Sentinel-2, on Landsat 2 and 3 MSS scenes, and Hurricane Patricia in 2015 on Landsat 8. The Eagle Creek fire of 2017 is the one card that can use compare_dates, since Sentinel-2 on Earth Search reaches 2017. Mauna Kea asks whether the stack holds night lights at all, and Portland asks the live feeds about today. Each learning opens with what the tools could do for the ask: <b>Works</b>, <b>Partly</b> or <b>Not yet</b>. Run on main at 0.59.0.</p>
 </div></header>
 
 <div class="stats wrap" style="padding: 0 24px">
-  <div class="stat"><b>3</b><span>prompts: a 1980 eruption, a 2015 hurricane landfall, a glacier 9 summers apart</span></div>
-  <div class="stat"><b>1 · 2 · 0</b><span>works · partly · not yet, each verdict grounded in the raw output</span></div>
-  <div class="stat"><b>3</b><span>live artifacts: 3 swipe maps, one per card, each with its screenshot</span></div>
+  <div class="stat"><b>6</b><span>prompts: a 1980 eruption, a 2015 hurricane, a glacier 9 summers apart, a 2017 fire, night lights over Hawaii, Portland today</span></div>
+  <div class="stat"><b>2 · 3 · 1</b><span>works · partly · not yet, each verdict grounded in the raw output</span></div>
+  <div class="stat"><b>6</b><span>live artifacts: 4 swipe maps and 2 single maps, one per card, each with its screenshot</span></div>
 </div>
 
 <main class="wrap">
-<h2 class="round">Round 1: 3 places Danny knows, 2 of them on Landsat</h2>
+<h2 class="round">Round 1: 6 asks Danny brought, 2 of them on Landsat and 1 of them live</h2>
 <div class="grid">
 <div class="card"><div class="top"><div class="num">1</div><div class="tag">before the satellite age</div><div class="who">Danny</div></div>
 <div><div class="label">Input</div><div class="prompt">Mt St Helens eruption 1980</div></div>
@@ -245,6 +245,162 @@ compute_statistics("earth-search", "sentinel-2-l2a", "S2A_32TMS_20260830_0_L2A",
 <div class="learning"><b>Learning →</b> <b>Partly.</b> The tools did their part: 2 matched Sentinel-2 scenes 9 years apart, an NDSI on correctly scaled bands, per-scene statistics, and a swipe map. They could not do what the sentence asks, because ice volume is not something these tools measure, and the card says so rather than letting a rise of 7.9% stand in for an answer. Why the index rose is not in the output; snow on the day, cloud (9.79% in 2026, and NDSI over cloud is not snow), and the box holding rock and forest as well as ice all move a mean like this (my reading). One mean over a 0.15 by 0.15 degree box is also not glacier area: the tools give no count of pixels above a snow threshold, which is the usual way to turn NDSI into extent. A small quirk: on Earth Search the statistics key comes back as <code>b1</code>, not the expression. Not checked: the Rhône glacier, other late-summer dates in 2026 (10 scenes were there), a snow threshold area, and any GLAMOS figure.</div>
 <div class="shows">the volume claim named as untestable by these tools · same tile 32TMS 9 years apart · mean NDSI 0.2108 to 0.2275, +7.9% · medians 0.1048 and 0.1080 · statistics key b1 on Earth Search · NDSI swipe map</div></details>
 </div>
+
+<div class="card"><div class="top"><div class="num">4</div><div class="tag">a fire Sentinel-2 saw</div><div class="who">Danny</div></div>
+<div><div class="label">Input</div><div class="prompt">Eagle Creek fire 2017, Columbia River Gorge</div></div>
+<div><div class="label">Our read</div><div class="answer">Sentinel-2 caught the Eagle Creek fire on both sides: compare_dates picked 2017-08-26 (0.32% cloud) and 2017-10-05 (0.26% cloud) from the same tile, 10TER, and the mean burn index (NBR)…</div></div>
+<div class="headline"><b>Learning →</b> Works.</div>
+<a class="fig" href="img/ft20-eagle-creek-map.html" target="_blank" title="open the live artifact"><img src="img/ft20-eagle-creek-map.png" alt="artifact produced by example 4" loading="lazy"><span class="open">map: Eagle Creek NBR swipe, 2017-08-26 against 2017-10-05 ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Sentinel-2 caught the Eagle Creek fire on both sides: compare_dates picked 2017-08-26 (0.32% cloud) and 2017-10-05 (0.26% cloud) from the same tile, 10TER, and the mean burn index (NBR) over the box fell from 0.6415 to 0.4305, -0.211 (-32.9%).</b> The fire started on 2017-09-02, so the before scene is 7 days ahead of it and the after is 33 days past it. search_imagery found 3 August scenes and 2 October scenes under 20% cloud, all covering 100.0% of the box; compare_dates took the clearest of each and named the runner-up (2017-08-11 and 2017-10-30). compute_statistics on the same 2 scenes gives the same means, a median that fell from 0.7305 to 0.5782, and a percentile_2 that fell from -0.0242 to -0.5044. The index is NBR, (nir-swir22)/(nir+swir22), on scaled bands (scale 0.0001, offset 0). The swipe map shows the 2017-10-05 side with orange and red patches across the hills south of the river, and the 2017-08-26 side green except for the river itself (my reading of the image).</div>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[-122.05, 45.55, -121.80, 45.70], datetime_range="2017-08-01T00:00:00Z/2017-08-31T23:59:59Z", max_cloud_cover=20, limit=20)
+  count: 3
+  S2A_10TER_20170831_0_L2A  2017-08-31  cloud 13.483338  covers_aoi_pct 100.0
+  S2B_10TER_20170826_0_L2A  2017-08-26  cloud 0.319339   covers_aoi_pct 100.0
+  S2A_10TER_20170811_0_L2A  2017-08-11  cloud 1.152866   covers_aoi_pct 100.0
+  recommended: S2B_10TER_20170826_0_L2A
+  reason: clearest (0.3% cloud) and best-covering (100.0% of the area), not a tradeoff; the newest, 2017-08-31, lost on cloud: 13.5% against the pick's 0.3%, outside the 5-point tie
+
+search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[-122.05, 45.55, -121.80, 45.70], datetime_range="2017-10-01T00:00:00Z/2017-10-31T23:59:59Z", max_cloud_cover=20, limit=20)
+  count: 2
+  S2A_10TER_20171030_0_L2A  2017-10-30  cloud 0.642735  covers_aoi_pct 100.0
+  S2B_10TER_20171005_0_L2A  2017-10-05  cloud 0.260885  covers_aoi_pct 100.0
+  recommended: S2A_10TER_20171030_0_L2A
+  reason: 0.6% cloud, covers 100.0% of the area, and newest of 2 near-equal scenes; the clearest (0.3% cloud) is from 2017-10-05
+
+compare_dates(bbox=[-122.05, 45.55, -121.80, 45.70], window_before="2017-08-01T00:00:00Z/2017-08-31T23:59:59Z", window_after="2017-10-01T00:00:00Z/2017-10-31T23:59:59Z", expression="(nir-swir22)/(nir+swir22)", max_cloud_cover=20, out_path="docs/img/ft20-eagle-creek-map.html")
+  tile: 10TER
+  before: S2B_10TER_20170826_0_L2A  2017-08-26  cloud 0.319339  mean 0.6415  covers_aoi_pct 100.0  (runner_up S2A_10TER_20170811_0_L2A)
+  after:  S2B_10TER_20171005_0_L2A  2017-10-05  cloud 0.260885  mean 0.4305  covers_aoi_pct 100.0  (runner_up S2A_10TER_20171030_0_L2A)
+  delta: -0.211   delta_pct: -32.9   (no caveat key)
+  scaling_note: scale 0.0001 and offset 0 applied for 2017-10-05; scale 0.0001 and offset 0 applied for 2017-08-26
+  map_path: docs/img/ft20-eagle-creek-map.html
+
+compute_statistics("earth-search", "sentinel-2-l2a", "S2B_10TER_20170826_0_L2A", expression="(nir-swir22)/(nir+swir22)", bbox=[-122.05, 45.55, -121.80, 45.70])
+  key: b1
+  mean: 0.6414721513511206   median: 0.7305303392259914   std: 0.2284133983634622
+  min: -0.9500000000000001   max: 0.953206239168111
+  percentile_2: -0.024150943396226476   percentile_98: 0.8221288515406163
+  count: 157593.59375   valid_percent: 100.0   scaling_applied: true
+
+compute_statistics("earth-search", "sentinel-2-l2a", "S2B_10TER_20171005_0_L2A", expression="(nir-swir22)/(nir+swir22)", bbox=[-122.05, 45.55, -121.80, 45.70])
+  key: b1
+  mean: 0.43049242929544157   median: 0.5782349756361668   std: 0.3955570736920874
+  min: -0.92   max: 0.9557721139430284
+  percentile_2: -0.504424778761062   percentile_98: 0.8343765045739048
+  count: 157593.59375   valid_percent: 100.0   scaling_applied: true
+
+active_events(bbox=[-122.05, 45.55, -121.80, 45.70], days=30, pad=2.0)   (run twice)
+  eonet: []   eonet_error: Server error '500 Internal Server Error' for url 'https://eonet.gsfc.nasa.gov/api/v3/events?days=30&status=open&bbox=...' (both tries)
+  gdacs: []   gdacs_note: GDACS current-events feed listed 100; 0 active within 30 days inside the bbox
+  all_clear: false   all_clear_note: EONET did not answer, so an empty list is not all-clear</div></details>
+<div class="learning"><b>Learning →</b> <b>Works.</b> This is the one card of the 6 where compare_dates fits, because it searches Earth Search sentinel-2-l2a only and Sentinel-2 reaches 2017. It picked 2 scenes from 1 tile, scaled the bands, returned the delta with no caveat key, and wrote the swipe map. On the figure: the box is 0.25 by 0.15 degrees and holds the Washington shore and the river as well as the burn, so a drop of 0.211 in the mean is the whole box, not the burn alone. The usual burn-severity measure differences the 2 NBR images pixel by pixel (dNBR), and the tools give a mean per scene, not a per-pixel difference or a burned area. A lower October sun may also move the index a little (my reading). active_events could not help: EONET answered with a server error (500) on both tries, and GDACS listed 0 active events within 30 days, so the feeds say nothing about 2017 and, with EONET down, not even all-clear today. Not checked: dNBR severity classes, the burned area against the published perimeter, and the scl cloud and shadow band.</div>
+<div class="shows">compare_dates works for 2017 on Sentinel-2 · same tile 10TER before and after · mean NBR 0.6415 to 0.4305, -32.9% · median 0.7305 to 0.5782 · EONET 500 on both tries · NBR swipe map</div></details>
+</div>
+
+<div class="card"><div class="top"><div class="num">5</div><div class="tag">a layer the stack does not have</div><div class="who">Danny</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me the light pollution problem around Mauna Kea's observatories</div></div>
+<div><div class="label">Our read</div><div class="answer">Not from these catalogs: none of the 3 holds night-lights radiance over Hawaii, and the one night-lights layer that covers the Big Island is a 2020 deprivation-index input with no data at…</div></div>
+<div class="headline"><b>Learning →</b> Not yet.</div>
+<a class="fig" href="img/ft20-mauna-kea-map.html" target="_blank" title="open the live artifact"><img src="img/ft20-mauna-kea-map.png" alt="artifact produced by example 5" loading="lazy"><span class="open">map: Big Island, GRDI VNL 2020, a deprivation-index input, not radiance ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Not from these catalogs: none of the 3 holds night-lights radiance over Hawaii, and the one night-lights layer that covers the Big Island is a 2020 deprivation-index input with no data at the summit.</b> search_datasets for night lights, nightlights, VIIRS, DNB and Black Marble found 13 collections, all on VEDA except HREA on Planetary Computer, and nothing for DNB; 2 of the 13 (fire perimeters and a cyclone brightness temperature) only matched VIIRS. describe_collection gives the extents: the Black Marble collections are cut to single events (Houston 2021, the 2022 derecho, Rolling Fork 2023, Ohio 2024, Burma 2025), nightlights-hd-1band spans -90.30 to -65.57 longitude, nightlights-hd-monthly starts at -122.64 and search_imagery found 0 of its items over the island, and HREA's 4 boxes miss -155. Only the 2 GRDI VNL layers are global. On grdi-vnl-raster over boxes of 0.12 degrees, the Hilo median is 89.49 (valid_percent 65.0), Waikoloa on the Kona coast 89.59 (valid_percent 15.0), and the summit has 0 valid pixels. The map draws the layer only over settled land, with Hilo and Kailua-Kona darkest and the interior and the summit empty (my reading of the image).</div>
+<details class="data"><summary>show the data</summary><div class="returned">search_datasets("night lights")   10 hits, all veda: burma-eq-night-lights, delta-disasters-hd-blackmarble-nightlights, ercot-houston-nightlights-freeze, grdi-vnl-raster, grdi-vnl-slope-raster, greenville-nightlights-tornadoes-2024, lakeview-nightlights-tornadoes-2024, nightlights-derecho, nightlights-hd-1band, nightlights-hd-monthly
+search_datasets("nightlights")    7 hits, all veda, all in the list above
+search_datasets("VIIRS")          6 hits: veda eis_fire_perimeter, grdi-vnl-raster, grdi-vnl-slope-raster, nightlights-derecho, viirs_mosaic-cyclone-beryl; planetary-computer hrea
+search_datasets("DNB")            note: nothing matched 'DNB' in 4 catalog(s): earth-search, veda, planetary-computer, zarr. Absence here does not mean the data does not exist, only that these catalogs do not carry it under those words
+search_datasets("Black Marble")   7 hits, all veda, all in the list above
+
+describe_collection, spatial extent and time:
+  veda nightlights-hd-1band         [-90.30, 17.91, -65.57, 30.07]    2017-07-21 to 2021-08-31
+  veda nightlights-hd-monthly       [-122.64, -37.08, 174.96, 54.58]  2019-01-01 to 2022-03-31
+  veda grdi-vnl-raster              [-180.00, -55.98, 179.82, 82.18]  2020-01-01 to 2020-12-31   "Global Gridded Relative Deprivation Index (GRDI) VIIRS Night Lights (VNL) Constituent raster"
+  veda grdi-vnl-slope-raster        [-180.00, -55.98, 179.82, 82.18]  2012-01-01 to 2020-12-31
+  veda burma-eq-night-lights        [89.24, 19.77, 100.09, 30.31]     2025-03-23 to 2025-03-29
+  veda delta-disasters-hd-blackmarble-nightlights  [-90.96, 32.83, -90.79, 32.97]  2023-03-15 to 2023-03-25
+  veda ercot-houston-nightlights-freeze  [-96.09, 29.20, -94.56, 30.33]  2021-02-10 to 2021-02-16
+  veda greenville-nightlights-tornadoes-2024  [-85.04, 39.75, -84.20, 40.42]  2024-05-07 to 2024-05-08
+  veda lakeview-nightlights-tornadoes-2024  [-84.30, 40.20, -83.58, 40.69]  2024-03-14
+  veda nightlights-derecho          [-112.08, 39.48, -88.25, 50.52]   2022-05-10
+  planetary-computer hrea           4 boxes: [-117.41, -55.54, -53.09, 32.72], [-25.36, -34.84, 50.76, 37.55], [34.96, -11.66, 157.04, 38.61], [155.39, -20.25, 172.17, 14.72]   2012-12-31 to 2019-12-31
+
+search_imagery("veda", ["grdi-vnl-raster"], bbox=[-156.10, 18.90, -154.80, 20.30], limit=10)
+  count: 1   povmap-grdi-v1_VNL_2020-01-01_2020-12-31  covers_aoi_pct 100.0   reason: best-covering scene at 100.0% of the area; this collection reports no cloud cover
+search_imagery("veda", ["grdi-vnl-slope-raster"], same bbox)
+  count: 1   povmap-grdi-v1_VNL-slope_2012-01-01_2020-12-31  covers_aoi_pct 100.0
+search_imagery("veda", ["nightlights-hd-monthly"], same bbox)
+  count: 0
+
+compute_statistics("veda", "grdi-vnl-raster", "povmap-grdi-v1_VNL_2020-01-01_2020-12-31", assets=["cog_default"], bbox=...)
+  Hilo [-155.15, 19.65, -155.03, 19.77]:        mean 79.13905805502182  median 89.49462127685547  min -0.0  max 100.0  count 156.0  valid_percent 65.0
+  summit [-155.53, 19.76, -155.41, 19.88]:      mean null  median null  count 0.0  valid_percent 0.0
+  Waikoloa [-155.95, 19.86, -155.83, 19.98]:    mean 82.49742396672566  median 89.59139251708984  min 24.302560806274414  max 100.0  count 36.0  valid_percent 15.0
+  band_scaling: scale 1.0 offset 0.0
+
+render_map("Big Island night lights, GRDI VNL constituent 2020", bbox=[-156.10, 18.90, -154.80, 20.30], layers=[grdi-vnl-raster cog_default, colormap inferno; geojson points for the summit, Hilo and Waikoloa], out_path="docs/img/ft20-mauna-kea-map.html")
+  map_path: docs/img/ft20-mauna-kea-map.html   rescale_used: 49.9485,100   rescale_basis: 2nd to 98th percentile of the raw values over the box</div></details>
+<div class="learning"><b>Learning →</b> <b>Not yet.</b> The stack has no night-lights radiance source that covers Hawaii, so it cannot show light pollution around the observatories, and a daytime image is no stand-in. What exists: most of VEDA's Black Marble collections are clipped to the places and days of single disasters, the 2 wider ones stop short of Hawaii, and the global GRDI VNL layers are 2020 inputs to a deprivation index, with values from 0 to 100 in these boxes and values only where people live. That masking is the problem for this ask: the summit box has 0 valid pixels, so the layer is silent exactly where the observatories are, and sky glow over the summit is not what it measures. The medians of 89.49 and 89.59 come from boxes of town, farmland and ocean, and the collection's description does not say which end of the scale is bright; on the map the towns sit at the low end, which fits a deprivation score where more light means less deprived (my reading), so I do not read the medians as an amount of light. No tool output names where a night-lights archive for Hawaii lives, so the stack has no night lights source for Hawaii yet, and I stop there. Not checked: grdi-vnl-slope-raster's values (found and searched, 1 global item for 2012 to 2020, not measured), and any light reading at the summit.</div>
+<div class="shows">13 collections found for 5 night-light words, 0 for DNB · Black Marble only for single disasters elsewhere · GRDI VNL 2020 the only layer over Hawaii · summit box 0 valid pixels · map of a deprivation input, labelled as not radiance</div></details>
+</div>
+
+<div class="card"><div class="top"><div class="num">6</div><div class="tag">live, the feeds today</div><div class="who">Danny</div></div>
+<div><div class="label">Input</div><div class="prompt">What's going on around Portland, Oregon right now: fires, floods, weather, and when the next clear satellite pass is</div></div>
+<div><div class="label">Our read</div><div class="answer">At 04:59 UTC on 2026-10-27: GDACS lists 0 active events within 30 days but EONET returned a server error, so it is not all-clear; it has rained since 2026-10-25 with more forecast; the next…</div></div>
+<div class="headline"><b>Learning →</b> Partly.</div>
+<a class="fig" href="img/ft20-portland-map.html" target="_blank" title="open the live artifact"><img src="img/ft20-portland-map.png" alt="artifact produced by example 6" loading="lazy"><span class="open">map: Portland, Sentinel-2 2026-10-15, the clearest scene of the last 14 days ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>At 04:59 UTC on 2026-10-27: GDACS lists 0 active events within 30 days but EONET returned a server error, so it is not all-clear; it has rained since 2026-10-25 with more forecast; the next daylight passes are Landsat 8 at 18:56 UTC on 2026-10-27 and Sentinel-2B and 2A at 19:12 and 19:22 UTC on 2026-10-28; the clearest recent scene is 2026-10-15 at 0.3% cloud.</b> geocode put Portland at 45.5427 N, 122.6544 W from Gazet. weather_summary (Open-Meteo) has 0.0 mm a day from 2026-10-19 to 2026-10-24, then 15.1 mm on 2026-10-25 and 13.3 mm on 2026-10-26, and 7.1, 11.55, 3.4, 3.3, 5.2 and 0.6 mm from 2026-10-27 to 2026-11-01, with highs of 10.0 to 12.8 C and wind no more than 14.8 km/h over those 6 days. next_pass looked 3 days ahead over its default open-data constellations, kept 8 daylight or radar passes and dropped 7 optical ones at night. search_imagery found 7 Sentinel-2 scenes from 2026-10-13 to 2026-10-26 and recommended S2A_10TER_20261015_0_L2A: "the newest, 2026-10-26, lost on cloud: 99.9%, over the 30% ceiling". The map shows the city clear on 2026-10-15, the Willamette running into the Columbia and the airport on the Columbia's south bank (my reading of the image).</div>
+<details class="data"><summary>show the data</summary><div class="returned">run at 2026-10-27T04:59:30Z
+
+geocode("Portland, Oregon")
+  name: Portland (US, locality)   lat 45.54270553588867  lon -122.65439224243164   source: gazet
+  bbox: [-122.83676147460938, 45.43252944946289, -122.4720230102539, 45.65288162231445]
+
+active_events(bbox=<the geocoded bbox>, days=30, pad=1.0)   (run at 04:59 and again at 05:02 UTC)
+  eonet: []   eonet_error: Server error '500 Internal Server Error' for url 'https://eonet.gsfc.nasa.gov/api/v3/events?days=30&status=open&bbox=...' (both tries)
+  gdacs: []   gdacs_note: GDACS current-events feed listed 100; 0 active within 30 days inside the bbox
+  all_clear: false   all_clear_note: EONET did not answer, so an empty list is not all-clear
+
+weather_summary(45.5427, -122.6544)   grid cell 45.535984, -122.65944, elevation 55.0
+  date        max C  min C  precip mm  wind max km/h  wind from
+  2026-10-19  16.6   8.3    0.0        8.2            168
+  2026-10-20  20.7   8.0    0.0        14.4           0
+  2026-10-21  20.3   6.7    0.0        8.3            325
+  2026-10-22  16.8   7.2    0.0        17.2           320
+  2026-10-23  14.5   6.0    0.0        9.3            171
+  2026-10-24  13.0   3.5    0.0        6.6            293
+  2026-10-25  10.7   7.1    15.1       19.1           123
+  2026-10-26  12.3   9.7    13.3       16.1           174
+  2026-10-27  12.2   8.7    7.1        13.7           209
+  2026-10-28  12.1   7.7    11.55      14.8           220
+  2026-10-29  12.8   5.8    3.4        6.1            130
+  2026-10-30  11.1   6.6    3.3        10.5           166
+  2026-10-31  10.0   5.5    5.2        6.1            160
+  2026-11-01  10.7   6.2    0.6        5.6            106
+
+next_pass(45.5427, -122.6544)   window_days 3, default constellations (open data), source developmentseed/eo-predictor
+  SENTINEL-3B  2026-10-27 18:16 UTC  sun 26.7  track 595.4 km
+  SENTINEL-3A  2026-10-27 18:54 UTC  sun 29.2  track 156.6 km
+  LANDSAT 8    2026-10-27 18:56 UTC  sun 29.2  track 47.4 km
+  SENTINEL-3A  2026-10-28 18:28 UTC  sun 27.3  track 340.9 km
+  SENTINEL-2B  2026-10-28 19:12 UTC  sun 29.6  track 108.5 km
+  SENTINEL-2A  2026-10-28 19:22 UTC  sun 29.9  track 132.1 km
+  SENTINEL-1C  2026-10-29 01:28 UTC  sun -5.9  radar (day or night, sees through cloud)
+  SENTINEL-3B  2026-10-29 19:04 UTC  sun 29.0  track 341.7 km
+  optical_passes_at_night: 7 (dropped)
+  note: swath geometry from live TLEs, not the acquisition plan; a pass is a possible capture, and imagery reaches public catalogs hours to a day later ...
+
+search_imagery("earth-search", ["sentinel-2-l2a"], bbox=<the geocoded bbox>, datetime_range="2026-10-12T00:00:00Z/2026-10-26T23:59:59Z", limit=20)
+  count: 7, 2026-10-13 to 2026-10-26, all tile 10TER, all covers_aoi_pct 100.0
+  S2C_10TER_20261026_0_L2A  2026-10-26  cloud 99.918073
+  S2C_10TER_20261023_0_L2A  2026-10-23  cloud 51.688737
+  S2B_10TER_20261021_0_L2A  2026-10-21  cloud 1.533307
+  S2A_10TER_20261015_0_L2A  2026-10-15  cloud 0.335234
+  recommended: S2A_10TER_20261015_0_L2A
+  reason: clearest (0.3% cloud) and best-covering (100.0% of the area), not a tradeoff; the newest, 2026-10-26, lost on cloud: 99.9%, over the 30% ceiling
+
+render_map("Portland, Oregon, Sentinel-2 2026-10-15", bbox=<the geocoded bbox>, layers=[S2A_10TER_20261015_0_L2A, assets [visual]], stack_facts=events, passes, out_path="docs/img/ft20-portland-map.html")
+  map_path: docs/img/ft20-portland-map.html   stack_facts_ignored: [geocoded]</div></details>
+<div class="learning"><b>Learning →</b> <b>Partly.</b> 4 of the 5 live calls answered with dated figures: the geocode, the weather, the passes and the scene pick with its reason, and the map drew the pick. The fires and floods part is half answered: GDACS listed 0 active events within 30 days in the padded box, and EONET answered with a server error (500) at 04:59 and again at 05:02 UTC, which the tool reports as not all-clear rather than as nothing, so I cannot say there are no fires. The ask says the next clear pass, and next_pass predicts passes, not cloud: the passes on 2026-10-27 and 2026-10-28 fall on days forecast at 7.1 mm and 11.55 mm of rain, so they are likely cloudy, and the driest forecast day, 2026-11-01 at 0.6 mm, is past its 3-day window (my reading). It defaults to the open-data constellations and returned Sentinel-1, Sentinel-2, Sentinel-3 and Landsat 8 passes. The scene pick is 11 days old because the newest, 2026-10-26, is 99.9% cloud. render_map dropped the geocoded flag I passed (stack_facts_ignored); my reading is that it only keeps the flag for a geocode made in the same process, and this one ran in another. Not checked: an air-quality or smoke feed, river levels, and EONET later in the day.</div>
+<div class="shows">dated to 04:59 UTC on 2026-10-27 · GDACS 0 events, EONET 500 twice, not all-clear · rain 15.1 and 13.3 mm, more forecast · Landsat 8 next at 18:56 UTC · clearest scene 2026-10-15 at 0.3% cloud · true-colour map</div></details>
+</div>
 </div>
 <div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
 bash scripts/doctor.sh                      # walks the setup chain, prints the fix
@@ -252,7 +408,7 @@ uv run evals/unit_checks.py                 # 209 offline checks
 uv run scripts/field_test.py docs/field-test-2026-10-27-no20.cases.json</code></div>
 </main>
 
-<footer>field test №20 · 3 prompts · 3 live artifacts · 1 works, 2 partly, 0 not yet · October 27, 2026 · run on main at 0.59.0 · groundstation · Development Seed labs</footer>
+<footer>field test №20 · 6 prompts · 6 live artifacts · 2 works, 3 partly, 1 not yet · October 27, 2026 · run on main at 0.59.0 · groundstation · Development Seed labs</footer>
 
 </body>
 </html>
