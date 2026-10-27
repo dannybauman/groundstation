@@ -1,14 +1,14 @@
 # groundstation
 
-**Earth data, agent-ready.** A [Development Seed](https://developmentseed.org) labs prototype that puts the cloud-native geospatial stack in the hands of AI agents, and of anyone with a browser.
+Earth data, agent ready. A [Development Seed](https://developmentseed.org) MCP prototype giving easy access to a variety of cloud-native geospatial stacks, with visual examples and repeatable scenario workflows called "field tests".
 
-Ask a question about any place on Earth. groundstation finds the freshest satellite imagery, active fires and disaster alerts, and the weather, does the pixel math, and hands back an interactive map. There are 3 ways in:
+Ask a question about any place on Earth. groundstation finds the satellite imagery, active fires and disaster alerts, weather, does the pixel math, and returns data, stories, and interactive maps. 3 ways in:
 
 ```mermaid
 flowchart LR
-    A["🗣 You, via Claude<br/>(MCP server + skill)"] --> T
-    B["🖥 Web console<br/>(no terminal needed)"] --> T
-    C["⏰ Scheduled briefings<br/>(nobody asks)"] --> T
+    A["🗣 AI Agent (Claude, GPT, Gemini, local) <br/>(MCP server + skill)"] --> T
+    B["🖥 Web"] --> T
+    C["⏰ Scheduled briefings"] --> T
     T["groundstation tools"] --> D["STAC catalogs<br/>Earth Search · NASA VEDA<br/>Planetary Computer"]
     T --> E["TiTiler<br/>tiles · previews · band math"]
     T --> F["EONET · GDACS · Open-Meteo<br/>events & weather"]
