@@ -15,28 +15,28 @@ flowchart LR
     T --> G["🗺 shareable map artifacts<br/>📄 draft briefs"]
 ```
 
-Everything runs against public, keyless endpoints, so it works anywhere with nothing to sign up for.
+Everything runs against public, keyless endpoints, so it works anywhere with nothing to sign up for. It supports any MCP client, like Claude Code, Codex, Gemini CLI or Cursor.
 
 ## What it lets an agent do
 
-- **Answer a question about a place.** Find the right scene, do the pixel math, and come back with numbers, their caveats, and a map to share
-- **Think alongside you.** In a brainstorm or design session, pull real imagery and numbers for a place while the idea is still forming, and sketch a map the room can react to
-- **Explore before committing.** See what data exists for a place, at what resolution and how fresh, before anyone scopes a project around it
-- **Watch places and report back.** Brief you each morning on what changed, and stay quiet about what didn't
+- Answer a question about a place. Find the right scene, do the pixel math, and come back with numbers, their caveats, and a map to share
+- Think alongside you. In a brainstorm or design session, pull real imagery and numbers for a place while the idea is still forming, and sketch a map the room can react to
+- Explore before committing. See what data exists for a place, at what resolution and how fresh, before anyone scopes a project around it
+- Watch places and report back. Brief you each morning on what changed, and stay quiet about what didn't
 
-![the console scanning the Barotse Floodplain](docs/img/console.jpg)
+<img src="docs/img/field-test.jpg" width="680" alt="a field test page: 4 real asks, each with our read, the learning and a map">
 
-## Real examples
+## Examples
 
 All 3 are real runs on real data.
 
-**"What's burning near Chelan County?"** One scan found the 2 active wildfires (Navarre Coulee, Chelan Hills), correlated them with 14 straight days of zero rain and a 33°C heat peak in the forecast, and pointed at the 3 sub-1%-cloud scenes from ignition day.
+"What's burning near Chelan County?" One scan found the 2 active wildfires (Navarre Coulee, Chelan Hills), correlated them with 14 straight days of zero rain and a 33°C heat peak in the forecast, and pointed at the 3 sub-1%-cloud scenes from ignition day.
 
-**"How did vegetation change around Wenatchee?"** One `compare_dates` call matched 2 scenes from the same Sentinel-2 tile (10TFT, both about 1% cloud) and answered: NDVI 0.46 → 0.63 between May 28 and July 5, a +36% spring green-up, with a swipe map to see it.
+"How did vegetation change around Wenatchee?" One `compare_dates` call matched 2 scenes from the same Sentinel-2 tile (10TFT, both about 1% cloud) and answered: NDVI 0.46 → 0.63 between May 28 and July 5, a +36% spring green-up, with a swipe map to see it.
 
-**"Watch these 4 places every morning."** The fleet sweep triaged Chelan ACT (fires + heat), Efate and Laredo WATCH, Barotse CALM ("NDVI 0.397 → 0.395, normal dry-season drift, not a distress signal"). On its second run the Chelan brief opened with *"unchanged since this morning's earlier run"*. It remembers yesterday and only makes noise about what's new.
+"Watch these 4 places every morning." The fleet sweep triaged Chelan ACT (fires + heat), Efate and Laredo WATCH, Barotse CALM ("NDVI 0.397 → 0.395, normal dry-season drift, not a distress signal"). On its second run the Chelan brief opened with *"unchanged since this morning's earlier run"*. It remembers yesterday and only makes noise about what's new.
 
-![NDVI swipe comparison over Portland](docs/img/swipe-compare.jpg)
+<img src="docs/img/swipe-compare.jpg" width="680" alt="NDVI swipe comparison over Portland">
 
 ## Quickstart
 
@@ -129,7 +129,7 @@ The first `search_datasets` call takes 20 to 30 seconds while collection lists c
 | `next_pass` | when a satellite could next image a place | Celestrak orbits, constellations read from [eo-predictor](https://github.com/developmentseed/eo-predictor)'s catalog |
 | `conditions_brief` | current conditions around a place in one call: dryness, wind, events, the latest look, the next pass | the tools above |
 
-The tools say when not to trust them. A tool that returns a derived number also returns, on the same object, the conditions under which it should not be read at face value: a cloudy scene behind a change figure, statistics that cover a whole tile, a scene the tiler cannot read. The rule is in `docs/adr-caveats.md`.
+The tools try to flag when a number should not be trusted. A tool that returns a derived number also returns, on the same object, the conditions under which it should not be read at face value: a cloudy scene behind a change figure, statistics that cover a whole tile, a scene the tiler cannot read. The rule is in `docs/adr-caveats.md`.
 
 Every artifact carries a Stack panel. It shows the pipeline that made it, in order, with only the components that actually ran and Development Seed's own listed first. `docs/stack.md` is the curated source, and adding a tool is one entry.
 
@@ -143,7 +143,7 @@ Scheduling it with cron or launchd, Slack delivery, and running the synthesis on
 
 ## Be a good neighbor: titiler.xyz
 
-All tiling, previews and pixel math ride **titiler.xyz** by default, a free shared endpoint that Development Seed runs as a demo. It rate-limits (HTTP 429) under heavy use. For scheduled briefings, batch runs, or a demo to a room, run your own:
+All tiling, previews and pixel math ride titiler.xyz by default, a free shared endpoint that Development Seed runs as a demo. It rate-limits (HTTP 429) under heavy use. For scheduled briefings, batch runs, or a demo to a room, run your own:
 
 ```bash
 docker compose up -d titiler                          # TiTiler is one container, see compose.yml

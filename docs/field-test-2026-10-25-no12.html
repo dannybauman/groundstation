@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="only light">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>groundstation field test №12: 20 new asks, built to show what the tools can draw now</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
@@ -11,6 +12,7 @@
   --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
   --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
   --calm: #2e7d32; --blue: #1d4e8f;
+  color-scheme: only light;
 }
 * { box-sizing: border-box; }
 body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
@@ -28,8 +30,8 @@ main { padding: 10px 24px 60px; }
 h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
   display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
 h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(480px, 100%), 1fr)); gap: 16px; }
-@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+.grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; } }
 .card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .card .top { display: flex; align-items: center; gap: 10px; }
 .card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
@@ -44,10 +46,32 @@ details.data summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing:
 .learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
 .learning b { color: var(--accent); font-style: normal; }
 .shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.headline { font-size: 12.5px; color: var(--mid); border-left: 3px solid var(--accent); padding-left: 10px; }
+.headline b { color: var(--accent); }
+details.more > summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+details.more[open] > summary { margin-bottom: 10px; }
+details.more > * + * { margin-top: 10px; }
+@media (max-width: 999px) {
+  .card { display: grid; grid-template-columns: 300px minmax(0, 1fr); grid-auto-rows: min-content; align-content: start; gap: 8px 20px; padding: 16px; }
+  .card > * { grid-column: 2; min-width: 0; }
+  .card > .fig { grid-column: 1; grid-row: 1 / span 5; align-self: start; }
+  .card.nofig { grid-template-columns: minmax(0, 1fr); }
+  .card.nofig > * { grid-column: 1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/10; object-fit: cover; }
+}
+@media (max-width: 700px) {
+  .card { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px; }
+  .card > *, .card > .fig { grid-column: 1; grid-row: auto; }
+  .card > .fig { order: -1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/7; }
+  .card .top { flex-wrap: wrap; }
+  .card .who { margin-left: 0; }
+}
 .repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
 .repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
 .fig { position: relative; display: block; border: 1px solid var(--rule); text-decoration: none; }
-.fig img { width: 100%; display: block; }
+.fig img { width: 100%; display: block; aspect-ratio: 10/7; }
+.fig:not(:has(img)) { aspect-ratio: 16/10; background: var(--paper); }
 .fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
   background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
 .fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -74,8 +98,10 @@ footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var
 <div class="grid">
 <div class="card"><div class="top"><div class="num">1</div><div class="tag">forecast heat</div><div class="who">farm manager</div></div>
 <div><div class="label">Input</div><div class="prompt">My fields are just south of Laredo, Texas. What's the forecast high tomorrow afternoon, and how does that compare with the past week?</div></div>
-<div class="answer"><div class="label">Our read</div><b>Tomorrow afternoon (2026-10-26, 21:00 UTC, about 4 pm in Laredo) the HRRR model puts the air at 29.0 C over the fields</b>, with cells ranging 28.4 to 29.8 C (converted from the returned kelvin by me, not tool output). That is level with the past week's daily highs (2026-10-18 to 10-24), which averaged 29.1 C (my own average, not tool output) across a 21.3 to 32.4 range. The two numbers are not quite like for like: the model figure is one hour's temperature, while the week figures are each day's peak (the same weather source lists 30.0 C as the daily high for 2026-10-26). The temperature map is an ERA5 frame from 2023-01-10 12:00 UTC, because that is the only store the tiler can draw; it shows the layer working, not today's heat.</div>
+<div><div class="label">Our read</div><div class="answer">Tomorrow afternoon (2026-10-26, 21:00 UTC, about 4 pm in Laredo) the HRRR model puts the air at 29.0 C over the fields, with cells ranging 28.4 to 29.8 C (converted from the returned kelvin…</div></div>
+<div class="headline"><b>Learning →</b> The forecast store can be read but not drawn.</div>
 <a class="fig" href="img/ft12-laredo-era5.html" target="_blank" title="open the live artifact"><img src="img/ft12-laredo-era5.png" alt="artifact produced by example 1" loading="lazy"><span class="open">map: ERA5 temperature, 2023-01-10 frame, not the forecast ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Tomorrow afternoon (2026-10-26, 21:00 UTC, about 4 pm in Laredo) the HRRR model puts the air at 29.0 C over the fields</b>, with cells ranging 28.4 to 29.8 C (converted from the returned kelvin by me, not tool output). That is level with the past week's daily highs (2026-10-18 to 10-24), which averaged 29.1 C (my own average, not tool output) across a 21.3 to 32.4 range. The two numbers are not quite like for like: the model figure is one hour's temperature, while the week figures are each day's peak (the same weather source lists 30.0 C as the daily high for 2026-10-26). The temperature map is an ERA5 frame from 2023-01-10 12:00 UTC, because that is the only store the tiler can draw; it shows the layer working, not today's heat.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Laredo, Texas")
   source: nominatim   name: Laredo, Webb County, Texas, United States
   lat: 27.5079211   lon: -99.5069834
@@ -104,12 +130,14 @@ tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel={"time": "
 render_map("Laredo fields: ERA5 2 m temperature", bbox=fields, layers=[raster], stack_facts={"geocoded": "nominatim", "weather": True})
   map_path: /tmp/ft12/out/map-laredo-fields--era5-2-m-temperature.html</div></details>
 <div class="learning"><b>Learning →</b> <b>The forecast store can be read but not drawn.</b> HRRR answered the statistics call cleanly, but its <code>tiles</code> flag is false, so the only temperature raster available for the map is ERA5, and ERA5 stops at 2023-01-10; the card's map is a January 2023 frame behind an October 2026 question. The HRRR reply also gives the valid time it used but not which 00/06/12/18z run it came from, and its <code>caveats</code> list was empty, so nothing in the output says how fresh the forecast is. <b>And an ERA5 frame over a field-sized box is one flat colour:</b> the store is a 0.25° grid, so the box asked about is about one cell; the map is drawn at state scale so the temperature field shows, with the subtitle saying so.</div>
-<div class="shows">Zarr store (HRRR statistics, clipped) · weather_summary past week · ERA5 tile_url_template raster layer · Stack panel with geocoded fact</div>
+<div class="shows">Zarr store (HRRR statistics, clipped) · weather_summary past week · ERA5 tile_url_template raster layer · Stack panel with geocoded fact</div></details>
 </div>
 
-<div class="card"><div class="top"><div class="num">2</div><div class="tag">sea surface</div><div class="who">fisheries officer</div></div>
+<div class="card nofig"><div class="top"><div class="num">2</div><div class="tag">sea surface</div><div class="who">fisheries officer</div></div>
 <div><div class="label">Input</div><div class="prompt">How warm is the sea surface off Monterey Bay this week compared with the same week last year?</div></div>
-<div class="answer"><div class="label">Our read</div><b>Not computable from this store today.</b> The tool refused the sea surface request outright (quoted in the block above), and even if it had run, the MUR record listed in <code>describe_collection</code> ends 2020-01-20, so it has nothing for this week (2026-10-25) or last year's. ERA5 offers only 2 m air temperature, not sea surface. A NOAA OISST collection exists on Planetary Computer, but I did not run it, so there is no Monterey Bay sea surface number here.</div>
+<div><div class="label">Our read</div><div class="answer">Not computable from this store today.</div></div>
+<div class="headline"><b>Learning →</b> Two reasons stacked, and the error names only one.</div>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Not computable from this store today.</b> The tool refused the sea surface request outright (quoted in the block above), and even if it had run, the MUR record listed in <code>describe_collection</code> ends 2020-01-20, so it has nothing for this week (2026-10-25) or last year's. ERA5 offers only 2 m air temperature, not sea surface. A NOAA OISST collection exists on Planetary Computer, but I did not run it, so there is no Monterey Bay sea surface number here.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Monterey Bay, California")
   source: nominatim   name: Monterey Bay, Monterey County, California, United States
   bbox: [-122.0510668, 36.6499557, -121.75106679999999, 36.9499557]
@@ -141,13 +169,15 @@ search_datasets("sea surface temperature")
   planetary-computer   noaa-cdr-sea-surface-temperature-whoi   ...
   [further rows omitted, not read]</div></details>
 <div class="learning"><b>Learning →</b> <b>Two reasons stacked, and the error names only one.</b> The refusal talks about chunk size (123 MB for a single cell), which sounds like a speed problem that a patient retry might beat. The bigger fact is in <code>describe_collection</code>: the store ends 2020-01-20, so no amount of reading would give a 2026 answer. Read the <code>sel</code> line before trusting that a refusal is the only obstacle.</div>
-<div class="shows">Zarr store metadata-only branch (MUR) · tool refusal quoted as the card · describe_collection · search_datasets across catalogs</div>
+<div class="shows">Zarr store metadata-only branch (MUR) · tool refusal quoted as the card · describe_collection · search_datasets across catalogs</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">3</div><div class="tag">smoke</div><div class="who">air quality lead</div></div>
 <div><div class="label">Input</div><div class="prompt">Is wildfire smoke going to reach Boise in the next 24 hours?</div></div>
-<div class="answer"><div class="label">Our read</div><b>No: HRRR guidance shows clear air over Boise</b>, 0.1 ug/m3 at 2026-10-26 05:00 UTC and 0.0 ug/m3 at 2026-10-27 05:00 UTC from the 2026-10-26 00Z run, both under the 5 ug/m3 clear line. The brief page agrees (TL;DR: CALM) and no fire or other event is listed within about 150 km. This is model guidance, not a measurement, and it gives two moments 24 hours apart, so a plume passing through in between would not show; the tool's own caveat says timing and edges can be off by hours and miles.</div>
+<div><div class="label">Our read</div><div class="answer">No: HRRR guidance shows clear air over Boise, 0.1 ug/m3 at 2026-10-26 05:00 UTC and 0.0 ug/m3 at 2026-10-27 05:00 UTC from the 2026-10-26 00Z run, both under the 5 ug/m3 clear line.</div></div>
+<div class="headline"><b>Learning →</b> The tool and the page disagree about who carries the smoke.</div>
 <a class="fig" href="img/ft12-boise-brief.html" target="_blank" title="open the live artifact"><img src="img/ft12-boise-brief.png" alt="artifact produced by example 3" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>No: HRRR guidance shows clear air over Boise</b>, 0.1 ug/m3 at 2026-10-26 05:00 UTC and 0.0 ug/m3 at 2026-10-27 05:00 UTC from the 2026-10-26 00Z run, both under the 5 ug/m3 clear line. The brief page agrees (TL;DR: CALM) and no fire or other event is listed within about 150 km. This is model guidance, not a measurement, and it gives two moments 24 hours apart, so a plume passing through in between would not show; the tool's own caveat says timing and edges can be off by hours and miles.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Boise, Idaho")
   source: nominatim   name: Boise, Ada County, Idaho, United States   lat 43.6166163  lon -116.200886
   geocode_note: matched 'Boise, Idaho'; other places share it: Boise County, Idaho, United States. Pass a state or country if another was meant
@@ -182,13 +212,15 @@ page states:
   Fresh eyes: "Sentinel-2 L2A, 2026-10-24 (S2C_11TNJ): 1.1% cloud and 100% AOI coverage."
   map layers include: "HRRR smoke forecast, valid 2026-10-27T05:00Z"</div></details>
 <div class="learning"><b>Learning →</b> <b>The tool and the page disagree about who carries the smoke.</b> <code>conditions_brief</code> returned wind, events and a Sentinel-2 look but no smoke at all; the smoke numbers and the smoke map frame came only from the page script <code>briefing/brief.py</code>, which took about 39 s. And <code>smoke_forecast</code> returns two instants (now and +24 h), not a worst case across the day, so the question 'in the next 24 hours' is answered by endpoints only.</div>
-<div class="shows">smoke_forecast (HRRR MASSDEN) · smoke frame on the brief's map · brief page whose linked map carries the Stack panel · conditions_brief side by side</div>
+<div class="shows">smoke_forecast (HRRR MASSDEN) · smoke frame on the brief's map · brief page whose linked map carries the Stack panel · conditions_brief side by side</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">4</div><div class="tag">rain two years</div><div class="who">hydrologist</div></div>
 <div><div class="label">Input</div><div class="prompt">ERA5: how did total precipitation over the Sacramento Valley in October 2026 compare with October 2025?</div></div>
-<div class="answer"><div class="label">Our read</div><b>Not computable from this ERA5 store.</b> It has no precipitation variable (the tool lists only 2m_temperature), and its time axis ends 2023-01-10, so neither October 2026 nor October 2025 exists in it; asking for either snapped to 2023-01-10 18:00 UTC ("outside the store's range", off by 1373 and 1008 days). There is no rainfall comparison for the Sacramento Valley here, and the temperature figures the calls returned are for January 2023 and should not be read as October. The map is a labeled January 2023 temperature frame to show the layer, not an October 2026 rain picture.</div>
+<div><div class="label">Our read</div><div class="answer">Not computable from this ERA5 store.</div></div>
+<div class="headline"><b>Learning →</b> Two traps in a row.</div>
 <a class="fig" href="img/ft12-sacramento-era5.html" target="_blank" title="open the live artifact"><img src="img/ft12-sacramento-era5.png" alt="artifact produced by example 4" loading="lazy"><span class="open">map: ERA5 temperature, January 2023 frame, not rain ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Not computable from this ERA5 store.</b> It has no precipitation variable (the tool lists only 2m_temperature), and its time axis ends 2023-01-10, so neither October 2026 nor October 2025 exists in it; asking for either snapped to 2023-01-10 18:00 UTC ("outside the store's range", off by 1373 and 1008 days). There is no rainfall comparison for the Sacramento Valley here, and the temperature figures the calls returned are for January 2023 and should not be read as October. The map is a labeled January 2023 temperature frame to show the layer, not an October 2026 rain picture.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Sacramento Valley, California")
   source: nominatim   ambiguous: false
   name: Sacramento Valley Station, 401, I Street, Downtown, Sacramento, Sacramento County, California, 95814, United States
@@ -220,13 +252,15 @@ tile_url_template("zarr", "weatherbench2-era5", "2m_temperature", sel={"time": "
 render_map(... subtitle="Asked for 2026-10-15 12Z; the store has nothing after 2023-01-10")
   map_path: /tmp/ft12/out/map-sacramento-valley--era5-2-m-temperature--last-frame-in-the-s.html</div></details>
 <div class="learning"><b>Learning →</b> <b>Two traps in a row.</b> First, "Sacramento Valley" geocoded to Sacramento Valley Station, a train station downtown, widened to a 0.3 degree box; the geocode_note names it but a hasty reader would take the box for the valley, so I set a valley-sized box by hand. Second, <code>tile_url_template</code> accepted a 2026 time with no warning, while <code>compute_statistics</code> snaps loudly with a caveat; the tiler's "nearest" should land on the last frame, but I did not load the tiles to confirm that. <b>And an ERA5 frame over a field-sized box is one flat colour:</b> the store is a 0.25° grid, so the box asked about is about one cell; the map is drawn at state scale so the temperature field shows, with the subtitle saying so.</div>
-<div class="shows">Zarr store caveats (snapped time, coarse grid) · unknown-variable error listing options · ERA5 tile template · Stack panel</div>
+<div class="shows">Zarr store caveats (snapped time, coarse grid) · unknown-variable error listing options · ERA5 tile template · Stack panel</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">5</div><div class="tag">snow 3d</div><div class="who">ski resort operations</div></div>
 <div><div class="label">Input</div><div class="prompt">Is there snow on the upper mountain at Mt Bachelor yet, and what does the model say for the next 2 days?</div></div>
-<div class="answer"><div class="label">Our read</div><b>Mostly bare on the upper mountain as of the clear Sentinel-2 look on 2026-10-23 (0.02% cloud)</b>: the snow index over the summit box averaged -0.32 (median -0.33), with only the top 2% of pixels above 0.10, though a few bright patches reach 0.84. The model (HRRR, one 3 km cell) holds the air below freezing: about -2.8 C at 21:00 UTC on 2026-10-26, -2.6 C at 09:00 UTC and -2.2 C at 21:00 UTC on 2026-10-27 (my conversion from kelvin, not tool output). That store carries temperature only, so it says nothing about snowfall; and the index was computed on raw band values (the scale and offset are passed through, not applied), so read it as direction, not as a snow-cover percentage.</div>
+<div><div class="label">Our read</div><div class="answer">Mostly bare on the upper mountain as of the clear Sentinel-2 look on 2026-10-23 (0.02% cloud): the snow index over the summit box averaged -0.32 (median -0.33), with only the top 2% of…</div></div>
+<div class="headline"><b>Learning →</b> The 3D drape missed a slice of the view until a sibling tile was added.</div>
 <a class="fig" href="img/ft12-bachelor-ndsi-3d.html" target="_blank" title="open the live artifact"><img src="img/ft12-bachelor-ndsi-3d.png" alt="artifact produced by example 5" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Mostly bare on the upper mountain as of the clear Sentinel-2 look on 2026-10-23 (0.02% cloud)</b>: the snow index over the summit box averaged -0.32 (median -0.33), with only the top 2% of pixels above 0.10, though a few bright patches reach 0.84. The model (HRRR, one 3 km cell) holds the air below freezing: about -2.8 C at 21:00 UTC on 2026-10-26, -2.6 C at 09:00 UTC and -2.2 C at 21:00 UTC on 2026-10-27 (my conversion from kelvin, not tool output). That store carries temperature only, so it says nothing about snowfall; and the index was computed on raw band values (the scale and offset are passed through, not applied), so read it as direction, not as a snow-cover percentage.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Mount Bachelor, Oregon")
   source: nominatim   name: Mount Bachelor, Deschutes County, Oregon, United States   lat 43.9793848  lon -121.6885078
   bbox_note: geocoder returned a point, not an extent -- widened to a 0.3 deg box around it. Pass your own bbox if the subject is bigger
@@ -259,7 +293,7 @@ render_map_3d("Mt Bachelor: snow index (NDSI) on terrain, 2026-10-23", bbox=[-12
   coverage_note: the drape covers 87% of the view on load, the rest is terrain with no imagery until someone clicks Load full coverage, which takes it to 100%
   [first render without extra_layers said: "the drape covers 87% of the view, the rest renders as terrain with no imagery. Pass the rest of a same-day full_coverage_set as extra_layers"]</div></details>
 <div class="learning"><b>Learning →</b> <b>The 3D drape missed a slice of the view until a sibling tile was added.</b> The clearest scene (tile 10TFP) does not reach the west edge of my view, so that edge had no imagery and the tool reported 87% coverage; the same-day neighbor 10TEP covers it, but only as <code>extra_layers</code> behind a click, so on load the page still opens at 87%. Also, a 0.03 degree summit box holds one HRRR cell, so the 'upper mountain' forecast is the single cell's temperature, which may not match the summit.</div>
-<div class="shows">clipped compute_statistics with an NDSI expression · render_map_3d draped with an index layer and extra_layers · HRRR forecast statistics · Stack panel with terrain</div>
+<div class="shows">clipped compute_statistics with an NDSI expression · render_map_3d draped with an index layer and extra_layers · HRRR forecast statistics · Stack panel with terrain</div></details>
 </div>
 </div>
 
@@ -267,8 +301,10 @@ render_map_3d("Mt Bachelor: snow index (NDSI) on terrain, 2026-10-23", bbox=[-12
 <div class="grid">
 <div class="card"><div class="top"><div class="num">6</div><div class="tag">lava</div><div class="who">rancher</div></div>
 <div><div class="label">Input</div><div class="prompt">Any new lava flows near Kilauea this month?</div></div>
-<div class="answer"><div class="label">Our read</div><b>I can't tell you from this whether there are new lava flows</b>: the SWIR index over the Kilauea box moved from -0.30 on 2026-09-28 to -0.27 on 2026-10-18, a delta of +0.04, but the 2026-10-18 scene is 36% cloud. The name "Kilauea, Hawaii" was refused as ambiguous (a town on Kauaʻi or a point in Hawaiʻi County), so I passed the volcano's own box from "Kilauea volcano, Hawaii". The tool's caveat applies: "cloud may be driving this delta (after scene 36%, threshold 20%). Cloud pushes a normalized index toward zero." The figure is a mean over the whole box (clipped_to above), not a lava map, so open the swipe and look at the summit and rift area on 2026-09-28 against 2026-10-18.</div>
+<div><div class="label">Our read</div><div class="answer">I can&#x27;t tell you from this whether there are new lava flows: the SWIR index over the Kilauea box moved from -0.30 on 2026-09-28 to -0.27 on 2026-10-18, a delta of +0.04, but the 2026-10-18…</div></div>
+<div class="headline"><b>Learning →</b> The volcano was candidate 2, but as a box 0.0001 degrees wide.</div>
 <a class="fig" href="img/ft12-kilauea-swir.html" target="_blank" title="open the live artifact"><img src="img/ft12-kilauea-swir.png" alt="artifact produced by example 6" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>I can't tell you from this whether there are new lava flows</b>: the SWIR index over the Kilauea box moved from -0.30 on 2026-09-28 to -0.27 on 2026-10-18, a delta of +0.04, but the 2026-10-18 scene is 36% cloud. The name "Kilauea, Hawaii" was refused as ambiguous (a town on Kauaʻi or a point in Hawaiʻi County), so I passed the volcano's own box from "Kilauea volcano, Hawaii". The tool's caveat applies: "cloud may be driving this delta (after scene 36%, threshold 20%). Cloud pushes a normalized index toward zero." The figure is a mean over the whole box (clipped_to above), not a lava map, so open the swipe and look at the summit and rift area on 2026-09-28 against 2026-10-18.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Kilauea, Hawaii")
   source: nominatim   name: Kilauea, Kauaʻi County, Hawaii, 96754, United States
   bbox: [-159.422598, 22.1961855, -159.392682, 22.22117]
@@ -300,13 +336,15 @@ compare_dates(bbox=[-155.425811, 19.2638647, -155.125811, 19.5638647],
   caveat: ["cloud may be driving this delta (after scene 36%, threshold 20%). Cloud pushes a normalized index toward zero."]
   map_path: /tmp/ft12/out/map-kilauea-volcano---2026-10-18-vs-2026-09-28.html</div></details>
 <div class="learning"><b>Learning →</b> <b>The volcano was candidate 2, but as a box 0.0001 degrees wide.</b> The geocoder refused to guess, as intended, but the two choices it offered were Kilauea on Kauaʻi and a Hawaiʻi County point whose box is 0.0001 degrees wide (about 11 m, my arithmetic), so picking candidate 2 would have clipped a few pixels. Typing "Kilauea volcano, Hawaii" returned the same point widened to a plain 0.3 degree square, which is the box I used. I also ran with max_cloud_cover 40 because a tropical volcano rarely gives anything clearer; the cost was a 36% scene and the caveat above.</div>
-<div class="shows">ambiguous geocode with candidates · compare_dates refusing an ambiguous place · clipped_to · cloud caveat · SWIR expression · swipe map</div>
+<div class="shows">ambiguous geocode with candidates · compare_dates refusing an ambiguous place · clipped_to · cloud caveat · SWIR expression · swipe map</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">7</div><div class="tag">reservoir</div><div class="who">water district</div></div>
 <div><div class="label">Input</div><div class="prompt">How much has Lake Shasta's surface shrunk since spring?</div></div>
-<div class="answer"><div class="label">Our read</div><b>Slightly less water in the reservoir box, but this index can't give you a shrinkage number</b>: over a box I drew around the reservoir the NDWI mean went from -0.47 on 2026-05-15 to -0.49 on 2026-10-18 (delta -0.02), and water scores high on this index. Both scenes are clear (cloud 0.05% and 0.0002%) and from the same tile, 10TEL. It gives direction, not acres or feet: the box includes shoreline and hills, and the number is a mean over every pixel in it. The name "Shasta Lake, California" resolved to the town of Shasta Lake, and over that box the sign is the opposite (+0.05), so the box you choose decides the answer.</div>
+<div><div class="label">Our read</div><div class="answer">Slightly less water in the reservoir box, but this index can&#x27;t give you a shrinkage number: over a box I drew around the reservoir the NDWI mean went from -0.47 on 2026-05-15 to -0.49 on…</div></div>
+<div class="headline"><b>Learning →</b> The place name gave the town, not the lake, and the sign flipped.</div>
 <a class="fig" href="img/ft12-shasta-ndwi.html" target="_blank" title="open the live artifact"><img src="img/ft12-shasta-ndwi.png" alt="artifact produced by example 7" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Slightly less water in the reservoir box, but this index can't give you a shrinkage number</b>: over a box I drew around the reservoir the NDWI mean went from -0.47 on 2026-05-15 to -0.49 on 2026-10-18 (delta -0.02), and water scores high on this index. Both scenes are clear (cloud 0.05% and 0.0002%) and from the same tile, 10TEL. It gives direction, not acres or feet: the box includes shoreline and hills, and the number is a mean over every pixel in it. The name "Shasta Lake, California" resolved to the town of Shasta Lake, and over that box the sign is the opposite (+0.05), so the box you choose decides the answer.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Shasta Lake, California")
   source: nominatim   name: Shasta Lake, Shasta County, California, United States
   bbox: [-122.411328, 40.650921, -122.336985, 40.709755]
@@ -335,13 +373,15 @@ compare_dates(bbox=[-122.45, 40.67, -122.17, 40.95], label="Lake Shasta reservoi
   map_path: /tmp/ft12/out/map-lake-shasta-reservoir---2026-10-18-vs-2026-05-15.html
   [no caveat key on either call]</div></details>
 <div class="learning"><b>Learning →</b> <b>The place name gave the town, not the lake, and the sign flipped.</b> geocode("Shasta Lake, California") returned a 0.07 by 0.06 degree city box with no ambiguity flag, and compare_dates over it reported NDWI up 0.05; the same call over a box I drew by eye around the reservoir ([-122.45, 40.67, -122.17, 40.95], not checked against a shoreline) reported it down 0.02. clipped_to printed the box both times, which is what exposed it, but nothing warned that a city box was standing in for a lake.</div>
-<div class="shows">clipped_to on compare_dates · NDWI expression · same-tile scene matching · place-versus-bbox sensitivity · swipe map</div>
+<div class="shows">clipped_to on compare_dates · NDWI expression · same-tile scene matching · place-versus-bbox sensitivity · swipe map</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">8</div><div class="tag">flood events</div><div class="who">county emergency manager</div></div>
 <div><div class="label">Input</div><div class="prompt">Any active flooding events in Harris County?</div></div>
-<div class="answer"><div class="label">Our read</div><b>No active flooding events are listed for Harris County, Texas</b> over the past 30 days: EONET listed 0 open events and GDACS 0 active inside the county box. Widening the box by 1 degree turns up one event, a prescribed fire in Polk County dated 2026-10-16, which is not a flood. "Harris County" alone was flagged ambiguous (a Texas county at 29.8N 95.4W or one at 32.7N 84.9W), so I used "Harris County, Texas". Two feeds with nothing in them means nothing is logged there, not that nothing is flooding: local flash-flood reports are not in EONET or GDACS, so use the National Weather Service for those.</div>
+<div><div class="label">Our read</div><div class="answer">No active flooding events are listed for Harris County, Texas over the past 30 days: EONET listed 0 open events and GDACS 0 active inside the county box.</div></div>
+<div class="headline"><b>Learning →</b> The two candidates have the same name and differ only in a coordinate.</div>
 <a class="fig" href="img/ft12-harris-events.html" target="_blank" title="open the live artifact"><img src="img/ft12-harris-events.png" alt="artifact produced by example 8" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>No active flooding events are listed for Harris County, Texas</b> over the past 30 days: EONET listed 0 open events and GDACS 0 active inside the county box. Widening the box by 1 degree turns up one event, a prescribed fire in Polk County dated 2026-10-16, which is not a flood. "Harris County" alone was flagged ambiguous (a Texas county at 29.8N 95.4W or one at 32.7N 84.9W), so I used "Harris County, Texas". Two feeds with nothing in them means nothing is logged there, not that nothing is flooding: local flash-flood reports are not in EONET or GDACS, so use the National Weather Service for those.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Harris County")
   source: gazet   name: Harris County (US, county)
   bbox: [-95.96084594726562, 29.49733543395996, -94.90847778320312, 30.170696258544922]
@@ -373,13 +413,15 @@ render_map(title="Harris County, Texas: open natural events, 30 days", layers=[g
   coverage_note: no imagery layer on this map, so it renders as vectors on a blank background. Add a scene, or say plainly that none is available for this area
   [state echo (bbox, compare false, layer list) omitted]</div></details>
 <div class="learning"><b>Learning →</b> <b>The two candidates have the same name and differ only in a coordinate.</b> Both Harris County rows read "Harris County (US, county)"; the caller has to tell them apart from the "where" text (29.8N 95.4W against 32.7N 84.9W) and know which is Texas. The fuller name "Harris County, Texas" then answered through nominatim, not gazet, with the same bbox to within 0.00002 degrees. The events map is also an honest empty: with no events inside the county there is only the padded Polk point on a blank background, and I did not add imagery because I found no single Sentinel-2 scene covering the county (that search is not in the block above).</div>
-<div class="shows">ambiguous geocode with candidates · active_events with and without pad · events layer · Stack panel facts (geocoded, events) · empty-result honesty</div>
+<div class="shows">ambiguous geocode with candidates · active_events with and without pad · events layer · Stack panel facts (geocoded, events) · empty-result honesty</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">9</div><div class="tag">burn scar 3d</div><div class="who">forester</div></div>
 <div><div class="label">Input</div><div class="prompt">Show me the Flat Fire burn scar in 3D</div></div>
-<div class="answer"><div class="label">Our read</div><b>EONET has no Flat Fire in Oregon, so I draped the largest named Oregon wildfire from the last 90 days, MUSTANG in Malheur County</b> (13,379 acres, last EONET update 2026-08-25). The 3D view uses the Sentinel-2 scene from 2026-10-07 (cloud 0.06%, covers the whole box), coloured by a burn index where low values mean burned ground; the box mean is -0.18 and the 2nd to 98th percentile range is -0.38 to -0.06. The one near-name match, Second Flat in Harney County (76,958 acres), was last updated 2026-07-24, outside the 90 days. Caveats: this is one date with no pre-fire scene, the tool computed the index on raw values without applying the scene's offset, and the burn colouring is not calibrated, so read the picture, not the mean.</div>
+<div><div class="label">Our read</div><div class="answer">EONET has no Flat Fire in Oregon, so I draped the largest named Oregon wildfire from the last 90 days, MUSTANG in Malheur County (13,379 acres, last EONET update 2026-08-25).</div></div>
+<div class="headline"><b>Learning →</b> active_events cannot rank fires, so &quot;the largest&quot; took a second source.</div>
 <a class="fig" href="img/ft12-mustang-3d.html" target="_blank" title="open the live artifact"><img src="img/ft12-mustang-3d.png" alt="artifact produced by example 9" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>EONET has no Flat Fire in Oregon, so I draped the largest named Oregon wildfire from the last 90 days, MUSTANG in Malheur County</b> (13,379 acres, last EONET update 2026-08-25). The 3D view uses the Sentinel-2 scene from 2026-10-07 (cloud 0.06%, covers the whole box), coloured by a burn index where low values mean burned ground; the box mean is -0.18 and the 2nd to 98th percentile range is -0.38 to -0.06. The one near-name match, Second Flat in Harney County (76,958 acres), was last updated 2026-07-24, outside the 90 days. Caveats: this is one date with no pre-fire scene, the tool computed the index on raw values without applying the scene's offset, and the burn colouring is not calibrated, so read the picture, not the mean.</div>
 <details class="data"><summary>show the data</summary><div class="returned">active_events(bbox=[-124.6, 41.9, -116.4, 46.3], days=90)    [Oregon box; 3 of 18 rows shown]
   eonet_note: EONET listed 18 open events in 90 days
   gdacs_note: GDACS current-events feed listed 100; 0 active within 90 days inside the bbox
@@ -416,13 +458,15 @@ compute_statistics(earth-search, sentinel-2-l2a, S2C_11TMH_20261007_0_L2A, expre
   clipped_to: [-117.56, 42.55, -117.32, 42.78]
   [band_scaling omitted: the item's scale/offset list, 0.0001 and offset -0.1 on the reflectance bands, which the tool passes through and does not apply, so the index is computed on raw values]</div></details>
 <div class="learning"><b>Learning →</b> <b>active_events cannot rank fires, so "the largest" took a second source.</b> The 90-day call returned 18 rows with title, date and coordinates but no acreage, and the rule I was given (pick the largest) needs one. I had to query EONET directly for magnitudeValue, which is not a groundstation tool. That same query also showed the call's <code>status: open</code> filter hides closed fires, and that the only Flat in Oregon in 400 days is Second Flat, last updated 2026-07-24. The index stats also come back on raw values (the offset -0.1 is not applied), so the -0.18 mean is a relative number only.</div>
-<div class="shows">active_events to find a named fire · search_imagery recommended/coverage fields · render_map_3d drape with a burn index · clipped compute_statistics</div>
+<div class="shows">active_events to find a named fire · search_imagery recommended/coverage fields · render_map_3d drape with a burn index · clipped compute_statistics</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">10</div><div class="tag">port radar</div><div class="who">port analyst</div></div>
 <div><div class="label">Input</div><div class="prompt">Compare Rotterdam port activity on radar between last month and now</div></div>
-<div class="answer"><div class="label">Our read</div><b>The radar picture is a little brighter over the Rotterdam port box on 2026-10-24 than on 2026-09-30</b>: VV mean 269 against 241 (median 204 against 197), both from the same Sentinel-1 orbit (descending, 05:49 UTC) so the viewing geometry matches. That is a brightness difference, not an activity count. The numbers are raw amplitude values for a hand-drawn box that is mostly water and land, not calibrated backscatter, and they include wind and sea-state effects.</div>
+<div><div class="label">Our read</div><div class="answer">The radar picture is a little brighter over the Rotterdam port box on 2026-10-24 than on 2026-09-30: VV mean 269 against 241 (median 204 against 197), both from the same Sentinel-1 orbit…</div></div>
+<div class="headline"><b>Learning →</b> Radar brightness needed its stretch chosen by hand.</div>
 <a class="fig" href="img/ft12-rotterdam-sar.html" target="_blank" title="open the live artifact"><img src="img/ft12-rotterdam-sar.png" alt="artifact produced by example 10" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>The radar picture is a little brighter over the Rotterdam port box on 2026-10-24 than on 2026-09-30</b>: VV mean 269 against 241 (median 204 against 197), both from the same Sentinel-1 orbit (descending, 05:49 UTC) so the viewing geometry matches. That is a brightness difference, not an activity count. The numbers are raw amplitude values for a hand-drawn box that is mostly water and land, not calibrated backscatter, and they include wind and sea-state effects.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Port of Rotterdam")
   source: nominatim   name: Port of Rotterdam, Lekstraat, Mathenesse, Nieuw-Mathenesse, Delfshaven, Rotterdam, Zuid-Holland, Nederland, 3029 BN, Nederland
   bbox: [4.2798268, 51.754333, 4.5798268, 52.054333]
@@ -451,7 +495,7 @@ render_map(title="Rotterdam port on radar: 2026-09-30 vs 2026-10-24 (VV)", bbox=
   map_path: /tmp/ft12/out/map-rotterdam-port-on-radar--2026-09-30-vs-2026-10-24--vv.html
   compare: true   coverage_pct: 100.0</div></details>
 <div class="learning"><b>Learning →</b> <b>Radar brightness needed its stretch chosen by hand.</b> The VV asset is raw amplitude (values up to 9,000), so there was no obvious rescale; I ran compute_statistics on both scenes first and used 0,800 because the 98th percentiles were 795 and 932. The geocode for "Port of Rotterdam" was also no use: a 0.3 degree square around a street address in Mathenesse, so I drew the port box myself. Nothing in the tools turns this into ship or container counts.</div>
-<div class="shows">search_imagery on sentinel-1-grd · same-orbit scene pairing · SAR VV compare swipe · raw amplitude stats</div>
+<div class="shows">search_imagery on sentinel-1-grd · same-orbit scene pairing · SAR VV compare swipe · raw amplitude stats</div></details>
 </div>
 </div>
 
@@ -459,8 +503,10 @@ render_map(title="Rotterdam port on radar: 2026-09-30 vs 2026-10-24 (VV)", bbox=
 <div class="grid">
 <div class="card"><div class="top"><div class="num">11</div><div class="tag">datasets</div><div class="who">researcher</div></div>
 <div><div class="label">Input</div><div class="prompt">Which open datasets cover night lights for Lagos at better than 1 km?</div></div>
-<div class="answer"><div class="label">Our read</div><b>Black Marble does not cover Lagos, though the catalog says it does.</b> VEDA's <code>nightlights-hd-monthly</code> came back with <code>covers_aoi=True</code>, but a search for its items over Lagos returned 0, because its extent is one envelope around other cities' scenes (25 per month in the items read, Venice to Auckland, 2019 to 2022-03). What does cover Lagos is the <b>GRDI VIIRS night-lights raster, one annual composite for 2020</b>, drawn on the map; no search hit declares a resolution, so "better than 1 km" is unconfirmed, and the pixel count over the 0.32 degree Lagos box (about 35 km, my arithmetic) suggests about 1 km, which I did not verify. Caveats: the tool says <code>gsd</code> is null and "resolution unknown (not necessarily coarse)"; the raster is an input to a deprivation index and not the Black Marble product; there is no 2026 or monthly night-lights layer for Lagos in these catalogs.</div>
+<div><div class="label">Our read</div><div class="answer">Black Marble does not cover Lagos, though the catalog says it does.</div></div>
+<div class="headline"><b>Learning →</b> covers_aoi=True is the envelope, not the pixels.</div>
 <a class="fig" href="img/ft12-lagos-nightlights.html" target="_blank" title="open the live artifact"><img src="img/ft12-lagos-nightlights.png" alt="artifact produced by example 11" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Black Marble does not cover Lagos, though the catalog says it does.</b> VEDA's <code>nightlights-hd-monthly</code> came back with <code>covers_aoi=True</code>, but a search for its items over Lagos returned 0, because its extent is one envelope around other cities' scenes (25 per month in the items read, Venice to Auckland, 2019 to 2022-03). What does cover Lagos is the <b>GRDI VIIRS night-lights raster, one annual composite for 2020</b>, drawn on the map; no search hit declares a resolution, so "better than 1 km" is unconfirmed, and the pixel count over the 0.32 degree Lagos box (about 35 km, my arithmetic) suggests about 1 km, which I did not verify. Caveats: the tool says <code>gsd</code> is null and "resolution unknown (not necessarily coarse)"; the raster is an input to a deprivation index and not the Black Marble product; there is no 2026 or monthly night-lights layer for Lagos in these catalogs.</div>
 <details class="data"><summary>show the data</summary><div class="returned">search_datasets("nightlights", place="Lagos, Nigeria", max_gsd=1000)
   1 hit
   veda  nightlights-hd-monthly  Black Marble High Definition Nightlights Monthly Dataset  gsd=None  covers_aoi=True
@@ -494,13 +540,15 @@ render_map("Lagos, GRDI VIIRS night lights (2020 annual)", bbox=<Lagos>, [item l
   /tmp/ft12/out/map-lagos--grdi-viirs-night-lights--2020-annual.html  layers: ['GRDI VNL night lights, 2020']
 [one tile fetched at z=11 over Lagos Island: HTTP 200, PNG with partial transparency; the whole map was not looked at in a browser]</div></details>
 <div class="learning"><b>Learning →</b> <b>covers_aoi=True is the envelope, not the pixels.</b> The Black Marble HD monthly collection passed the Lagos filter and then held no Lagos item: its declared box is a union of 25 city scenes. The tool's docstring says as much, but the flag reads as a yes. Every hit also has gsd=None, so the max_gsd=1000 filter kept things it could not check, and the only way to find the real Lagos layer was a second search_imagery per hit.</div>
-<div class="shows">federated search_datasets with place and max_gsd filters · covers_aoi and gsd=None flags · describe_collection extent versus search_imagery items · Stack panel with geocoded fact</div>
+<div class="shows">federated search_datasets with place and max_gsd filters · covers_aoi and gsd=None flags · describe_collection extent versus search_imagery items · Stack panel with geocoded fact</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">12</div><div class="tag">offline archive</div><div class="who">disaster planner</div></div>
 <div><div class="label">Input</div><div class="prompt">Build me an offline archive of the last 3 months of Sentinel-2 over Metro Manila, then search it with the network off.</div></div>
-<div class="answer"><div class="label">Our read</div>A 96-scene Sentinel-2 archive for Metro Manila (2026-07-25 to 2026-10-23) was written to one parquet file, and <b>the search ran with the network cut</b>: the live control failed with Connection refused while the archive returned five scenes. The recommended scene is S2A_51PTS_20261015_0_L2A (2026-10-15, 7.7% cloud, covers 95.3% of the box), drawn from the live catalog after the network came back. Caveats: the result says the archive is a snapshot and "newer scenes may exist"; a cloud cap cannot be set when writing (write_archive takes no max_cloud_cover), so all 96 scenes are in the file and the 20% cap was applied at search time.</div>
+<div><div class="label">Our read</div><div class="answer">A 96-scene Sentinel-2 archive for Metro Manila (2026-07-25 to 2026-10-23) was written to one parquet file, and the search ran with the network cut: the live control failed with Connection…</div></div>
+<div class="headline"><b>Learning →</b> The archive keeps every cloud level.</div>
 <a class="fig" href="img/ft12-manila-archive.html" target="_blank" title="open the live artifact"><img src="img/ft12-manila-archive.png" alt="artifact produced by example 12" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div>A 96-scene Sentinel-2 archive for Metro Manila (2026-07-25 to 2026-10-23) was written to one parquet file, and <b>the search ran with the network cut</b>: the live control failed with Connection refused while the archive returned five scenes. The recommended scene is S2A_51PTS_20261015_0_L2A (2026-10-15, 7.7% cloud, covers 95.3% of the box), drawn from the live catalog after the network came back. Caveats: the result says the archive is a snapshot and "newer scenes may exist"; a cloud cap cannot be set when writing (write_archive takes no max_cloud_cover), so all 96 scenes are in the file and the 20% cap was applied at search time.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Metro Manila, Philippines")
   Metro Manila, Philippines  bbox=[120.7917034, 14.3472554, 121.1350232, 14.7853355]  source=nominatim
 write_archive("earth-search", ["sentinel-2-l2a"], bbox=[120.7917034, 14.3472554, 121.1350232, 14.7853355], datetime_range="2026-07-25T00:00:00Z/2026-10-25T23:59:59Z", out_path="/tmp/ft12/out/manila-s2.parquet")
@@ -532,13 +580,15 @@ network back on
 render_map("Metro Manila, Sentinel-2 scene of 2026-10-15 (from the archive)", bbox=<Manila>, [item layer: earth-search / sentinel-2-l2a / S2A_51PTS_20261015_0_L2A, assets ["visual"]], stack_facts={"geocoded": "nominatim"})
   /tmp/ft12/out/map-metro-manila--sentinel-2-scene-of-2026-10-15--from-the-archi.html  layers: ['Sentinel-2 true colour, 2026-10-15']</div></details>
 <div class="learning"><b>Learning →</b> <b>The archive keeps every cloud level.</b> write_archive has no cloud filter, so a cloud-capped archive is a promise the search has to keep later, and the file also holds scenes you will never use. The oddity from №11 is back: write_archive says written 2026-10-25 and the search says 2026-10-26. Also the full_coverage_set items name the parquet path as their catalog, so passing that set straight to render_map would point at a file the tiler cannot read; I drew the one recommended id from earth-search by hand.</div>
-<div class="shows">write_archive geoparquet snapshot · search_imagery on an archive under a dead proxy with a failing live control · recommended and full_coverage_set from an archive · live render from an archived id</div>
+<div class="shows">write_archive geoparquet snapshot · search_imagery on an archive under a dead proxy with a failing live control · recommended and full_coverage_set from an archive · live render from an archived id</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">13</div><div class="tag">night postcard</div><div class="who">climate educator</div></div>
 <div><div class="label">Input</div><div class="prompt">Make me a postcard of the Nile delta at night.</div></div>
-<div class="answer"><div class="label">Our read</div><b>There is no Black Marble scene of the Nile delta</b>: VEDA's monthly Black Marble collection says it covers it, but search returned 0 items for the delta (its extent is an envelope and ends 2022-03-31), and the two other Black Marble collections tried have extents elsewhere. The postcard I made is a <b>2020 annual VIIRS night-lights composite</b> (GRDI VNL), a night-lights raster that does cover the delta, and the caption says it is not Black Marble. Caveats: it is a 2020 annual image, not a recent night; the tool declares no resolution, and the frame is small.</div>
+<div><div class="label">Our read</div><div class="answer">There is no Black Marble scene of the Nile delta: VEDA&#x27;s monthly Black Marble collection says it covers it, but search returned 0 items for the delta (its extent is an envelope and ends…</div></div>
+<div class="headline"><b>Learning →</b> The collection named in the brief did not have the scene.</div>
 <a class="fig" href="img/ft12-nile-postcard.html" target="_blank" title="open the live artifact"><img src="img/ft12-nile-postcard.png" alt="artifact produced by example 13" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>There is no Black Marble scene of the Nile delta</b>: VEDA's monthly Black Marble collection says it covers it, but search returned 0 items for the delta (its extent is an envelope and ends 2022-03-31), and the two other Black Marble collections tried have extents elsewhere. The postcard I made is a <b>2020 annual VIIRS night-lights composite</b> (GRDI VNL), a night-lights raster that does cover the delta, and the caption says it is not Black Marble. Caveats: it is a 2020 annual image, not a recent night; the tool declares no resolution, and the frame is small.</div>
 <details class="data"><summary>show the data</summary><div class="returned">search_datasets("nightlights", catalog="veda", bbox=[30.0, 30.2, 32.3, 31.6])
   1 hit: nightlights-hd-monthly   covers_aoi=True
 search_datasets("black marble", bbox=[30.0, 30.2, 32.3, 31.6])
@@ -560,13 +610,15 @@ render_postcard("veda", "grdi-vnl-raster", "povmap-grdi-v1_VNL_2020-01-01_2020-1
   /tmp/ft12/out/postcard-nile-delta--egypt-2020--annual-composite.html
 [the first postcard used rescale 0,75, which clips the 98th percentile; it was redone at 0,100. The delta bbox is my own, not a geocode result, so no geocoded fact is claimed. Image looked at once: delta shape visible, small frame.]</div></details>
 <div class="learning"><b>Learning →</b> <b>The collection named in the brief did not have the scene.</b> The brief assumed a Black Marble collection that covers the delta; describe_collection confirmed an envelope that does, and search_imagery then found nothing. I only learned that because I searched items; describe_collection alone would have said yes. The postcard tool then worked fine on the fallback, but I had to pick the rescale from statistics (98th percentile of 100) because the first guess clipped.</div>
-<div class="shows">search_datasets with bbox filter · describe_collection extent versus real items · VEDA render_postcard with bbox framing and colormap · static Stack credit block on a postcard</div>
+<div class="shows">search_datasets with bbox filter · describe_collection extent versus real items · VEDA render_postcard with bbox framing and colormap · static Stack credit block on a postcard</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">14</div><div class="tag">landsat cloud</div><div class="who">agriculture analyst</div></div>
 <div><div class="label">Input</div><div class="prompt">Which Landsat scenes cover Ludhiana with under 10% cloud this month, and show me the best one.</div></div>
-<div class="answer"><div class="label">Our read</div><b>One Landsat scene covers Ludhiana under 10% cloud this month: LC08_L2SP_148039_20261006_02_T1 (2026-10-06, 0.04% cloud, covers 100% of the area)</b>, and it is the recommended one with the reason "clearest (0.0% cloud) and best-covering (100.0% of the area), not a tradeoff". The map shows it in true colour from the red, green and blue bands. Caveats: the other 7 October scenes are 12% to 86% cloud (2026-10-06 to 10-23), and the newest, 2026-10-23, is 12% to 14%; the true-colour stretch (7000 to 15000) is my pick from the scene's statistics, not a tool default.</div>
+<div><div class="label">Our read</div><div class="answer">One Landsat scene covers Ludhiana under 10% cloud this month: LC08_L2SP_148039_20261006_02_T1 (2026-10-06, 0.04% cloud, covers 100% of the area), and it is the recommended one with the…</div></div>
+<div class="headline"><b>Learning →</b> The cloud filter hid the newer scenes.</div>
 <a class="fig" href="img/ft12-ludhiana-landsat.html" target="_blank" title="open the live artifact"><img src="img/ft12-ludhiana-landsat.png" alt="artifact produced by example 14" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>One Landsat scene covers Ludhiana under 10% cloud this month: LC08_L2SP_148039_20261006_02_T1 (2026-10-06, 0.04% cloud, covers 100% of the area)</b>, and it is the recommended one with the reason "clearest (0.0% cloud) and best-covering (100.0% of the area), not a tradeoff". The map shows it in true colour from the red, green and blue bands. Caveats: the other 7 October scenes are 12% to 86% cloud (2026-10-06 to 10-23), and the newest, 2026-10-23, is 12% to 14%; the true-colour stretch (7000 to 15000) is my pick from the scene's statistics, not a tool default.</div>
 <details class="data"><summary>show the data</summary><div class="returned">describe_collection("planetary-computer", "landsat-c2-l2")
   assets include: red, green, blue (band ids "red" "green" "blue"), nir08, swir16, swir22, coastal, lwir11, qa_pixel   [full list and description omitted]
 search_imagery("planetary-computer", ["landsat-c2-l2"], place="Ludhiana, Punjab, India", datetime_range="2026-10-01T00:00:00Z/2026-10-25T23:59:59Z", max_cloud_cover=10, limit=10)
@@ -584,13 +636,15 @@ render_map("Ludhiana, Landsat 8 true colour of 2026-10-06", bbox=<Ludhiana>, [it
   /tmp/ft12/out/map-ludhiana--landsat-8-true-colour-of-2026-10-06.html  layers: ['Landsat true colour, 2026-10-06']
 [one tile fetched at z=10 over Ludhiana: HTTP 200, RGBA PNG, 146 KB, RGB values 58 to 255]</div></details>
 <div class="learning"><b>Learning →</b> <b>The cloud filter hid the newer scenes.</b> A cap of 10% leaves one scene from 19 days ago, while the 2026-10-23 pass sits at 12 to 14% and would be the choice for a field visit. I only knew that by running the unfiltered control. Also, Landsat on Planetary Computer needs a hand-set rescale: the bands' 2nd to 98th percentiles run 8632 to 12644, so a 0 to 255 style stretch would draw black.</div>
-<div class="shows">Planetary Computer Landsat C2 L2 · recommended with reason · band ids from describe_collection · true-colour map from three assets with a rescale</div>
+<div class="shows">Planetary Computer Landsat C2 L2 · recommended with reason · band ids from describe_collection · true-colour map from three assets with a rescale</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">15</div><div class="tag">land cover legend</div><div class="who">geographer</div></div>
 <div><div class="label">Input</div><div class="prompt">Land cover around the shores of Lake Victoria, with a legend.</div></div>
-<div class="answer"><div class="label">Our read</div><b>The land-cover map draws in class colours, but it has no legend</b>: the shores of Lake Victoria are shown from ESA WorldCover 2021 (2021-01-01, 10 m) with the esa-worldcover colormap, so water is blue and land is in pinks and oranges. The colormap works: the same tile without it is a grayscale image of class codes (values 10 to 90), with it a four-channel colour image. Caveats: nothing on the page says what a colour means, so you cannot yet answer a reader who asks what pink is; the bbox is my own box around the lake, and the map has six layers all with the same name.</div>
+<div><div class="label">Our read</div><div class="answer">The land-cover map draws in class colours, but it has no legend: the shores of Lake Victoria are shown from ESA WorldCover 2021 (2021-01-01, 10 m) with the esa-worldcover colormap, so water…</div></div>
+<div class="headline"><b>Learning →</b> &quot;With a legend&quot; cannot be done.</div>
 <a class="fig" href="img/ft12-victoria-landcover.html" target="_blank" title="open the live artifact"><img src="img/ft12-victoria-landcover.png" alt="artifact produced by example 15" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>The land-cover map draws in class colours, but it has no legend</b>: the shores of Lake Victoria are shown from ESA WorldCover 2021 (2021-01-01, 10 m) with the esa-worldcover colormap, so water is blue and land is in pinks and oranges. The colormap works: the same tile without it is a grayscale image of class codes (values 10 to 90), with it a four-channel colour image. Caveats: nothing on the page says what a colour means, so you cannot yet answer a reader who asks what pink is; the bbox is my own box around the lake, and the map has six layers all with the same name.</div>
 <details class="data"><summary>show the data</summary><div class="returned">search_imagery("planetary-computer", ["esa-worldcover"], bbox=[31.6, -3.1, 34.9, 0.6], datetime_range="2021-01-01T00:00:00Z/2021-12-31T23:59:59Z", limit=10)
   count: 6   tiles S06E033 S06E030 S03E033 S03E030 N00E033 N00E030, all 2021-01-01
   full_coverage_set: date 2021-01-01, union_covers_aoi_pct 100.0
@@ -608,15 +662,17 @@ one tile at z=9 over the Speke Gulf shore (lat -1.9, lon 33.6):
   without colormap_name:               HTTP 200, image/png, 7656 bytes,  mode LA (grayscale plus alpha), gray values 10 to 90
 map HTML: the word "legend" does not appear, and neither do the class names "tree cover" or "cropland"   [grep over the file; the map was not opened in a browser]</div></details>
 <div class="learning"><b>Learning →</b> <b>"With a legend" cannot be done.</b> tile_url_template and render_map accept a colormap_name and draw the colours, but the map HTML has no legend (grepped, not opened in a browser), and nothing in the tool result lists the classes. I would have to hand-write the WorldCover class table from memory, which I did not do. Smaller: the six layers in the toggle are all called 'WorldCover 2021 · WorldCover', so a reader cannot tell which tile is which.</div>
-<div class="shows">categorical colormap (esa-worldcover) on tile_url_template and a coverage_set layer · Planetary Computer WorldCover · tile colour type check (RGBA versus LA) · missing legend</div>
+<div class="shows">categorical colormap (esa-worldcover) on tile_url_template and a coverage_set layer · Planetary Computer WorldCover · tile colour type check (RGBA versus LA) · missing legend</div></details>
 </div>
 </div>
 
 <h2 class="round">Round 4 — passes, briefs and stacks</h2>
 <div class="grid">
-<div class="card"><div class="top"><div class="num">16</div><div class="tag">polar pass</div><div class="who">a field team lead</div></div>
+<div class="card nofig"><div class="top"><div class="num">16</div><div class="tag">polar pass</div><div class="who">a field team lead</div></div>
 <div><div class="label">Input</div><div class="prompt">When does Sentinel-2 next pass over Longyearbyen, and is it worth it this time of year?</div></div>
-<div class="answer"><div class="label">Our read</div><b>Sentinel-2 passes Longyearbyen next at 2026-10-26 12:29 UTC (Sentinel-2C), and it is almost certainly not worth it for optical imagery.</b> The catalog's newest Sentinel-2 scene is 2026-10-09 at 96.9% cloud, nothing newer exists in the last 30 days, and the best look in that window is 2026-09-25 at 21.2% cloud, a month old. My own sun-angle estimate (not a tool output) puts the sun at about -1.6 degrees at the 2026-10-26 pass and -2.1 degrees at the 2026-10-28 12:19 pass, so the predicted passes fall at the start of polar night where there is little or no light to image. If you need a look now, radar is the answer: Sentinel-1A passes 2026-10-26 07:49 UTC and sees through cloud and dark. Caveats: a pass is a possible capture from swath geometry, not the acquisition plan, and imagery lands in the catalogs hours to a day later.</div>
+<div><div class="label">Our read</div><div class="answer">Sentinel-2 passes Longyearbyen next at 2026-10-26 12:29 UTC (Sentinel-2C), and it is almost certainly not worth it for optical imagery.</div></div>
+<div class="headline"><b>Learning →</b> The pass predictor lists optical passes it should know are dark.</div>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Sentinel-2 passes Longyearbyen next at 2026-10-26 12:29 UTC (Sentinel-2C), and it is almost certainly not worth it for optical imagery.</b> The catalog's newest Sentinel-2 scene is 2026-10-09 at 96.9% cloud, nothing newer exists in the last 30 days, and the best look in that window is 2026-09-25 at 21.2% cloud, a month old. My own sun-angle estimate (not a tool output) puts the sun at about -1.6 degrees at the 2026-10-26 pass and -2.1 degrees at the 2026-10-28 12:19 pass, so the predicted passes fall at the start of polar night where there is little or no light to image. If you need a look now, radar is the answer: Sentinel-1A passes 2026-10-26 07:49 UTC and sees through cloud and dark. Caveats: a pass is a possible capture from swath geometry, not the acquisition plan, and imagery lands in the catalogs hours to a day later.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Longyearbyen, Svalbard") -> 78.2231558, 15.6463656  source: nominatim
 next_pass(78.2231558, 15.6463656, days=3)
   constellations_source: developmentseed/eo-predictor   (49 passes in all, all open constellations)
@@ -645,13 +701,15 @@ search_imagery("earth-search", ["sentinel-2-l2a"], place="Longyearbyen, Svalbard
 
 not tool output (my own arithmetic, NOAA solar-position formula): sun elevation at the scene times, 78.22 N 15.65 E: 2026-10-05 12:19Z +6.4 deg, 2026-10-09 11:59Z +5.2 deg, 2026-10-26 12:29Z -1.6 deg, 2026-10-28 12:19Z -2.1 deg</div></details>
 <div class="learning"><b>Learning →</b> <b>The pass predictor lists optical passes it should know are dark.</b> next_pass keeps Sentinel-2 rows at 12:29 UTC over 78 N as the sun sets for the season, and the result has no field saying the sun is below the horizon, so I computed sun elevation myself to say the passes were useless. Also, two next_pass calls minutes apart gave different track distances for the same passes, and the first run listed a Sentinel-2C row the second did not (only the second run is in the block above); I did not find the cause.</div>
-<div class="shows">eo-predictor passes at 78 N, catalog vs predictor honesty, no artifact because no real scene draws (newest scene 96.9% cloud)</div>
+<div class="shows">eo-predictor passes at 78 N, catalog vs predictor honesty, no artifact because no real scene draws (newest scene 96.9% cloud)</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">17</div><div class="tag">morning brief</div><div class="who">the mayor's office in Asheville</div></div>
 <div><div class="label">Input</div><div class="prompt">Morning brief for Asheville, North Carolina: weather, anything happening, latest imagery</div></div>
-<div class="answer"><div class="label">Our read</div><b>The brief calls Asheville CALM, and this time both hazard feeds answered: EONET listed no open events in 30 days and GDACS had none inside the area.</b> It is dry (no rain on any day from 2026-10-19 through 2026-10-31, highs 17.7 to 22.9 C), with 25.2 mm of rain forecast for 2026-11-01, and model smoke is 0.1 ug/m3 now and for 2026-10-27 05:00 UTC, both clear (NOAA HRRR guidance, not a measurement). The latest imagery is a Sentinel-2 scene from 2026-10-22 at essentially 0% cloud covering all of the area; a 2026-10-24 scene is 22.2% cloud. The one flagged change, NDVI 0.81 (2026-10-07) to 0.76 (2026-10-22), is a whole-tile mean (tile 17SLV), not the city, and conditions_brief says it is not a risk model.</div>
+<div><div class="label">Our read</div><div class="answer">The brief calls Asheville CALM, and this time both hazard feeds answered: EONET listed no open events in 30 days and GDACS had none inside the area.</div></div>
+<div class="headline"><b>Learning →</b> The date on the brief is not Asheville&#x27;s date.</div>
 <a class="fig" href="img/ft12-asheville-brief.html" target="_blank" title="open the live artifact"><img src="img/ft12-asheville-brief.png" alt="artifact produced by example 17" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>The brief calls Asheville CALM, and this time both hazard feeds answered: EONET listed no open events in 30 days and GDACS had none inside the area.</b> It is dry (no rain on any day from 2026-10-19 through 2026-10-31, highs 17.7 to 22.9 C), with 25.2 mm of rain forecast for 2026-11-01, and model smoke is 0.1 ug/m3 now and for 2026-10-27 05:00 UTC, both clear (NOAA HRRR guidance, not a measurement). The latest imagery is a Sentinel-2 scene from 2026-10-22 at essentially 0% cloud covering all of the area; a 2026-10-24 scene is 22.2% cloud. The one flagged change, NDVI 0.81 (2026-10-07) to 0.76 (2026-10-22), is a whole-tile mean (tile 17SLV), not the city, and conditions_brief says it is not a risk model.</div>
 <details class="data"><summary>show the data</summary><div class="returned">uv run briefing/brief.py --place "Asheville, North Carolina" --days 7 --out /tmp/ft12/r4/brief
   [5/5] synthesizing brief with Claude...   (35 s wall, no source failed, no timeout)
   brief: brief-asheville--north-carolina-2026-10-25.html   map: brief-map-asheville--north-carolina-2026-10-25.html   (also .md and .data.json)
@@ -678,13 +736,15 @@ conditions_brief(place="Asheville, North Carolina")
   note: "current conditions from live sources - not a risk model, not a prediction"
   [days array and summary string omitted]</div></details>
 <div class="learning"><b>Learning →</b> <b>The date on the brief is not Asheville's date.</b> The file is stamped 2026-10-25 from this machine's clock, but the UTC date had already rolled to 2026-10-26 during these runs, and neither output names the date it calls "today", so conditions_brief's "today" wind (329 deg, from the NW) may be a day later than the file name. Also, the brief still reports NDVI over the whole tile ("The figure covers the whole 17SLV tile"), though compare_dates now clips to the place.</div>
-<div class="shows">briefing page with sources, conditions_brief beside it, both hazard feeds checked and none failed, page copied with its map relinked</div>
+<div class="shows">briefing page with sources, conditions_brief beside it, both hazard feeds checked and none failed, page copied with its map relinked</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">18</div><div class="tag">volcano 3d</div><div class="who">a volcano observatory</div></div>
 <div><div class="label">Input</div><div class="prompt">Etna in 3D with the latest thermal view</div></div>
-<div class="answer"><div class="label">Our read</div><b>Etna is draped in a Sentinel-2 SWIR composite (swir22, nir, red) from the 2026-10-23 scene, 1.7% cloud, covering 93% of the view, at 1.5x exaggeration.</b> The newest scene, 2026-10-25, is 22.6% cloud and covers only 4% of the area, so it was not used. This is not a thermal view: Sentinel-2 has no thermal band, so the composite can only show very hot ground glowing in the shortwave infrared, and I did not open the page to see whether any does. Caveat: the rest of the view (about 7%) renders as terrain with no imagery, per the tool's coverage note.</div>
+<div><div class="label">Our read</div><div class="answer">Etna is draped in a Sentinel-2 SWIR composite (swir22, nir, red) from the 2026-10-23 scene, 1.7% cloud, covering 93% of the view, at 1.5x exaggeration.</div></div>
+<div class="headline"><b>Learning →</b> The first drape rendered pure white and the tool said nothing.</div>
 <a class="fig" href="img/ft12-etna-3d.html" target="_blank" title="open the live artifact"><img src="img/ft12-etna-3d.png" alt="artifact produced by example 18" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Etna is draped in a Sentinel-2 SWIR composite (swir22, nir, red) from the 2026-10-23 scene, 1.7% cloud, covering 93% of the view, at 1.5x exaggeration.</b> The newest scene, 2026-10-25, is 22.6% cloud and covers only 4% of the area, so it was not used. This is not a thermal view: Sentinel-2 has no thermal band, so the composite can only show very hot ground glowing in the shortwave infrared, and I did not open the page to see whether any does. Caveat: the rest of the view (about 7%) renders as terrain with no imagery, per the tool's coverage note.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Mount Etna, Sicily") -> "Parco dell'Etna, Catania, Sicilia, 95052, Italia" 37.7476765, 14.9661442  bbox [14.8223805, 37.6185794, 15.132806, 37.8768383]  source: nominatim
 search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[14.8223805, 37.6185794, 15.132806, 37.8768383], datetime_range="2026-08-25T00:00:00Z/2026-10-25T23:59:59Z", max_cloud_cover=30, limit=8)
   recommended: S2B_33SVB_20261023_0_L2A  "1.7% cloud but covers 93.0% of the area; the clearest scene (0.0% cloud) covers 3.7%"
@@ -702,13 +762,15 @@ render_map_3d(same, rescale "0,4000")
   tile check, same z11 tile: 144187 bytes, 42685 colors
   page check: id="stack-toggle" present; panel names Terrarium terrain and Nominatim</div></details>
 <div class="learning"><b>Learning →</b> <b>The first drape rendered pure white and the tool said nothing.</b> I used rescale "0,0.5" as for reflectance; earth-search Sentinel-2 comes through the tiler as raw numbers in the thousands, so every pixel saturated. A tile fetch showed 863 bytes and two colors; "0,4000" gave 42,685 colors. render_map_3d returned a clean result both times, so only fetching a tile caught it. I checked the tile, not the finished page in a browser.</div>
-<div class="shows">3D drape with a false-colour SWIR composite, Stack panel with the geocoder named, coverage note on a 93% scene</div>
+<div class="shows">3D drape with a false-colour SWIR composite, Stack panel with the geocoder named, coverage note on a 93% scene</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">19</div><div class="tag">flood swipe</div><div class="who">a journalist</div></div>
 <div><div class="label">Input</div><div class="prompt">Show the before and after of the Dubai April 2024 floods as a swipe, with the tech stack visible</div></div>
-<div class="answer"><div class="label">Our read</div><b>The swipe compares Dubai on 2024-04-07 against 2024-04-27, and the area-mean NDWI is lower after (0.04) than before (0.10), a change of -0.06, so the mean does not show standing water.</b> The after scene is the only low-cloud pass in the window: 2024-04-17 was 20.7% cloud, just over the 20% limit, and 2024-04-22 was 48.3%. The scene tile (40RCP) covers about 45% of the Dubai box, and the mean is clipped to that box. Caveat, from the tool: the baseline is near zero, so the -59.8% is unstable and the delta is what to trust. The artifact's Stack toggle (id="stack-toggle") is in the page and names Gazet as the geocoder.</div>
+<div><div class="label">Our read</div><div class="answer">The swipe compares Dubai on 2024-04-07 against 2024-04-27, and the area-mean NDWI is lower after (0.04) than before (0.10), a change of -0.06, so the mean does not show standing water.</div></div>
+<div class="headline"><b>Learning →</b> compare_dates rejects stack_facts.</div>
 <a class="fig" href="img/ft12-dubai-swipe.html" target="_blank" title="open the live artifact"><img src="img/ft12-dubai-swipe.png" alt="artifact produced by example 19" loading="lazy"><span class="open">live artifact ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>The swipe compares Dubai on 2024-04-07 against 2024-04-27, and the area-mean NDWI is lower after (0.04) than before (0.10), a change of -0.06, so the mean does not show standing water.</b> The after scene is the only low-cloud pass in the window: 2024-04-17 was 20.7% cloud, just over the 20% limit, and 2024-04-22 was 48.3%. The scene tile (40RCP) covers about 45% of the Dubai box, and the mean is clipped to that box. Caveat, from the tool: the baseline is near zero, so the -59.8% is unstable and the delta is what to trust. The artifact's Stack toggle (id="stack-toggle") is in the page and names Gazet as the geocoder.</div>
 <details class="data"><summary>show the data</summary><div class="returned">geocode("Dubai") -> bbox [55.03047291744394, 24.93011660379285, 55.583020371348475, 25.451036414434718]  source: gazet
 compare_dates(place="Dubai", window_before="2024-04-01T00:00:00Z/2024-04-14T23:59:59Z", window_after="2024-04-17T00:00:00Z/2024-04-30T23:59:59Z", expression="(green-nir)/(green+nir)", max_cloud_cover=20, label="Dubai floods April 2024 NDWI")
   tile: 40RCP
@@ -724,13 +786,15 @@ artifact check: id="stack-toggle" present (1 match); panel lists Gazet, Natural 
 search_imagery over the same bbox, 2024-04-15 to 2024-04-30 (tile 40RCP rows; cloud %, covers_aoi_pct): 2024-04-17 S2A 20.7 / 45.3; 2024-04-22 S2B 48.3 / 45.3; 2024-04-27 S2A 4.4 / 45.3
   [other tiles omitted]</div></details>
 <div class="learning"><b>Learning →</b> <b>compare_dates rejects stack_facts.</b> The brief said to pass stack_facts with the geocode source, and the call raised a TypeError because only render_map and render_map_3d take it; compare_dates geocodes itself and puts Gazet or Nominatim in the panel on its own. The plain call produced the toggle and the right geocoder, so nothing was lost, but the skill text reads as if the argument applies. And the swipe's answer is the opposite of what the question implies, so the story is in the pixels, not the mean.</div>
-<div class="shows">compare_dates swipe with the Stack toggle by default, geocoder named in the panel, instability caveat quoted</div>
+<div class="shows">compare_dates swipe with the Stack toggle by default, geocoder named in the panel, instability caveat quoted</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">20</div><div class="tag">shoreline</div><div class="who">a coastal engineer</div></div>
 <div><div class="label">Input</div><div class="prompt">Shoreline change at Cape Hatteras over the last 5 years</div></div>
-<div class="answer"><div class="label">Our read</div>Six Octobers of Sentinel-2 true colour (2021-10-24, 2022-10-19, 2023-10-29, 2024-10-28, 2025-10-23, 2026-10-23, every one under 1.5% cloud and covering the whole box) are in the timelapse, and <b>the box-mean NDWI fell from 0.45 (2021-10-24) to 0.35 (2026-10-23), a change of -0.10, which is a direction, not a shoreline position</b>. Step through the frames to look at the island edge directly; I used my own 9 km box on the cape, not round 4's 33 km one. A 10 m index averaged over a box mixes open water, sound, wet sand and vegetation, so tide, turbidity or sand moisture can move it as much as land does, and I looked up no tide stage for any scene time. Six frames are one scene a year, not a trend: they cannot say whether a lower value is erosion, a different tide, or a storm week.</div>
+<div><div class="label">Our read</div><div class="answer">Six Octobers of Sentinel-2 true colour (2021-10-24, 2022-10-19, 2023-10-29, 2024-10-28, 2025-10-23, 2026-10-23, every one under 1.5% cloud and covering the whole box) are in the timelapse,…</div></div>
+<div class="headline"><b>Learning →</b> The recommended scene is just an id, so &quot;first item&quot; can be the wrong tile.</div>
 <a class="fig" href="img/ft12-hatteras-timelapse.html" target="_blank" title="open the live artifact"><img src="img/ft12-hatteras-timelapse.png" alt="artifact produced by example 20" loading="lazy"><span class="open">timelapse: 6 frames, press play ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div>Six Octobers of Sentinel-2 true colour (2021-10-24, 2022-10-19, 2023-10-29, 2024-10-28, 2025-10-23, 2026-10-23, every one under 1.5% cloud and covering the whole box) are in the timelapse, and <b>the box-mean NDWI fell from 0.45 (2021-10-24) to 0.35 (2026-10-23), a change of -0.10, which is a direction, not a shoreline position</b>. Step through the frames to look at the island edge directly; I used my own 9 km box on the cape, not round 4's 33 km one. A 10 m index averaged over a box mixes open water, sound, wet sand and vegetation, so tide, turbidity or sand moisture can move it as much as land does, and I looked up no tide stage for any scene time. Six frames are one scene a year, not a trend: they cannot say whether a lower value is erosion, a different tide, or a storm week.</div>
 <details class="data"><summary>show the data</summary><div class="returned"># bbox: my own box, about 9 km by 11 km on the cape itself; round 4's box was 33 km wide ([-75.678, 35.075, -75.378, 35.375])
 search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[-75.58, 35.2, -75.48, 35.3], datetime_range="2021-10-01T00:00:00Z/2021-10-31T23:59:59Z", max_cloud_cover=20, limit=10)
   items: 8  [per-item fields omitted]
@@ -770,7 +834,7 @@ compute_statistics("earth-search", "sentinel-2-l2a", "S2C_18SVE_20261023_0_L2A",
 artifact check (headless): frame 1 "2021-10-24 (1/6)", 20 tile requests all 200; #tl-next -> "2022-10-19 (2/6)", 20 more tile requests all 200
 not run: Stack panel contents, play/prev controls, tide lookup, shoreline extraction, frames 3 to 6 tile loads</div></details>
 <div class="learning"><b>Learning →</b> <b>The recommended scene is just an id, so "first item" can be the wrong tile.</b> `recommended` returns the id, coverage, cloud and reason only. My first pass looked the item up by a key the dict does not have and took the first item in the list, which in 2021 was tile 18SVD at 7.7% cloud, not the recommended 18SVE at 0.0%. Building the layer from the recommended id fixed it; the layer needs no bbox, but then each frame re-fetches its STAC item.</div>
-<div class="shows">the timelapse renderer: 6 frames, one per October 2021 to 2026, tiles loading per frame, prev / play / next controls, and the Stack panel</div>
+<div class="shows">the timelapse renderer: 6 frames, one per October 2021 to 2026, tiles loading per frame, prev / play / next controls, and the Stack panel</div></details>
 </div>
 </div>
 <div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
