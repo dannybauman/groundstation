@@ -1,6 +1,8 @@
 # groundstation
 
-Earth data, agent ready. A [Development Seed](https://developmentseed.org) MCP prototype giving easy access to a variety of cloud-native geospatial stacks, with visual examples and repeatable scenario workflows called "field tests".
+Earth data, agent ready. A [Development Seed](https://developmentseed.org) MCP prototype giving easy access to a variety of cloud-native geospatial stacks, with visual examples and repeatable workflows called "field tests".
+
+Cloud-native geospatial exists because the satellite archives grew to petabytes, and downloading whole scenes to look at one field stopped making sense. With STAC to find the data, cloud-optimized formats (COG, Zarr) to read only the pixels you need, and TiTiler to render them on demand, any question about any place can be answered in seconds against the open archive. That is the exciting part: an agent can now reach the whole Earth record as easily as it reaches a web page.
 
 Ask a question about any place on Earth. groundstation finds satellite imagery, active fires, disaster alerts and weather, does the pixel math, and returns data, stories and interactive maps. 3 ways in:
 
@@ -28,7 +30,7 @@ Everything runs against public, keyless endpoints, so it works anywhere with not
 
 ## Examples
 
-All 3 are real runs on real data.
+All 3 are real runs on real data. The screenshots and the examples here come from the field tests: quick examples that open the door to digging in further, and a way to learn which stack to consider for your own use case (`docs/field-test-*.html`, highest number is newest).
 
 "What's burning near Chelan County?" One scan found the 2 active wildfires (Navarre Coulee, Chelan Hills), correlated them with 14 straight days of zero rain and a 33°C heat peak in the forecast, and pointed at the 3 sub-1%-cloud scenes from ignition day.
 
