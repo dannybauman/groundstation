@@ -33,37 +33,13 @@ All 3 are real runs on real data.
 
 ## Quickstart
 
-You need [uv](https://docs.astral.sh/uv/). In Claude Code, install the plugin:
-
-```
-/plugin marketplace add dannybauman/groundstation
-/plugin install groundstation@groundstation
-```
-
-That brings the MCP server and the skills together. The first launch builds the server's environment, so the tools appear a few seconds after Claude starts. Then ask for a map of your hometown.
-
-If the tools don't show up, run the preflight. It walks the setup chain in the order it breaks (uv, server env, CLI, plugin wiring, endpoints) and prints the fix for the first broken link:
+You need [uv](https://docs.astral.sh/uv/). Clone the repo and build the environment:
 
 ```bash
-bash scripts/doctor.sh
-```
-
-The other ways to run it:
-
-```bash
-# as a plain MCP server
 git clone https://github.com/dannybauman/groundstation && cd groundstation && uv sync
-claude mcp add groundstation -- uv --directory "$PWD" run groundstation
-
-# the web console, at http://127.0.0.1:8765
-uv run --group web groundstation-web
-
-# a brief for one place, or the morning sweep over a watch list
-uv run briefing/brief.py --place "Chelan County, Washington" --days 10
-uv run briefing/brief.py --fleet briefing/fleet.json
 ```
 
-Any other MCP client (Codex, Gemini CLI, Cursor, Claude Desktop, a local model's client) takes the same command. Most read a config like this:
+Then point any MCP client at it (Claude, Codex, Gemini CLI, Cursor, a local model's client). Most read a config like this:
 
 ```json
 {
@@ -76,20 +52,44 @@ Any other MCP client (Codex, Gemini CLI, Cursor, Claude Desktop, a local model's
 }
 ```
 
-The skills in `skills/` are plain markdown, so an agent without plugin support can read them as instructions.
+The skills in `skills/` are plain markdown, so any agent can read them as instructions. Then ask for a map of your hometown.
 
-With the plugin installed you can also just ask. "demo groundstation", "is groundstation running", "open the field tests" and "brief me on Lisbon" all run through the `groundstation` skill, with no commands to remember.
+In Claude Code, the plugin brings the server and the skills in one step, with no clone:
+
+```
+/plugin marketplace add dannybauman/groundstation
+/plugin install groundstation@groundstation
+```
+
+The first launch builds the server's environment, so the tools appear a few seconds after the agent starts. With the plugin you can also just ask: "demo groundstation", "is groundstation running", "open the field tests" and "brief me on Lisbon" all run through the `groundstation` skill.
+
+If the tools don't show up, run the preflight. It walks the setup chain in the order it breaks (uv, server env, CLI, plugin wiring, endpoints) and prints the fix for the first broken link:
+
+```bash
+bash scripts/doctor.sh
+```
+
+Without an agent:
+
+```bash
+# the web console, at http://127.0.0.1:8765
+uv run --group web groundstation-web
+
+# a brief for one place, or the morning sweep over a watch list
+uv run briefing/brief.py --place "Chelan County, Washington" --days 10
+uv run briefing/brief.py --fleet briefing/fleet.json
+```
 
 ### Updating
 
-Plugin installs are cached per version, so an installed copy stays as it was until you update it:
+With a clone, `git pull` and restart your agent. Claude Code plugin installs are cached per version, so they stay as they were until you update them:
 
 ```bash
 claude plugin marketplace update groundstation
 claude plugin update groundstation@groundstation
 ```
 
-Then restart Claude Code. If you installed with `claude mcp add`, `git pull` in your clone and restart. `scripts/doctor.sh` says which copy you are running and whether it is behind.
+Then restart Claude Code. `scripts/doctor.sh` says which copy you are running and whether it is behind.
 
 ## Things to ask it
 
