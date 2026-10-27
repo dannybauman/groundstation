@@ -1318,6 +1318,8 @@ def t_brief_says_when_the_baseline_moved():
     assert "no scene ids" in old and "same" not in old, old
     gone = brief._scene_vs_last_run(prev, best, None)
     assert "this run has no NDVI comparison" in gone and "None" not in gone and "same" not in gone, gone
+    nopick = brief._scene_vs_last_run(prev, None, None)
+    assert nopick.startswith("this run has no scene pick, so unchanged cannot be claimed") and "None" not in nopick, nopick
     none = brief._scene_vs_last_run(dict(prev, baseline_id=None, ndvi_mean=None), best, None)
     assert none.endswith("neither run has an NDVI comparison, so unchanged cannot be claimed"), none
     noted = brief._ensure_scene_note(GOOD_MD, out)
