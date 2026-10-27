@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="only light">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>groundstation field test №3 — the stack layer, everywhere</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
@@ -11,6 +12,7 @@
   --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
   --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
   --calm: #2e7d32; --blue: #1d4e8f;
+  color-scheme: only light;
 }
 * { box-sizing: border-box; }
 body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
@@ -28,8 +30,8 @@ main { padding: 10px 24px 60px; }
 h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
   display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
 h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(480px, 100%), 1fr)); gap: 16px; }
-@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+.grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; } }
 .card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .card .top { display: flex; align-items: center; gap: 10px; }
 .card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
@@ -44,14 +46,36 @@ details.data summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing:
 .learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
 .learning b { color: var(--accent); font-style: normal; }
 .shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.headline { font-size: 12.5px; color: var(--mid); border-left: 3px solid var(--accent); padding-left: 10px; }
+.headline b { color: var(--accent); }
+details.more > summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+details.more[open] > summary { margin-bottom: 10px; }
+details.more > * + * { margin-top: 10px; }
+@media (max-width: 999px) {
+  .card { display: grid; grid-template-columns: 300px minmax(0, 1fr); grid-auto-rows: min-content; align-content: start; gap: 8px 20px; padding: 16px; }
+  .card > * { grid-column: 2; min-width: 0; }
+  .card > .fig { grid-column: 1; grid-row: 1 / span 5; align-self: start; }
+  .card.nofig { grid-template-columns: minmax(0, 1fr); }
+  .card.nofig > * { grid-column: 1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/10; object-fit: cover; }
+}
+@media (max-width: 700px) {
+  .card { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px; }
+  .card > *, .card > .fig { grid-column: 1; grid-row: auto; }
+  .card > .fig { order: -1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/7; }
+  .card .top { flex-wrap: wrap; }
+  .card .who { margin-left: 0; }
+}
 .repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
-.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
-.fig { position: relative; display: block; border: 1px solid var(--rule); text-decoration: none; }
-.fig img { width: 100%; display: block; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fig { position: relative; display: block; min-height: 44px; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; aspect-ratio: 10/7; }
+.fig:not(:has(img)) { aspect-ratio: 16/10; background: var(--paper); }
 .fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
   background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
 .fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
-footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 0 40px; }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 16px 40px; }
 </style>
 </head>
 <body>
@@ -73,24 +97,28 @@ footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var
 <div class="grid">
 <div class="card"><div class="top"><div class="num">1</div><div class="tag">3d + stack</div><div class="who">the roadshow</div></div>
 <div><div class="label">Input</div><div class="prompt">Mount Rainier in 3D, and show me what's behind the rendering.</div></div>
-<div class="answer"><div class="label">Output</div>A <b>0.0002%-cloud July 13 scene</b> draped on Terrarium terrain, panel open: Earth Search, <b>AWS Terrarium terrain</b>, COG range requests, TiTiler, MapLibre. The terrain entry only appears here — a 2D map never claims it.</div>
+<div><div class="label">Output</div><div class="answer">A 0.0002%-cloud July 13 scene draped on Terrarium terrain, panel open: Earth Search, AWS Terrarium terrain, COG range requests, TiTiler, MapLibre.</div></div>
 <a class="fig" href="../demo/map3d-rainier-stack.html" target="_blank" title="open the live artifact"><img src="img/w3-map3d-rainier-stack.jpg" alt="artifact produced by example 1" loading="lazy"><span class="open">live 3D ↗</span></a>
-<div class="shows">render_map_3d stack_layer=True, new in G.3: the terrain fact goes live</div>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Output</div>A <b>0.0002%-cloud July 13 scene</b> draped on Terrarium terrain, panel open: Earth Search, <b>AWS Terrarium terrain</b>, COG range requests, TiTiler, MapLibre. The terrain entry only appears here — a 2D map never claims it.</div>
+<div class="shows">render_map_3d stack_layer=True, new in G.3: the terrain fact goes live</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">2</div><div class="tag">postcard + stack</div><div class="who">the share card</div></div>
 <div><div class="label">Input</div><div class="prompt">Postcard of that Rainier scene, with the stack printed on the back.</div></div>
-<div class="answer"><div class="label">Output</div>The listing prints as static credit lines: <b>Earth Search, COG range requests, TiTiler, STAC, cloud object storage</b> — and no MapLibre, because a still card runs no map engine. No links either, so the card keeps its no-live-URLs guarantee.</div>
+<div><div class="label">Output</div><div class="answer">The listing prints as static credit lines: Earth Search, COG range requests, TiTiler, STAC, cloud object storage — and no MapLibre, because a still card runs no map engine.</div></div>
+<div class="headline"><b>Learning →</b> the postcard previews the full scene, so the mountain sits small in a big tile — framing to the asked-for AOI is the natural next postcard improvement.</div>
 <a class="fig" href="../demo/postcard-rainier-stack.html" target="_blank" title="open the live artifact"><img src="img/w3-postcard-rainier-stack.jpg" alt="artifact produced by example 2" loading="lazy"><span class="open">live postcard ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Output</div>The listing prints as static credit lines: <b>Earth Search, COG range requests, TiTiler, STAC, cloud object storage</b> — and no MapLibre, because a still card runs no map engine. No links either, so the card keeps its no-live-URLs guarantee.</div>
 <div class="learning"><b>Learning →</b> the postcard previews the full scene, so the mountain sits small in a big tile — framing to the asked-for AOI is the natural next postcard improvement.</div>
-<div class="shows">render_postcard stack_layer=True: the back-of-postcard form from the design doc</div>
+<div class="shows">render_postcard stack_layer=True: the back-of-postcard form from the design doc</div></details>
 </div>
 
 <div class="card"><div class="top"><div class="num">3</div><div class="tag">honest facts</div><div class="who">the harvest</div></div>
 <div><div class="label">Input</div><div class="prompt">How did the Palouse change over the last month?</div></div>
-<div class="answer"><div class="label">Output</div>compare_dates geocoded the place itself, so its swipe map's panel truthfully claims <b>Gazet and Nominatim</b> alongside the raster pipeline. The answer is wheat harvest: <b>NDVI 0.485 → 0.388, down 19.8%</b> between June 22 and July 19.</div>
+<div><div class="label">Output</div><div class="answer">compare_dates geocoded the place itself, so its swipe map&#x27;s panel truthfully claims Gazet and Nominatim alongside the raster pipeline.</div></div>
 <a class="fig" href="../demo/map-palouse--washington---2026-07-19-vs-2026-06-22.html" target="_blank" title="open the live artifact"><img src="img/w3-map-palouse-stack.jpg" alt="artifact produced by example 3" loading="lazy"><span class="open">live swipe map ↗</span></a>
-<div class="shows">stack_facts plumbing: panels only claim what the pipeline actually did</div>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Output</div>compare_dates geocoded the place itself, so its swipe map's panel truthfully claims <b>Gazet and Nominatim</b> alongside the raster pipeline. The answer is wheat harvest: <b>NDVI 0.485 → 0.388, down 19.8%</b> between June 22 and July 19.</div>
+<div class="shows">stack_facts plumbing: panels only claim what the pipeline actually did</div></details>
 </div>
 </div>
 <div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
