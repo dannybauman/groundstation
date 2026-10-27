@@ -1919,7 +1919,8 @@ def compute_statistics(
                 factors[key] = (sc, off)
     params: list[tuple[str, str]] = [("max_size", "512")]
     if apply_scaling and convention:
-        # digital number 0 is nodata; masked in the read, or the offset would turn it into -0.1 and into the index
+        # PC's COGs already declare nodata 0 (same count with and without, probed on a 15SXS swath edge);
+        # sent anyway so a file without the tag cannot turn digital number 0 into -0.1 and into the index
         params.append(("nodata", "0"))
     corrected = False
     raw_expression = expression
@@ -2032,13 +2033,15 @@ def compute_statistics(
         flat = re.sub(r"\s+", "", raw_expression or "")
         m = re.fullmatch(r"\((\w+)-(\w+)\)/\((\w+)\+(\w+)\)", flat)
         st = out.get(raw_expression)
-        if corrected and any(o for _, o in factors.values()) and m and {m[3], m[4]} == {m[1], m[2]} and isinstance(st, dict):
+        # the operands' own factors, so a Landsat -0.2 is not called -0.1
+        sc, off = factors.get(m[1], (1, 0)) if m and {m[3], m[4]} == {m[1], m[2]} else (1, 0)
+        if corrected and off and factors.get(m[2]) == (sc, off) and isinstance(st, dict):
             lo, hi = st.get("min"), st.get("max")
             if (lo is not None and lo < -1) or (hi is not None and hi > 1):
                 out["range_note"] = (
-                    f"the index ran from {lo:.4g} to {hi:.4g}, outside -1 to 1: dark pixels (digital number under 1000) "
-                    "go below 0 after the -0.1 offset, so the index is undefined there; the values are not clamped "
-                    "and the data is unchanged, read the percentiles for the usable range"
+                    f"the index ran from {lo:.4g} to {hi:.4g}, outside -1 to 1: pixels under digital number {-off / sc:.0f} "
+                    f"go below 0 after the {off:g} offset, so the index is undefined over them; the values are not clamped "
+                    "and they pull the mean, so the median and percentiles are the safer summary"
                 )
     try:
         item = item or {}
@@ -4230,14 +4233,17 @@ def compare_dates(
 
     scope: dict[str, Any] = {}
     scaling: dict[str, list[dict[str, Any]]] = {}
+    ranges: dict[str, str] = {}  # per date: one scene's out-of-range index says nothing about the other
 
     def _mean(it: dict[str, Any]) -> float | None:
         try:
             # without the bbox the mean is the whole Sentinel-2 tile, not the place asked about
             s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox, apply_scaling=apply_scaling)
-            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_applied", "scaling_note", "range_note") if k in s})
+            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_applied", "scaling_note") if k in s})
             if s.get("band_scaling"):
                 scaling[it["id"]] = s["band_scaling"]
+            if s.get("range_note"):
+                ranges[it["id"]] = s["range_note"]
             return round(next(iter(s.values()))["mean"], 4)
         except Exception:
             return None
@@ -4283,6 +4289,8 @@ def compare_dates(
     for side, it in (("after", a), ("before", b)):
         if it["id"] in scaling:
             out[side]["band_scaling"] = scaling[it["id"]]
+        if it["id"] in ranges:
+            out[side]["range_note"] = ranges[it["id"]]
     if scope.get("scaling_applied") and "scaling_note" not in scope and len(scaling) == 2:
         out["scaling_note"] = _applied_scaling_words(
             [(x["datetime"][:10], scaling[x["id"]]) for x in (a, b)]

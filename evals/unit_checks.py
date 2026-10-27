@@ -635,11 +635,13 @@ def t_compare_dates_carries_band_scaling_and_names_factors():
         "S2A_10TFK_20230328_0_L2A": [{"scale": 0.0001, "declared_offset": -0.1, "offset": 0, "bands": ["a"] * 13}],
         "S2A_10TFK_20210203_0_L2A": [{"scale": 0.0001, "offset": -0.1, "bands": ["a"] * 13}],
     }
-    tools.compute_statistics = lambda cat, coll, iid, **kw: {"nd": {"mean": 0.5}, "scaling_applied": True, "band_scaling": groups[iid]}
+    tools.compute_statistics = lambda cat, coll, iid, **kw: {"nd": {"mean": 0.5}, "scaling_applied": True, "band_scaling": groups[iid],
+                                                             **({"range_note": "r"} if "2021" in iid else {})}
     tools.render_map = lambda **kw: {"map_path": "x.html"}
     try:
         out = tools.compare_dates(bbox=[-121.5, 39.4, -121.4, 39.5], window_before="a/b", window_after="c/d")
         assert out["after"]["band_scaling"][0]["declared_offset"] == -0.1 and out["before"]["band_scaling"][0]["offset"] == -0.1
+        assert out["before"]["range_note"] == "r" and "range_note" not in out["after"] and "range_note" not in out, "per date"
         n = out["scaling_note"]
         assert "offset -0.1 applied for 2021-02-03" in n and "offset 0 applied for 2023-03-28 (Earth Search already took the -0.1 offset out of its pixels)" in n, n
     finally:
@@ -2074,7 +2076,10 @@ def t_index_outside_its_range_after_the_offset_says_so():
     out, params = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", lo=-64.0, expression="(B08-B04)/(B08+B04)")
     assert out["(B08-B04)/(B08+B04)"]["min"] == -64.0, "not clamped"
     assert "outside -1 to 1" in out["range_note"] and "-0.1 offset" in out["range_note"] and "not clamped" in out["range_note"], out
+    assert "under digital number 1000" in out["range_note"] and "median" in out["range_note"], out
     assert params.get("nodata") == "0", "digital number 0 is masked before the offset"
+    out, _ = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", lo=-64.0, expression="(B03-B08)/(B03+B08)*2")
+    assert "range_note" not in out, "not a normalized index, so -1 to 1 is no claim to make"
     out, _ = _scaled_stats(_pc_item("03.01"), catalog="planetary-computer", expression="(B08-B04)/(B08+B04)")
     assert "range_note" not in out, "an index inside its range earns no note"
 
