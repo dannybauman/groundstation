@@ -51,10 +51,13 @@ If a "smoke" block is present, add one sentence about smoke to Weather signal: n
 forecast, both in µg/m³ with the approximate scale word, and say it is model guidance. Call the
 first reading by the smoke block's "now_label" exactly ("now" or "at <time>").
 If an "ndvi_change" block is present, weave the vegetation delta (with both dates) into TL;DR and
-What changed — a real change signal outranks scene bookkeeping.
+What changed — a real change signal outranks scene bookkeeping. If its "caveats" list is not empty,
+say each caveat in the same sentence as the delta.
 If a "previous_run" block is present, "What changed" means changed SINCE THAT RUN: name events that
 appeared, escalated, or cleared since it, and say plainly when today is calmer than the last run
 (e.g. "yesterday's WATCH stands down"). Deltas against the last run outrank everything else.
+Its "scene_vs_last_run" line is computed: say "nothing has changed" ONLY when it reads
+"same pick, same baseline, same mean"; otherwise say what it says.
 
 DATA:
 """
@@ -202,6 +205,44 @@ def synthesize(data: dict) -> str:
     return "\n".join(lines)
 
 
+SAME_SCENE = "same pick, same baseline, same mean"
+
+
+def _scene_vs_last_run(prev: dict, best: dict | None, change: dict | None) -> str:
+    """Deterministic: compare this run's pick, NDVI baseline and mean with the stored run."""
+    if "pick_id" not in prev:
+        return "the prior run carried no scene ids, so whether the pick or baseline moved is unknown"
+    pick, old_pick = (best["id"] if best else None), prev.get("pick_id")
+    base, old_base = (change["baseline"]["scene"] if change else None), prev.get("baseline_id")
+    mean, old_mean = (change["current"]["mean"] if change else None), prev.get("ndvi_mean")
+    out = []
+    if not pick or not old_pick:
+        if pick or old_pick:
+            out.append(f"{'this run has' if not pick else 'the last run had'} no scene pick, so unchanged cannot be claimed")
+    elif pick != old_pick:
+        out.append(f"pick changed: {old_pick} -> {pick}")
+    if None in (base, old_base, mean, old_mean):
+        who = "neither run has an" if base is None and old_base is None else "this run has no" if base is None else "the last run had no"
+        out.append(f"{who} NDVI comparison, so unchanged cannot be claimed")
+    else:
+        if base != old_base:
+            out.append(f"baseline changed: {old_base} -> {base}")
+        if mean != old_mean:
+            out.append(f"NDVI mean {old_mean} -> {mean}")
+    return "; ".join(out) or SAME_SCENE
+
+
+def _ensure_scene_note(md: str, line: str | None) -> str:
+    """Deterministic: a moved pick or baseline is said in the brief, not left to the model.
+    The prompt asks for it; this guarantees it."""
+    if not line or line == SAME_SCENE or line in md:
+        return md
+    note = f"Since the last run: {line}."
+    if "## What changed\n" in md:
+        return md.replace("## What changed\n", f"## What changed\n{note}\n", 1)
+    return f"{md.rstrip()}\n\n{note}\n"
+
+
 def _ensure_transition_note(md: str, prev_alert: str | None) -> str:
     """Deterministic day-over-day honesty: a CALM brief after a WATCH/ACT run
     must say so even when the model forgot. The synth prompt asks for it; this
@@ -230,15 +271,18 @@ def _ensure_source_honesty(md: str, data: dict) -> str:
     return md.replace("## TL;DR\n", f"## TL;DR\nWATCH — {' and '.join(down)} did not answer; CALM is unconfirmed. ", 1)
 
 
-def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
-    """NDVI delta between the newest scene and a same-tile baseline ~1 month back."""
+COVERAGE_GAP_PCT = 20.0  # points of AOI coverage apart before the change block says so
+
+
+def ndvi_change(best: dict, aoi: list[float], today: dt.date, days: int, place: str | None = None) -> dict | None:
+    """NDVI delta between the brief's scene and a same-tile baseline ~1 month back, both ranked and averaged over the AOI."""
     tile = tools._mgrs_tile(best["id"])
     if tile == best["id"]:
         return None
     baseline = tools.search_imagery(
         "earth-search",
         [best["collection"]],
-        bbox=best["bbox"],
+        bbox=aoi,
         datetime_range=tools.last_days_window(44, end_days_ago=days + 1),
         max_cloud_cover=30,
         limit=20,
@@ -246,18 +290,29 @@ def ndvi_change(best: dict, today: dt.date, days: int) -> dict | None:
     candidates = [i for i in baseline.get("items", []) if tools._mgrs_tile(i["id"]) == tile]
     if not candidates:
         return None
-    ref = min(candidates, key=lambda i: i.get("cloud_cover") or 100)
+    ref = min(tools._with_coverage(candidates, aoi), key=tools._scene_key)
     expr = "(nir-red)/(nir+red)"
-    now_s = tools.compute_statistics("earth-search", best["collection"], best["id"], expression=expr)
-    ref_s = tools.compute_statistics("earth-search", ref["collection"], ref["id"], expression=expr)
+    now_s = tools.compute_statistics("earth-search", best["collection"], best["id"], expression=expr, bbox=aoi)
+    ref_s = tools.compute_statistics("earth-search", ref["collection"], ref["id"], expression=expr, bbox=aoi)
     now_mean = next(iter(now_s.values()))["mean"]
     ref_mean = next(iter(ref_s.values()))["mean"]
+    now_cov, ref_cov = best.get("covers_aoi_pct"), ref.get("covers_aoi_pct")
+    caveats = []
+    if now_cov is not None and ref_cov is not None and abs(now_cov - ref_cov) > COVERAGE_GAP_PCT:
+        caveats.append(f"the 2 scenes cover different ground (current {now_cov:.0f}% of the area, baseline "
+                       f"{ref_cov:.0f}%), so the 2 means are not over the same pixels")
+    where = place or "MGRS tile " + tile
+    if place and now_cov is not None and now_cov < 99:
+        where += f", {now_cov:.1f}% of it covered"
     return {
-        "metric": "NDVI (vegetation) over MGRS tile " + tile,
-        "current": {"scene": best["id"], "date": best["datetime"][:10], "mean": round(now_mean, 3)},
-        "baseline": {"scene": ref["id"], "date": ref["datetime"][:10], "mean": round(ref_mean, 3)},
+        "metric": "NDVI (vegetation) over " + where,
+        "current": {"scene": best["id"], "date": best["datetime"][:10], "cloud": best.get("cloud_cover"),
+                    "covers_aoi_pct": best.get("covers_aoi_pct"), "mean": round(now_mean, 3)},
+        "baseline": {"scene": ref["id"], "date": ref["datetime"][:10], "cloud": ref.get("cloud_cover"),
+                     "covers_aoi_pct": ref.get("covers_aoi_pct"), "mean": round(ref_mean, 3)},
         "delta": round(now_mean - ref_mean, 3),
         "delta_pct": round((now_mean - ref_mean) / abs(ref_mean) * 100, 1) if ref_mean else None,
+        "caveats": caveats,
     }
 
 
@@ -276,7 +331,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     if "error" in g:
         raise SystemExit(g["error"])
     bbox = g["bbox"]
-    pad = 0.4  # look slightly beyond the AOI for nearby events
+    pad = tools.BRIEF_PAD_DEG  # look slightly beyond the AOI for nearby events, same radius as conditions_brief
     ev_bbox = [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad]  # map extent
 
     print("[2/5] gathering events + weather...")
@@ -304,7 +359,7 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     if best:
         print("[3.5/5] computing NDVI change vs baseline...")
         try:
-            change = ndvi_change(best, today, days)
+            change = ndvi_change(best, bbox, today, days, place)
         except Exception as e:
             print(f"change detection skipped: {e}", file=sys.stderr)
 
@@ -345,8 +400,8 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         )
         preview_url = tools.preview_item("earth-search", best["collection"], best["id"], max_size=768)["preview_url"]
         scene_caption = (
-            f"Sentinel-2, {best['datetime'][:10]}, {round(best.get('cloud_cover') or 0, 1)}% cloud cover — "
-            f"clearest of {imagery['count']} scenes in the last {days} days."
+            f"Sentinel-2, {best['datetime'][:10]}, {round(best.get('cloud_cover') or 0, 1)}% cloud cover, "
+            f"covers {round(best['covers_aoi_pct'])}% of the area — best of {imagery['count']} scenes in the last {days} days."
         )
     if smoke and smoke.get("tiles"):
         layers.append(
@@ -393,12 +448,16 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
     state_path = Path(__file__).parent / "state" / f"{slug}.json"
     if state_path.exists():
         try:
-            data["previous_run"] = json.loads(state_path.read_text(encoding="utf-8"))
+            prev = json.loads(state_path.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            prev = None
+        if isinstance(prev, dict):
+            prev["scene_vs_last_run"] = _scene_vs_last_run(prev, best, change)
+            data["previous_run"] = prev
     md = synthesize(data)
     md = _ensure_source_honesty(md, data)
     md = _ensure_transition_note(md, (data.get("previous_run") or {}).get("alert"))
+    md = _ensure_scene_note(md, (data.get("previous_run") or {}).get("scene_vs_last_run"))
 
     html = (
         PAGE.replace("__PLACE__", place)
@@ -429,6 +488,8 @@ def build_brief(place: str, days: int, out_dir: Path) -> dict:
         "alert": result["alert"],
         "event_titles": [e.get("title") for e in events.get("eonet", []) + events.get("gdacs", [])][:20],
         "ndvi_mean": change["current"]["mean"] if change else None,
+        "pick_id": best["id"] if best else None,
+        "baseline_id": change["baseline"]["scene"] if change else None,
         "scene_count": imagery.get("count"),
         "tldr": result["tldr"][:200],
     }, indent=1), encoding="utf-8")

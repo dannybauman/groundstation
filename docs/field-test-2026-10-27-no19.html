@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="only light">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>groundstation field test №19: the 3 cards stops 34 to 37 set out to fix, re-run on 0.59.0</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
+  --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
+  --calm: #2e7d32; --blue: #1d4e8f;
+  color-scheme: only light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
+header { border-bottom: 2px solid var(--ink); padding: 42px 24px 30px; }
+.wrap { max-width: 1060px; margin: 0 auto; }
+header h1 { font: 700 34px/1.1 'Roboto Condensed', sans-serif; margin: 0 0 6px; letter-spacing: .02em; }
+header h1 .dot { display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); margin-right: 12px; }
+header .sub { font: 500 11.5px 'Roboto Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--mid); }
+header p.lede { max-width: 760px; font-size: 16px; margin: 16px 0 0; color: var(--mid); }
+.stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 26px auto 0; max-width: 1060px; padding: 0; }
+.stat { flex: 1; min-width: 160px; background: var(--white); border: 1px solid var(--rule); border-top: 3px solid var(--accent); padding: 12px 16px; }
+.stat b { display: block; font: 600 30px 'Roboto Condensed', sans-serif; color: var(--accent); }
+.stat span { font-size: 12px; color: var(--mid); }
+main { padding: 10px 24px 60px; }
+h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
+  display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
+h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; } }
+.card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.card .top { display: flex; align-items: center; gap: 10px; }
+.card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.card .tag { font: 500 10px 'Roboto Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); border: 1px solid var(--rule); padding: 3px 8px; }
+.card .who { margin-left: auto; font: 400 10.5px 'Roboto Mono', monospace; color: var(--muted); }
+.label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
+.returned { font: 400 12px/1.5 'Roboto Mono', monospace; background: #fbfaf7; border: 1px solid var(--rule); border-left: 3px solid var(--mid); padding: 8px 12px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+details.data summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; margin-bottom: 3px; }
+.answer { font-size: 13.5px; color: var(--mid); }
+.answer b { color: var(--ink); }
+.learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
+.learning b { color: var(--accent); font-style: normal; }
+.shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.headline { font-size: 12.5px; color: var(--mid); border-left: 3px solid var(--accent); padding-left: 10px; }
+.headline b { color: var(--accent); }
+details.more > summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+details.more[open] > summary { margin-bottom: 10px; }
+details.more > * + * { margin-top: 10px; }
+@media (max-width: 999px) {
+  .card { display: grid; grid-template-columns: 300px minmax(0, 1fr); grid-auto-rows: min-content; align-content: start; gap: 8px 20px; padding: 16px; }
+  .card > * { grid-column: 2; min-width: 0; }
+  .card > .fig { grid-column: 1; grid-row: 1 / span 5; align-self: start; }
+  .card.nofig { grid-template-columns: minmax(0, 1fr); }
+  .card.nofig > * { grid-column: 1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/10; object-fit: cover; }
+}
+@media (max-width: 700px) {
+  .card { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px; }
+  .card > *, .card > .fig { grid-column: 1; grid-row: auto; }
+  .card > .fig { order: -1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/7; }
+  .card .top { flex-wrap: wrap; }
+  .card .who { margin-left: 0; }
+}
+.repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fig { position: relative; display: block; min-height: 44px; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; aspect-ratio: 10/7; }
+.fig:not(:has(img)) { aspect-ratio: 16/10; background: var(--paper); }
+.fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
+  background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
+.fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 16px 40px; }
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <h1><span class="dot"></span>THE FIELD TEST №19</h1>
+  <div class="sub">groundstation · 3 prompts re-run · 1 live artifact · 2 fixed, 0 partly, 1 the same · October 27, 2026 · Development Seed labs</div>
+  <p class="lede">The finish-line run for the MVP. Stops 34 to 37 landed today (PRs 102, 103, 104, 106) and this run asks the same 3 cards as field test 18, in the same words and with the same tool calls, on main at 0.59.0. Each learning opens with its verdict, grounded only in the new raw output: 2 fixed, 0 partly, 1 the same. The one that stayed the same is the Landsat card, where nothing was meant to move.</p>
+</div></header>
+
+<div class="stats wrap" style="padding: 0 24px">
+  <div class="stat"><b>3</b><span>cards re-asked on 0.59.0, covering stops 34 to 37</span></div>
+  <div class="stat"><b>2 · 0 · 1</b><span>fixed · partly · the same, each verdict grounded in the new output</span></div>
+  <div class="stat"><b>1</b><span>live artifact: the Chelan brief map; plus every raw tool result the cards quote</span></div>
+</div>
+
+<main class="wrap">
+<h2 class="round">Round 1: the folded copies and the out-of-range note, Landsat unchanged, and the brief over the place with its scene check (stops 34 to 37)</h2>
+<div class="grid">
+<div class="card nofig"><div class="top"><div class="num">1</div><div class="tag">claims on the stack</div><div class="who">insurance catastrophe adjuster</div></div>
+<div><div class="label">Input</div><div class="prompt">Rolling Fork, Mississippi was hit by the March 24, 2023 tornado. Show me before and after, and tell me what data this came from.</div></div>
+<div><div class="label">Our read</div><div class="answer">The 2023 search now returns 1 scene per tile, and the 2023 statistics say in words that their extreme values are not real vegetation.</div></div>
+<div class="headline"><b>Learning →</b> Fixed.</div>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>The 2023 search now returns 1 scene per tile, and the 2023 statistics say in words that their extreme values are not real vegetation.</b> The search over 2023-08-18 to 08-19 comes back with 2 items, one per tile (15SYS covers 41.1% of the box, 15SXS covers 100.0%), both processed 2024-10-26, with <code>folded_duplicates: 2</code> and a note that 2 older processings of the same scene were dropped. The recommendation reads "clearest (0.0% cloud) and best-covering (100.0% of the area), not a tradeoff". To the digit the 15SYS scene is the clearer one (cloud 0.007472 against the pick's 0.014582), but both print as 0.0%, so the reason holds at the precision it prints (my reading). The 2023 NDVI statistics carry a <code>range_note</code> saying the index ran from -64 to 4.067, that pixels under digital number 1000 go below 0 after the -0.1 offset, that the values are not clamped, and that the median (0.5799) and percentiles (0.1026 and 0.9498) are the safer summary. The mean is 0.5358. The 2021 scene (offset 0, 65.04% cloud scene-wide) has min -0.5272, max 0.7693, and no range_note. Index statistics over a 14 by 11 km box, not damage evidence.</div>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("planetary-computer", ["sentinel-2-l2a"], bbox=[-90.95, 32.86, -90.8, 32.96], datetime_range="2023-08-18T00:00:00Z/2023-08-19T23:59:59Z", limit=10)
+  count: 2
+  S2A_MSIL2A_20230818T163841_R126_T15SYS_20241026T035856  cloud 0.007472  covers_aoi_pct 41.1
+  S2A_MSIL2A_20230818T163841_R126_T15SXS_20241026T035856  cloud 0.014582  covers_aoi_pct 100.0
+  folded_duplicates: 2
+  note: 2 older processings of the same scene (same sensing time, tile and footprint) dropped; only the newest processing of each scene is kept
+  recommended: S2A_MSIL2A_20230818T163841_R126_T15SXS_20241026T035856  cloud 0.014582  covers_aoi_pct 100.0
+  reason: clearest (0.0% cloud) and best-covering (100.0% of the area), not a tradeoff
+
+search_imagery("planetary-computer", ["sentinel-2-l2a"], bbox=[-90.95, 32.86, -90.8, 32.96], datetime_range="2021-10-12T00:00:00Z/2021-10-13T23:59:59Z", limit=10)
+  count: 2   (no folded_duplicates key)
+  S2B_MSIL2A_20211012T164139_R126_T15SYS_20211013T050253  cloud 42.681421  covers_aoi_pct 41.1
+  S2B_MSIL2A_20211012T164139_R126_T15SXS_20211013T060154  cloud 65.04476   covers_aoi_pct 100.0
+  recommended: S2B_MSIL2A_20211012T164139_R126_T15SXS_20211013T060154  cloud 65.04476  covers_aoi_pct 100.0
+  reason: every scene is over 30% cloud, so this is the least bad: 65.0% cloud but covers 100.0% of the area; the clearest scene (42.7% cloud) covers 41.1%
+
+compute_statistics("planetary-computer", "sentinel-2-l2a", "S2A_MSIL2A_20230818T163841_R126_T15SXS_20230819T021410", expression="(B08-B04)/(B08+B04)", bbox=[-90.95, 32.86, -90.8, 32.96])
+  key: (B08-B04)/(B08+B04)
+  mean: 0.5357592447575882   median: 0.5799102519848118   std: 0.38024012773145444
+  min: -63.999999999998195   max: 4.066666666666659
+  percentile_2: 0.1026372059871704   percentile_98: 0.9497852659398744
+  count: 175104.0   valid_percent: 100.0
+  scaling_applied: true
+  band_scaling: 1 entry, scale 0.0001, offset -0.1, source: collection convention: the item carries no raster:bands
+  range_note: the index ran from -64 to 4.067, outside -1 to 1: pixels under digital number 1000 go below 0 after the -0.1 offset, so the index is undefined over them; the values are not clamped and they pull the mean, so the median and percentiles are the safer summary
+
+compute_statistics("planetary-computer", "sentinel-2-l2a", "S2B_MSIL2A_20211012T164139_R126_T15SXS_20211013T060154", expression="(B08-B04)/(B08+B04)", bbox=[-90.95, 32.86, -90.8, 32.96])
+  key: (B08-B04)/(B08+B04)
+  mean: -0.01693815486057333   median: -0.02622974642156508   std: 0.06243147773886538
+  min: -0.5272072072072072   max: 0.7693144722524483
+  percentile_2: -0.1110584330923314   percentile_98: 0.1473065310662641
+  count: 175104.0   valid_percent: 100.0
+  scaling_applied: true
+  band_scaling: 1 entry, scale 0.0001, offset 0, source: collection convention: the item carries no raster:bands
+  (no range_note key)</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> Field test 18 searched the same box and window and got 4 items (the no18 card names the one 15SXS id, ...20230819T021410, and the tile 15SYS item and the later-processed copies are not itemized there); now the search returns 2, with ids ending 20241026T035856, and says <code>folded_duplicates: 2</code>. The reason contrasts the pick with no other scene; the no18 card did not quote a reason for this search, so the self-contrast stop 34 removed is not shown in either field test's output. For the statistics, min -63.999999999998195 and max 4.066666666666659 are unchanged from no18, but they now come with a <code>range_note</code> in plain words; the 2021 scene, whose offset is 0 and whose range is -0.5272 to 0.7693, has none. Two things worth saying. First, the statistics call used the older item id ...20230819T021410 so the arguments stay identical to no18; the search no longer returns that id, and the call still worked, returning the same mean, median, std, percentiles and count as no18 to the digit. Second, the 2021 search returned 2 items with no folding key, which fits there being no reprocessed copies (my reading; the output only shows the absence of the key). Not checked: whether the dropped copies differ in content from the kept ones, the apply_scaling=False path, and whether 0.5358 holds against an independent source.</div>
+<div class="shows">stop 34 one id per tile and date, folded_duplicates 2 with a note · reason without a self-contrast · stop 36 range_note on the offset -0.1 scene · no range_note on the offset 0 scene · min -64.0 and max 4.067 unchanged</div></details>
+</div>
+
+<div class="card nofig"><div class="top"><div class="num">2</div><div class="tag">which portland</div><div class="who">harbor pilot</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me the harbor approaches at Portland from the latest Landsat pass.</div></div>
+<div><div class="label">Our read</div><div class="answer">Nothing on this card changed: the same 8 scenes, the same pick (2026-10-05, 15.28% cloud, 100.0% coverage), and the same reason ending with why the newest day, 2026-10-21, lost.</div></div>
+<div class="headline"><b>Learning →</b> The same.</div>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Nothing on this card changed: the same 8 scenes, the same pick (2026-10-05, 15.28% cloud, 100.0% coverage), and the same reason ending with why the newest day, 2026-10-21, lost.</b> The bare name "Portland" is still ambiguous (4 candidates), so I used the Casco Bay box of Portland, Maine, as the earlier cards did. The reason still ends "the newest, 2026-10-21, lost on cloud: 23.0% against the pick's 15.3%, outside the 5-point tie". Asked with limit=3 the search returns 3 scenes and picks the 2026-10-21 scene with no such clause. Neither search carries <code>folded_duplicates</code> or a note, so the Landsat items were not folded.</div>
+<details class="data"><summary>show the data</summary><div class="returned">geocode("Portland")
+  source: gazet   name: Portland (United States, urban_centre)   ambiguous: true
+  candidates (4):
+    Portland (United States, urban_centre)  Oregon, United States  score 0.099
+    Portland (US, locality)                 Oregon, United States  score 0.085
+    Portland (US, locality)                 Maine, United States   score 0.084
+    Portland (United States, urban_centre)  Maine, United States   score 0.057
+  geocode_note: 4 places match 'Portland' equally well; using Portland (Oregon, United States, urban_centre) (best score), not Portland (Oregon, United States, locality), Portland (Maine, United States, locality), Portland (Maine, United States, urban_centre). Pass the fuller name if another was meant. ambiguous: pass the fuller name or a bbox
+
+search_imagery("planetary-computer", ["landsat-c2-l2"], bbox=[-70.40, 43.55, -69.90, 43.85], datetime_range="2026-10-01T00:00:00Z/2026-10-26T23:59:59Z", limit=10)
+  count: 8   (result keys: bbox, count, items, recommended; no folded_duplicates, no note)
+  recommended: LC09_L2SP_012030_20261005_02_T1  cloud 15.28  covers_aoi_pct 100.0
+  reason: 15.3% cloud but covers 100.0% of the area; the clearest scene (0.3% cloud) covers 84.2%; the newest, 2026-10-21, lost on cloud: 23.0% against the pick's 15.3%, outside the 5-point tie
+  LC09_L2SP_012030_20261021_02_T1  2026-10-21  cloud 23.01  covers_aoi_pct 100.0
+  LC09_L2SP_012029_20261021_02_T1  2026-10-21  cloud 2.63   covers_aoi_pct 66.6
+  LC09_L2SP_011030_20261014_02_T1  2026-10-14  cloud 53.29  covers_aoi_pct 87.0
+  LC08_L2SP_012030_20261013_02_T2  2026-10-13  cloud 100.0  covers_aoi_pct 100.0
+  LC08_L2SP_012029_20261013_02_T2  2026-10-13  cloud 100.0  covers_aoi_pct 65.6
+  LC08_L2SP_011030_20261006_02_T1  2026-10-06  cloud 0.33   covers_aoi_pct 84.2
+  LC09_L2SP_012030_20261005_02_T1  2026-10-05  cloud 15.28  covers_aoi_pct 100.0
+  LC09_L2SP_012029_20261005_02_T1  2026-10-05  cloud 55.59  covers_aoi_pct 67.3
+
+search_imagery("planetary-computer", ["landsat-c2-l2"], bbox=[-70.40, 43.55, -69.90, 43.85], datetime_range="2026-10-01T00:00:00Z/2026-10-26T23:59:59Z", limit=3)
+  count: 3   (no folded_duplicates, no note)
+  recommended: LC09_L2SP_012030_20261021_02_T1  cloud 23.01  covers_aoi_pct 100.0
+  reason: 23.0% cloud but covers 100.0% of the area; the clearest scene (2.6% cloud) covers 66.6%
+  LC09_L2SP_012030_20261021_02_T1  2026-10-21  cloud 23.01  covers_aoi_pct 100.0
+  LC09_L2SP_012029_20261021_02_T1  2026-10-21  cloud 2.63   covers_aoi_pct 66.6
+  LC09_L2SP_011030_20261014_02_T1  2026-10-14  cloud 53.29  covers_aoi_pct 87.0</div></details>
+<div class="learning"><b>Learning →</b> <b>The same.</b> That is the expected result here, not a gap: stop 34 folds reprocessed copies of one scene, and no 2 of the 8 Landsat ids share a path, row and date, so there was nothing to fold; nothing should change, and nothing did. Count (8 and 3), ids, cloud and coverage figures, the geocode ambiguity note and both reason texts match field test 18 character for character, checked line by line against the no18 cases file; the candidate lines here leave out the type and extent_basis columns no18 printed, so those columns are not compared. The stop 32 newest-scene clause still holds, and is still absent when the pick is the newest day. What this card cannot say: whether the fold would fire on Landsat when duplicates exist (the fold in src/groundstation/tools.py keys the tile on s2:mgrs_tile, else grid:code; whether these Landsat items carry grid:code is not in the output), and the ceiling-step and coverage-step wordings, which no live data here reaches. Not checked: a render of the pick.</div>
+<div class="shows">stop 34 does not disturb a non-Sentinel collection · no folded_duplicates on Landsat · count 8 and 3, pick and reason as in no18 · stop 32 newest-scene clause still reads as before · geocode ambiguity still lists 4 Portlands</div></details>
+</div>
+
+<div class="card"><div class="top"><div class="num">3</div><div class="tag">the product</div><div class="who">Earth briefs you</div></div>
+<div><div class="label">Input</div><div class="prompt">brief.py --place "Chelan County, Washington" --days 7</div></div>
+<div><div class="label">Our read</div><div class="answer">The brief now measures NDVI over the county box, says how much of the county that covers, and says out loud that it cannot tell whether the scenes moved since the last run.</div></div>
+<div class="headline"><b>Learning →</b> Fixed.</div>
+<a class="fig" href="img/ft19-chelan-brief-map.html" target="_blank" title="open the live artifact"><img src="img/ft19-chelan-brief-map.png" alt="artifact produced by example 3" loading="lazy"><span class="open">map: Chelan County brief, S2C_10UFU_20261023_0_L2A ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>The brief now measures NDVI over the county box, says how much of the county that covers, and says out loud that it cannot tell whether the scenes moved since the last run.</b> The pick is the same scene as field test 18, S2C_10UFU_20261023_0_L2A (cloud 8.8687, 47.6% of the area), and the baseline is the same, S2C_10UFU_20261003_0_L2A. The means are now 0.499 and 0.525, not the whole-tile 0.544 and 0.614 of field test 18, and the metric label reads "NDVI (vegetation) over Chelan County, Washington, 47.6% of it covered". The change is a drop of 0.026 (-4.9%), against -0.07 (-11.5%) before. The brief carries "Since the last run: ..." under What changed and does not say "nothing has changed". The state file now holds both scene ids for the next run.</div>
+<details class="data"><summary>show the data</summary><div class="returned">brief.py --place "Chelan County, Washington" --days 7 --out docs/img/ft19-chelan
+  Ran through harbor-cli run --light, at 0.59.0, once, exit 0. All 5 steps ran, including the Claude synthesis. The state file held only the 2026-10-26 mean (0.544), no scene ids.
+  data.json ndvi_change.metric: NDVI (vegetation) over Chelan County, Washington, 47.6% of it covered
+  current: S2C_10UFU_20261023_0_L2A, 2026-10-23, cloud 8.8687, covers_aoi_pct 47.6, mean 0.499
+  baseline: S2C_10UFU_20261003_0_L2A, 2026-10-03, cloud 0.004074, covers_aoi_pct 47.6, mean 0.525
+  delta: -0.026, delta_pct: -4.9, caveats: []
+  data.json previous_run.scene_vs_last_run: "the prior run carried no scene ids, so whether the pick or baseline moved is unknown"
+  data.json previous_run.ndvi_mean: 0.544
+  brief md, under "## What changed": "Since the last run: the prior run carried no scene ids, so whether the pick or baseline moved is unknown."
+  brief md, vegetation bullet: "The previous run recorded a mean NDVI of 0.544, against 0.499 now. The prior run carried no scene ids, so whether the scene pick or baseline moved is unknown. Treat that gap as unexplained until the scenes are compared directly."
+  brief md, first line: "NDVI over the 47.6% of the county covered by tile 10UFU fell from 0.525 (2026-10-03) to 0.499 (2026-10-23), a drop of 0.026 (-4.9%), with no caveats listed."
+  occurrences of "nothing has changed" in the brief md (case-insensitive): 0
+  state file briefing/state/chelan-county--washington.json after the run: pick_id S2C_10UFU_20261023_0_L2A, baseline_id S2C_10UFU_20261003_0_L2A, ndvi_mean 0.499, date 2026-10-26
+  files: brief-chelan-county--washington-2026-10-26.{md,html,data.json}, brief-map-chelan-county--washington-2026-10-26.html</div></details>
+<div class="learning"><b>Learning →</b> <b>Fixed.</b> Stop 35: the label names the place and the covered share (47.6%), and both means moved from the whole tile (0.544 and 0.614 in field test 18) to the place's box (0.499 and 0.525); the 2 scenes are the same as field test 18, and both runs are dated 2026-10-26. Stop 37: the stored state from 2026-10-26 had only the mean, and previous_run.scene_vs_last_run reads "the prior run carried no scene ids, so whether the pick or baseline moved is unknown", which is the honest answer, and the brief text repeats it instead of the earlier habit of saying nothing changed (the phrase appears 0 times in the brief html; field test 18's brief, docs/img/ft18-chelan-brief.html, said "Nothing has changed since the 2026-10-25 CALM run"). The caption ("Sentinel-2, 2026-10-23, 8.9% cloud cover, covers 48% of the area") and the map layer ("Sentinel-2 2026-10-23 (8.9% cloud)") still name the one pick, and S2C_10UFU_20261023_0_L2A is the only scene id in the map html; the map image shows that one tile over Lake Chelan. Not checked: the other branch, a prior run that did carry scene ids and either matched or moved (this run could only exercise the no-ids branch; the next run on this place will carry pick_id and baseline_id for it), the share label when the pick covers 99% or more of the place, and the metric label and scene_vs_last_run strings against a committed file: the brief md and data.json were not committed, so those 2 quotes rest on the run's output, though the committed brief html carries the same "Since the last run" sentence.</div>
+<div class="shows">stop 35 label with the covered share · means over the place's box (0.499 and 0.525) · stop 37 scene_vs_last_run reads unknown when the prior run had no ids · Since the last run line under What changed · no claim that nothing has changed · pick_id and baseline_id stored</div></details>
+</div>
+</div>
+<div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
+bash scripts/doctor.sh                      # walks the setup chain, prints the fix
+uv run evals/unit_checks.py                 # 209 offline checks
+uv run scripts/field_test.py docs/field-test-2026-10-27-no19.cases.json</code></div>
+</main>
+
+<footer>field test №19 · October 27, 2026 · run on main at 0.59.0 · 3 cards re-run, 2 fixed, 0 partly, 1 the same · groundstation · Development Seed labs</footer>
+
+</body>
+</html>

@@ -9,11 +9,15 @@ that scaffold as a toolset later.
 
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
+import hashlib
 import json
+import math
 import os
 import re
 import time
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
 from pathlib import Path
@@ -60,8 +64,11 @@ _gazet_skip_until = 0.0
 # miss: "Salinas Valley" came back as Salinas, Mexico at 0.9
 GAZET_URL = os.environ.get("GAZET_URL", "https://developmentseed-gazet.hf.space/api/search")
 GAZET_MIN_SIMILARITY = 0.95
-# ponytail: one margin for all geocoders; per-source margins if the live list below ever disagrees
+# two candidates in different places whose scores sit this close are both
+# real contenders, and the place-taking tools refuse the name
 AMBIGUITY_MARGIN = 0.15
+# a box under this in both directions is a point (a Nominatim node), not an extent
+POINT_DEG = 0.001
 GAZET_TIMEOUT_S = 10.0  # geocode is a hot path: a cold Space takes ~8s, a dead one must not hang the tool
 
 
@@ -80,6 +87,18 @@ _FEATURE_KINDS = {
 }
 
 
+# a point candidate's half-width in km by kind. Nominatim pads its own place
+# nodes (a town node came back 0.08 deg), so city and town here are for a source that does not
+_KIND_HALF_KM = {
+    **dict.fromkeys(("bay", "marina", "harbour", "beach", "village", "hamlet", "mine", "pit"), 2.0),
+    **dict.fromkeys(("town", "volcano", "mountain", "peak", "lake", "reservoir", "water"), 5.0),
+    "city": 10.0,
+}
+
+
+_PHYSICAL_KINDS = set().union(*_FEATURE_KINDS.values())
+
+
 def _feature_word(query: str) -> tuple[str | None, set[str]]:
     return next(((t, _FEATURE_KINDS[t]) for t in re.findall(r"[a-z]+", query.lower()) if t in _FEATURE_KINDS), (None, set()))
 
@@ -88,8 +107,86 @@ def _nominatim_kind(r: dict[str, Any]) -> str:
     return str(r.get("addresstype") or r.get("type") or "place").lower()
 
 
+def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
+               importance: float | None, want: set[str]) -> dict[str, Any]:
+    """One geocode candidate from any source, scored by the one rule, with the inputs shown.
+
+    score = importance (0 where the source has none, as Gazet does)
+          + 0.03 x log10 of the extent in km2 (a point scores 0)
+          + 0.1 when the kind is a physical feature (lake, volcano, river...)
+          + 0.2 more when the ask names that feature ("lake", "volcano")
+    The weights were set against the live sources (field test No.14): the
+    Lake Charles city at importance 0.55 still beats the lake at 0.18 with
+    both bonuses, the Shasta Lake reservoir at 0.34 beats the town at 0.44
+    with them, and the Kilauea volcano at 0.48 clears the village at 0.35
+    by more than AMBIGUITY_MARGIN without a feature word
+
+    extent_basis says where the box comes from: own, or for a point (extent
+    under POINT_DEG) kind when _KIND_HALF_KM sizes it, else default (the 0.3 deg square)
+    """
+    w, s, e, n = bbox
+    width, height = e - w + (360 if e < w else 0), n - s  # west > east crosses the dateline
+    km2 = width * height * 111.32**2 * max(math.cos(math.radians((s + n) / 2)), 0.01)
+    score = (importance or 0.0) + 0.03 * math.log10(max(km2, 1.0))
+    if kind in _PHYSICAL_KINDS:
+        score += 0.1 + (0.2 if kind in want else 0.0)
+    basis = "own" if max(width, height) >= POINT_DEG else "kind" if kind in _KIND_HALF_KM else "default"
+    return dict(name=name, bbox=bbox, source=source, where=where, kind=kind,
+                extent=[round(width, 4), round(height, 4)], importance=importance, score=round(score, 3),
+                extent_basis=basis)
+
+
+# the boxes geocode returned, with the source that answered, so a caller's stack_facts can claim a geocode
+# only for a box that really came from one
+# ponytail: last 64 boxes in memory, rounded to 4 decimals; a persistent or per-session record if callers outlive it
+_geocoded_boxes: dict[tuple[float, ...], str] = {}
+
+
+def _bbox_key(bbox: list[float]) -> tuple[float, ...]:
+    return tuple(round(float(x), 4) for x in bbox)
+
+
+def _record_geocode(out: dict[str, Any]) -> dict[str, Any]:
+    key = _bbox_key(out["bbox"])
+    _geocoded_boxes.pop(key, None)
+    _geocoded_boxes[key] = out["source"]
+    while len(_geocoded_boxes) > 64:
+        del _geocoded_boxes[next(iter(_geocoded_boxes))]
+    return out
+
+
+def _geocoded_fact(facts: dict[str, Any] | None, bbox: list[float] | None) -> bool | str:
+    """What the panel may credit: the tool's own geocode, else a caller's claim that matches a box geocode returned"""
+    claimed = (facts or {}).get("geocoded")
+    if claimed and bbox is not None and _geocoded_boxes.get(_bbox_key(bbox)) == claimed:
+        return claimed
+    return _tool_geocoded.get()
+
+
+def _names_the_ask(name: str, ask: str) -> bool:
+    """A candidate whose name shares no word with the ask is a fuzzy-match stray (Le Moule for Portland)"""
+    words = lambda t: set(re.findall(r"\w+", unicodedata.normalize("NFKD", t.lower()).encode("ascii", "ignore").decode()))
+    return bool(words(name) & words(ask))
+
+
+def _state_country(c: dict[str, Any]) -> str:
+    """State and country at a candidate's centre, by one Nominatim reverse lookup at state zoom.
+
+    Gazet rows carry a country code and no state; ids_only=false adds an ISO
+    region code ("US-OR") but also every geometry, 4 MB for Canada, so a
+    reverse lookup on the refusal path is cheaper than either
+    """
+    w, s, e, n = c["bbox"]
+    try:
+        a = _get_json("https://nominatim.openstreetmap.org/reverse",
+                      params={"lat": (s + n) / 2, "lon": (w + e) / 2, "zoom": 5, "format": "jsonv2"}).get("address") or {}
+        return ", ".join(x for x in (a.get("state"), a.get("country")) if x) or c["where"]
+    except Exception:
+        return c["where"]
+
+
 def _kind_where(c: dict[str, Any]) -> str:
-    """County, state and country for a Nominatim candidate; a Gazet record carries only its country and position"""
+    """County, state and country for a Nominatim candidate; a Gazet record carries what geocode found for it"""
     if c.get("source") != "nominatim":
         return c.get("where") or ""
     parts = [p for p in c["name"].split(", ") if not p.strip().isdigit()]
@@ -123,6 +220,16 @@ def _resolve_bbox(place: str | None, bbox: list[float] | None) -> list[float] | 
     return bbox
 
 
+def _rfc3339_window(window: str) -> str:
+    """Date-only ends ("2024-10-01/2024-10-20") become the full-day RFC3339 range STAC servers accept."""
+    lo, sep, hi = window.partition("/")
+    if len(lo) == 10:
+        lo += "T00:00:00Z"
+    if len(hi) == 10:
+        hi += "T23:59:59Z"
+    return lo + sep + hi
+
+
 def last_days_window(days: int, end_days_ago: int = 0) -> str:
     """RFC3339 range covering the last `days` days, ending `end_days_ago` days ago."""
     import datetime as dt
@@ -133,10 +240,15 @@ def last_days_window(days: int, end_days_ago: int = 0) -> str:
 
 
 def pick_best_scene(items: list[dict[str, Any]], aoi_bbox: list[float]) -> dict[str, Any] | None:
-    """Best scene = covers the AOI, then low cloud — a clear sliver must not win."""
+    """The one rule (_scene_key): coverage first, then low cloud, then id — a clear sliver must not win."""
     if not items:
         return None
-    return max(items, key=lambda i: _coverage(i, aoi_bbox) - (i.get("cloud_cover") or 100) / 200)
+    return min(_with_coverage(items, aoi_bbox), key=_scene_key)
+
+
+def _with_coverage(items: list[dict[str, Any]], aoi_bbox: list[float]) -> list[dict[str, Any]]:
+    """Copies of items with covers_aoi_pct filled from the bbox where search_imagery did not"""
+    return [i if i.get("covers_aoi_pct") is not None else {**i, "covers_aoi_pct": _coverage(i, aoi_bbox) * 100} for i in items]
 
 
 def _coverage(item: dict[str, Any], aoi_bbox: list[float]) -> float:
@@ -159,9 +271,119 @@ FULL_COVERAGE_PCT = 99.0
 PARTIAL_COVERAGE_PCT = 95.0
 
 
-def _union_coverage_pct(aoi: list[float], boxes: list[list[float]]) -> float:
-    """Union coverage of the AOI by several bboxes — exact for axis-aligned
-    rectangles (coordinate-sweep grid), so overlapping tiles never double-count."""
+# ponytail: footprints are sampled on a 64x64 grid of AOI cell centres, so a
+# footprint edge is only resolved to 1/64 of the box (about 1.6 points of
+# coverage). A footprint thinner than a cell can read 0; raise the grid if it matters
+COVER_GRID = 64
+
+
+def _shape_polys(shape: Any) -> list[list[list[list[float]]]]:
+    """A bbox [w,s,e,n] or a GeoJSON Polygon/MultiPolygon as a list of polygons
+    (each a list of rings). Anything else is no shape."""
+    if isinstance(shape, dict):
+        c = shape.get("coordinates")
+        if shape.get("type") == "Polygon" and c:
+            return [c]
+        if shape.get("type") == "MultiPolygon" and c:
+            return list(c)
+        return []
+    if isinstance(shape, (list, tuple)) and len(shape) >= 4:
+        return [[[[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]] for b in _split_antimeridian(list(shape)[:4])]
+    return []
+
+
+def _in_polys(x: float, y: float, polys: list) -> bool:
+    for poly in polys:
+        inside = False  # even-odd over every ring, so a hole flips the point back out
+        for ring in poly:
+            j = len(ring) - 1
+            for i in range(len(ring)):
+                xi, yi, xj, yj = ring[i][0], ring[i][1], ring[j][0], ring[j][1]
+                if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                    inside = not inside
+                j = i
+        if inside:
+            return True
+    return False
+
+
+def _cover_mask(aoi: list[float], shape: Any) -> int:
+    """Bit k set when AOI grid point k lies inside the shape."""
+    polys = _shape_polys(shape)
+    if not polys:
+        return 0
+    w, s, e, n = aoi
+    span = (e - w) % 360 if w > e else e - w
+    mask, k = 0, 0
+    for r in range(COVER_GRID):
+        y = s + (n - s) * (r + 0.5) / COVER_GRID
+        for c in range(COVER_GRID):
+            x = w + span * (c + 0.5) / COVER_GRID
+            # footprints that cross the antimeridian come as lon beyond 180 or below -180
+            if any(_in_polys(x + d, y, polys) for d in (0, 360, -360)):
+                mask |= 1 << k
+            k += 1
+    return mask
+
+
+def _is_bbox(shape: Any) -> bool:
+    return isinstance(shape, (list, tuple)) and len(shape) >= 4
+
+
+def _union_coverage_pct(aoi: list[float], shapes: list[Any]) -> float:
+    """Union coverage of the AOI by several scene shapes, bboxes or footprints.
+
+    All bboxes: exact coordinate sweep. Any footprint polygon: the sampled grid
+    above, so holes, multipolygons and overlap all come out of one rule."""
+    if any(not _is_bbox(sh) for sh in shapes):
+        if not aoi or len(aoi) < 4 or aoi[3] <= aoi[1]:
+            return 0.0
+        m = 0
+        for sh in shapes:
+            m |= _cover_mask(aoi, sh)
+        return round(100.0 * bin(m).count("1") / COVER_GRID**2, 1)
+    return _union_bbox_coverage_pct(aoi, shapes)
+
+
+def _uncovered_side(aoi: list[float], shapes: list[Any]) -> tuple[float, str]:
+    """(percent of the AOI no shape covers, where it sits: 'south', 'the northwest corner'...)."""
+    m = 0
+    for sh in shapes:
+        m |= _cover_mask(aoi, sh)
+    xs = ys = cnt = 0
+    for k in range(COVER_GRID**2):
+        if not m >> k & 1:
+            r, c = divmod(k, COVER_GRID)
+            xs += (c + 0.5) / COVER_GRID * 2 - 1
+            ys += (r + 0.5) / COVER_GRID * 2 - 1
+            cnt += 1
+    if not cnt:
+        return 0.0, ""
+    dx, dy = xs / cnt, ys / cnt
+    ns = "north" if dy > 0.25 else "south" if dy < -0.25 else ""
+    ew = "east" if dx > 0.25 else "west" if dx < -0.25 else ""
+    where = ns + ew or "the middle"
+    if ns and ew and abs(dx) > 0.5 and abs(dy) > 0.5:
+        where = f"the {where} corner"
+    return round(100.0 * cnt / COVER_GRID**2, 1), where
+
+
+def _with_wedge(text: str, unc: tuple[float, str] | None) -> str:
+    """Append the uncovered-wedge sentence to a card caption or map subtitle, so the
+    reader of the artifact sees what the result's uncovered_pct says"""
+    if not unc or not unc[0]:
+        return text
+    return " · ".join(x for x in (text, f"{unc[0]:.1f}% of the box uncovered, mostly {unc[1]}") if x)
+
+
+def _item_shape(it: dict[str, Any]) -> Any:
+    """The scene's footprint polygon when the catalog gave one, else its bbox."""
+    return it.get("footprint") or it.get("bbox")
+
+
+def _union_bbox_coverage_pct(aoi: list[float], boxes: list[list[float]]) -> float:
+    """Exact union coverage by axis-aligned rectangles (coordinate sweep), so
+    overlapping tiles never double-count."""
     aoi_parts = _split_antimeridian(aoi)
     aoi_area = sum((part[2] - part[0]) * (part[3] - part[1]) for part in aoi_parts)
     if aoi_area <= 0:
@@ -213,23 +435,23 @@ def find_full_coverage_set(
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for it in items:
         day = (it.get("datetime") or "")[:10]
-        if day and it.get("bbox") and it.get("collection"):
+        if day and _item_shape(it) and it.get("collection"):
             groups.setdefault((it["collection"], day), []).append(it)
     for coll, day in sorted(groups, key=lambda k: k[1], reverse=True):
         remaining = list(groups[(coll, day)])
         chosen: list[dict[str, Any]] = []
-        boxes: list[list[float]] = []
+        boxes: list[Any] = []
         covered = 0.0
         while remaining:
             best, best_gain = None, 0.05  # require a real gain, not float noise
             for it in remaining:
-                gain = _union_coverage_pct(aoi_bbox, boxes + [it["bbox"]]) - covered
+                gain = _union_coverage_pct(aoi_bbox, boxes + [_item_shape(it)]) - covered
                 if gain > best_gain:
                     best, best_gain = it, gain
             if best is None:
                 break
             chosen.append(best)
-            boxes.append(best["bbox"])
+            boxes.append(_item_shape(best))
             covered = _union_coverage_pct(aoi_bbox, boxes)
             remaining.remove(best)
             if covered >= threshold:
@@ -259,7 +481,13 @@ def _pc_mosaic_id(collection_id: str, item_id: str) -> str:
             timeout=PC_REGISTER_TIMEOUT_S,
         )
         r.raise_for_status()
-        _pc_mosaic_cache[key] = r.json()["id"]
+        # the register reply carried "id" until 2026-10; it is "searchid" now
+        # (field test 16), and a missing key is the fallback's job, not a crash
+        j = r.json()
+        mid = j.get("searchid") or j.get("id")
+        if not mid:
+            raise httpx.HTTPError(f"mosaic register reply carries no id: {sorted(j)}")
+        _pc_mosaic_cache[key] = mid
     return _pc_mosaic_cache[key]
 
 
@@ -331,16 +559,22 @@ def geocode(query: str) -> dict[str, Any]:
     names ("Barotse Floodplain", "Chelan County") rather than long phrases.
     Returns {name, lat, lon, bbox: [w, s, e, n], source, candidates}, plus
     geocode_note when several places match the name and one was picked.
-    candidates lists up to 4 {name, bbox, source, where, kind}, kind being the
-    source's own word lowercased (Gazet subtype, Nominatim addresstype or type:
-    volcano, reservoir, town, county...) or "place". A feature word in the query
-    (lake, volcano, river, peak...) makes the one candidate of that kind the
-    chosen result and clears ambiguous; the others stay listed. Lake, reservoir
-    and water count as one kind. The word yields when the source's top result
-    is another place whose own name carries it and that outranks the feature by
-    more than AMBIGUITY_MARGIN ("Lake Charles" is the city). ambiguous is true
-    when the top two are real contenders in different places, and the
-    place-taking tools then refuse the name until a fuller name or bbox is passed.
+    candidates lists up to 4 {name, bbox, source, where, kind, extent,
+    importance, score}, best score first, kind being the source's own word
+    lowercased (Gazet subtype, Nominatim addresstype or type: volcano,
+    reservoir, town, county...) or "place", extent [width, height] in degrees,
+    importance Nominatim's own (None from Gazet). Every candidate from either
+    source is scored by one rule (see _candidate): importance, extent, a
+    physical-feature kind, and a feature word in the query (lake, volcano,
+    river, peak...) that names the candidate's kind. Lake, reservoir and water
+    count as one kind. The top score is the result; its bbox is the
+    candidate's own however small, widened only when it is a point: by
+    its kind's half-width (a bay 2 km, a town or volcano 5, a city 10),
+    or the 0.3 deg square when the kind is unknown. extent_basis on the result
+    and each candidate says which: own, kind or default. ambiguous
+    is true when a candidate in another place scores within AMBIGUITY_MARGIN
+    of the top; each candidate's where then names its state and country, and
+    the place-taking tools refuse the name until a fuller name or bbox is passed.
     """
     global _gazet_skip_until
     try:
@@ -360,17 +594,15 @@ def geocode(query: str) -> dict[str, Any]:
             if h.get("bbox") and len(h["bbox"]) == 4
             and (h.get("similarity") or 0.0) >= GAZET_MIN_SIMILARITY
         ]
-        # the feature word picks among the top ties too: "Lake Powell" ties an
-        # Australian locality with the Utah reservoir (field test No.13)
-        _, want = _feature_word(query)
-        top = [o for o in hits if o.get("similarity") == hits[0].get("similarity")] if hits else []
-        pick = [o for o in top if str(o.get("subtype") or "").lower() in want]
-        if len(pick) == 1:
-            hits = pick + [o for o in hits if o is not pick[0]]
-        if hits:
-            h = hits[0]
-            w, s, e, n = (float(x) for x in h["bbox"])
-            if e - w >= 180:
+        want = _feature_word(query)[1]
+        # Jaro-Winkler ties are real places sharing a name (Loja Province and
+        # Loja Canton both score 1.0), so every tie is a candidate and the score
+        # picks among them, "Lake Powell" the Utah reservoir over an Australian
+        # locality (field test No.13)
+        pool = []
+        for h in [o for o in hits if o.get("similarity") == hits[0].get("similarity")] if hits else []:
+            bb = [float(x) for x in h["bbox"]]
+            if bb[2] - bb[0] >= 180:
                 # Field test No.8: Fiji came back as [-180, -21, 180, -12], the
                 # minimum bounding rectangle of a country that crosses the
                 # dateline. One geometry fetch gives the real extent
@@ -380,47 +612,44 @@ def geocode(query: str) -> dict[str, Any]:
                     timeout=GAZET_TIMEOUT_S * 3,
                 )
                 gr.raise_for_status()
-                fixed = _wrap_aware_bbox(gr.json().get("geometry") or {})
-                if fixed:
-                    w, s, e, n = fixed
-                    h = {**h, "bbox": fixed}
-            where = ", ".join(x for x in (h.get("country"), h.get("subtype")) if x)
+                bb = _wrap_aware_bbox(gr.json().get("geometry") or {}) or bb
+            h = {**h, "bbox": bb}
             name = h.get("name") or query
+            pool.append((_candidate(f"{name} ({_where(h)})" if _where(h) else name, bb, "gazet", _gazet_where(h),
+                                    str(h.get("subtype") or "place").lower(), None, want), h))
+        if pool:
+            pool = [p for p in pool if _names_the_ask(p[1].get("name") or "", query)] or pool
+            pool = sorted(pool, key=lambda p: -p[0]["score"])[:4]
+            top, h = pool[0]
+            w, s, e, n = top["bbox"]
             lon_c = (w + (e + 360 if e < w else e)) / 2
             out: dict[str, Any] = {
-                "name": f"{name} ({where})" if where else name,
+                "name": top["name"],
                 "lat": (s + n) / 2,
                 "lon": lon_c - 360 if lon_c > 180 else lon_c,
                 "bbox": [w, s, e, n],
                 "source": "gazet",
             }
-            cands = [dict(name=out["name"], bbox=[w, s, e, n], source="gazet", where=_gazet_where(h),
-                          kind=str(h.get("subtype") or "place").lower())]
-            # Jaro-Winkler ties are real places sharing a name (Loja Province and
-            # Loja Canton both score 1.0). Picking one silently is the geocoder
-            # deciding for the caller, so say which and name the rest. Field test
-            # No.8: two US counties are both "Harris County (US, county)", so each
-            # tie carries where it is, from the bbox the record already has
-            ties = [o for o in hits[1:] if o.get("similarity") == h.get("similarity")]
-            if ties:
+            ambiguous = _settle(out, [c for c, _ in pool])
+            # Picking one silently is the geocoder deciding for the caller, so
+            # say which and name the rest. Field test No.8: two US counties are
+            # both "Harris County (US, county)", so each tie carries where it is.
+            # A refusal has looked up each state (_settle), so name that over coordinates
+            if len(pool) > 1:
+                def label(c: dict[str, Any], o: dict[str, Any]) -> str:
+                    if ambiguous:
+                        return f"({c['where']}, {c['kind']})" if c.get("kind") else f"({c['where']})"
+                    return f"({_where(o)}) {_at(o)}"
                 out["geocode_note"] = (
-                    f"{len(ties) + 1} places match {query!r} equally well; using {out['name']} {_at(h)}, not "
-                    + ", ".join(f"{o.get('name')} ({_where(o)}) {_at(o)}" for o in ties[:3])
+                    f"{len(pool)} places match {query!r} equally well; using {h.get('name')} "
+                    + (f"{label(top, h)}" if ambiguous else _at(h))
+                    + " (best score), not "
+                    + ", ".join(f"{o.get('name')} {label(c, o)}" for c, o in pool[1:])
                     + ". Pass the fuller name if another was meant"
                 )
-                cands += [
-                    dict(name=f"{o.get('name')} ({_where(o)})", bbox=[float(x) for x in o["bbox"]],
-                         source="gazet", where=_gazet_where(o), kind=str(o.get("subtype") or "place").lower())
-                    for o in ties[:3]
-                ]
-                # ties share a similarity score, so each is a real contender. Any one
-                # elsewhere counts, not just the second: both top Portland hits are
-                # Oregon (urban centre and locality), Portland Maine is third
-                if len(pick) != 1 and any(not _bboxes_overlap(cands[0]["bbox"], c["bbox"]) for c in cands[1:]):
-                    out["ambiguous"] = True
+                if ambiguous:
                     out["geocode_note"] += ". ambiguous: pass the fuller name or a bbox"
-            out["candidates"] = cands
-            return out
+            return _record_geocode(out)
     except httpx.HTTPError:
         _gazet_skip_until = time.time() + 300  # a slow or dead Space must not tax every geocode
     except Exception:
@@ -455,72 +684,73 @@ def geocode(query: str) -> dict[str, Any]:
             break
     if not results:
         return {"error": f"No geocoding result for {query!r}"}
-    # a feature word in the ask picks the one result of that kind ("Shasta Lake"
-    # is the reservoir, not the town). It yields when the source's top result is
-    # another place whose own name carries the word and that outranks the feature
-    # by more than the ambiguity margin: "Lake Charles" is the city at 0.55 over
-    # the lake at 0.18, Shasta Lake town only 0.44 over the reservoir at 0.34
-    # (field test No.13). Stay with the source's order otherwise
-    word, want = _feature_word(query)
-    hit = [r for r in results if _nominatim_kind(r) in want]
-    imp = lambda r: float(r.get("importance") or 0)
-    top_name = str(results[0].get("name") or results[0].get("display_name", "").split(", ")[0])
-    yielded = (len(hit) == 1 and hit[0] is not results[0] and word in re.findall(r"[a-z]+", top_name.lower())
-               and imp(results[0]) - imp(hit[0]) > AMBIGUITY_MARGIN)
-    picked = len(hit) == 1 and not yielded
-    if picked:
-        results = hit + [r for r in results if r is not hit[0]]
-    r0 = results[0]
-    s, n, w, e = (float(x) for x in r0["boundingbox"])
-    lat, lon = float(r0["lat"]), float(r0["lon"])
+    want = _feature_word(query)[1]
+    pool, seen = [], set()
+    for r in results:
+        key = (_short(r.get("display_name", "")), _nominatim_kind(r))
+        if key in seen:
+            continue
+        seen.add(key)
+        s, n, w, e = (float(x) for x in r["boundingbox"])
+        imp = r.get("importance")
+        pool.append((_candidate(r.get("display_name", key[0]), [w, s, e, n], "nominatim", key[0], key[1],
+                                None if imp is None else round(float(imp), 3), want), r))
+    pool = [p for p in pool if _names_the_ask(p[1].get("display_name", ""), matched)] or pool
+    pool = sorted(pool, key=lambda p: -p[0]["score"])[:4]
+    top, r0 = pool[0]
     out = {
-        "name": r0.get("display_name", query),
-        "lat": lat,
-        "lon": lon,
-        "bbox": [w, s, e, n],
+        "name": top["name"],
+        "lat": float(r0["lat"]),
+        "lon": float(r0["lon"]),
+        "bbox": list(top["bbox"]),
         "source": "nominatim",
     }
     # Field test No.8: "the Ashburn data center corridor" simplified to "Ashburn"
     # and Nominatim's first hit was Ashburn, Georgia. The fallback took the top
     # of a list it never showed. Say what was matched and who else shares it
-    mine = _short(r0.get("display_name", ""))
-    others = list(dict.fromkeys(_short(r.get("display_name", "")) for r in results[1:]))
-    others = [o for o in others if o != mine][:3]
-    seen = {(mine, _nominatim_kind(r0))}
-    cands = [dict(name=out["name"], bbox=[w, s, e, n], source="nominatim", where=mine, kind=_nominatim_kind(r0))]
-    for r in results[1:]:
-        sh = _short(r.get("display_name", ""))
-        if (sh, _nominatim_kind(r)) in seen or len(cands) == 4:
-            continue
-        seen.add((sh, _nominatim_kind(r)))
-        bb = [float(x) for x in r["boundingbox"]]
-        cands.append(dict(name=r.get("display_name", sh), bbox=[bb[2], bb[0], bb[3], bb[1]],
-                          source="nominatim", where=sh, kind=_nominatim_kind(r)))
-        if len(cands) == 2:
-            contender = abs(float(r0.get("importance") or 0) - float(r.get("importance") or 0)) <= AMBIGUITY_MARGIN
-            out["ambiguous"] = contender and not _bboxes_overlap(cands[0]["bbox"], cands[1]["bbox"]) and not picked
-    out["candidates"] = cands
-    if matched != query or others or out.get("ambiguous") or yielded:
+    others = list(dict.fromkeys(_short(r.get("display_name", "")) for r in results))
+    others = [o for o in others if o != top["where"]][:3]
+    ambiguous = _settle(out, [c for c, _ in pool])
+    if matched != query or others or ambiguous:
         out["geocode_note"] = (
             f"matched {matched!r}"
             + (f" after simplifying {query!r}" if matched != query else "")
-            + (f"; {word!r} is part of the {_nominatim_kind(r0)}'s own name and the source ranks it well above"
-               f" the {_nominatim_kind(hit[0])}, so the {_nominatim_kind(r0)} it is" if yielded else "")
             + (f"; other places share it: {' / '.join(others)}" if others else "")
             + ". Pass a state or country if another was meant"
-            + (". ambiguous: pass the fuller name or a bbox" if out.get("ambiguous") else "")
+            + (". ambiguous: pass the fuller name or a bbox" if ambiguous else "")
         )
+    return _record_geocode(out)
+
+
+def _settle(out: dict[str, Any], cands: list[dict[str, Any]]) -> bool:
+    """The tail both sources share: candidates on out, ambiguity, a point widened. Returns ambiguous"""
+    out["candidates"] = cands
+    top = cands[0]
+    ambiguous = any(top["score"] - c["score"] <= AMBIGUITY_MARGIN and not _bboxes_overlap(top["bbox"], c["bbox"])
+                    for c in cands[1:])
+    if ambiguous:
+        out["ambiguous"] = True
+        # Field test No.14: the Portland refusal named no state because Gazet
+        # answered and its rows carry none
+        for c in cands:
+            if c["source"] != "nominatim":
+                c["where"] = _state_country(c)
     # Nominatim returns a NODE for peaks and landmarks, so the bbox collapses to
     # a point (Mount Rainier came back 0.0001 deg wide). A degenerate bbox makes
-    # a useless imagery search and an empty 3D scene, so widen it and say so.
-    if (e - w) < 0.02 or (n - s) < 0.02:
-        d = 0.15
-        out["bbox"] = [lon - d, lat - d, lon + d, lat + d]
+    # a useless imagery search and an empty 3D scene, so widen it and say so. A
+    # real extent stays however small: the Berkeley Pit is 0.024 by 0.013 deg
+    out["extent_basis"] = top["extent_basis"]
+    if top["extent_basis"] != "own":
+        half_km = _KIND_HALF_KM.get(top["kind"]) if top["extent_basis"] == "kind" else None
+        dlat = half_km / 111.32 if half_km else 0.15
+        dlon = min(dlat / max(math.cos(math.radians(out["lat"])), 0.01), 180.0) if half_km else 0.15
+        out["bbox"] = [out["lon"] - dlon, max(out["lat"] - dlat, -90.0), out["lon"] + dlon, min(out["lat"] + dlat, 90.0)]
         out["bbox_note"] = (
-            "geocoder returned a point, not an extent — widened to a "
-            f"{2 * d:g} deg box around it. Pass your own bbox if the subject is bigger"
+            "geocoder returned a point, not an extent — widened to "
+            + (f"{2 * half_km:g} km across for a {top['kind']}" if half_km else "a 0.3 deg box")
+            + " around it. Pass your own bbox if the subject is bigger"
         )
-    return out
+    return ambiguous
 
 
 def reverse_geocode(lat: float, lon: float) -> dict[str, Any]:
@@ -1115,6 +1345,7 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
         "datetime": props.get("datetime") or props.get("start_datetime"),
         "cloud_cover": props.get("eo:cloud_cover"),
         "bbox": item.get("bbox"),
+        **({"footprint": item["geometry"]} if (item.get("geometry") or {}).get("type") in ("Polygon", "MultiPolygon") else {}),
         "assets": sorted(item.get("assets", {}).keys()),
         "self_url": self_url,
         # SAR backscatter is only comparable between passes of the same
@@ -1128,9 +1359,8 @@ def _compact_item(catalog: str, item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float | None:
-    # ponytail: bbox-overlap approximation — a tilted scene footprint covers
-    # less than its bbox suggests; split-at-180 handles antimeridian crossing,
-    # swap in real footprint geometry if it matters.
+    # the fallback for an item with no geometry: a tilted footprint covers less
+    # than its bbox suggests, which is why search_imagery prefers the footprint
     if not item_bbox or len(item_bbox) < 4:
         return None
     aoi_parts = _split_antimeridian(aoi)
@@ -1157,9 +1387,11 @@ def _bbox_coverage_pct(aoi: list[float], item_bbox: list[float] | None) -> float
 RECOMMEND_MAX_CLOUD = 30.0  # above this a scene is only recommended when nothing cleaner exists
 # Field test No.8: a strict max on coverage took a 49.7% scene at 19% cloud over a
 # 48.9% scene at 0.6%, and a strict min on cloud took a 25-day-older scene for 0.4
-# points. Within these bands the axes are a tie and the newest scene wins
+# points. Within these bands the axes are a tie; a recency band then keeps the
+# scenes that are one look, and _scene_key (newest on a dead tie) picks among them
 RECOMMEND_COVERAGE_TIE = 5.0
 RECOMMEND_CLOUD_TIE = 5.0
+RECOMMEND_RECENCY_DAYS = 7  # scenes this close to the newest near-equal one are the same look; _scene_key picks among them
 
 
 def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -1182,9 +1414,26 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     least = min((cloud(it) for it in near if cloud(it) is not None), default=None)
     if least is not None:
         near = [it for it in near if cloud(it) is None or cloud(it) <= least + RECOMMEND_CLOUD_TIE]
-    best = max(near, key=lambda it: (it.get("datetime") or "", cov(it), -(cloud(it) or 0.0)))
+    def day(it: dict[str, Any]) -> dt.date | None:
+        try:
+            return dt.date.fromisoformat((it.get("datetime") or "")[:10])
+        except ValueError:
+            return None
+
+    days = [d for d in map(day, near) if d]
+    band = [it for it in near if not days or (day(it) or dt.date.min) >= max(days) - dt.timedelta(days=RECOMMEND_RECENCY_DAYS)]
+    band.sort(key=lambda it: it.get("datetime") or "", reverse=True)
+    # newest first, and min keeps the first of equal keys, so a dead tie (an archive with no cloud
+    # figures) goes to the newest instead of falling to the id as text
+    best = min(band, key=lambda it: _scene_key(it)[:2])
+    is_newest = not days or day(best) == max(days)
+    pick = (
+        f"newest of {len(near)} near-equal scenes" if is_newest
+        else f"best on coverage, then cloud, of {len(band)} near-equal scenes within {RECOMMEND_RECENCY_DAYS} days of the newest"
+    )
     with_cloud = [it for it in items if cloud(it) is not None]
-    clearest = min(with_cloud, key=lambda it: cloud(it) or 0.0) if with_cloud else None
+    # a tie at the 0.1% the reason prints goes to the pick, so it is never contrasted with a scene it equals
+    clearest = min(with_cloud, key=lambda it: (round(cloud(it) or 0.0, 1), it["id"] != best["id"])) if with_cloud else None
     bc = cloud(best)
     if clearest is None:
         reason = f"best-covering scene at {cov(best):.1f}% of the area; this collection reports no cloud cover"
@@ -1193,7 +1442,7 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
     elif cov(clearest) >= cov(best) - RECOMMEND_COVERAGE_TIE and len(near) > 1:
         # the clearest scene is inside both tie bands, so freshness decided
         reason = (
-            f"{'no cloud figure' if bc is None else f'{bc:.1f}% cloud'}, covers {cov(best):.1f}% of the area, and newest of {len(near)} near-equal scenes; "
+            f"{'no cloud figure' if bc is None else f'{bc:.1f}% cloud'}, covers {cov(best):.1f}% of the area, and {pick}; "
             f"the clearest ({cloud(clearest):.1f}% cloud) is from {(clearest.get('datetime') or '')[:10]}"
         )
     else:
@@ -1202,6 +1451,28 @@ def _recommend(items: list[dict[str, Any]]) -> dict[str, Any] | None:
             f"{own} but covers {cov(best):.1f}% of the area; "
             f"the clearest scene ({cloud(clearest):.1f}% cloud) covers {cov(clearest):.1f}%"
         )
+    newest_day = max((it.get("datetime") or "")[:10] for it in items)
+    if newest_day and newest_day != (best.get("datetime") or "")[:10]:
+        # name the first step, in the order above, that dropped the newest scene, so "why not the latest" is answered
+        def lost(it: dict[str, Any]) -> tuple[int, str | None]:
+            c = cloud(it)
+            if not all_cloudy and c is not None and c > RECOMMEND_MAX_CLOUD:
+                return 0, f"cloud: {c:.1f}%, over the {RECOMMEND_MAX_CLOUD:.0f}% ceiling"
+            if cov(it) < top - RECOMMEND_COVERAGE_TIE:
+                ref = "the pick's" if cov(best) == top else "the best-covering scene's"
+                return 1, f"coverage: {cov(it):.1f}% against {ref} {top:.1f}%, outside the {RECOMMEND_COVERAGE_TIE:.0f}-point band"
+            if all(it is not n for n in near) and c is not None and least is not None:
+                ref = "the pick's" if bc == least else "the band's"
+                return 2, f"cloud: {c:.1f}% against {ref} {least:.1f}%, outside the {RECOMMEND_CLOUD_TIE:.0f}-point tie"
+            return 3, None
+        # two scenes can share the newest day and STAC order is not stable: explain the one that got furthest
+        newest = max(
+            (it for it in items if (it.get("datetime") or "")[:10] == newest_day),
+            key=lambda it: (lost(it)[0], cov(it), -(cloud(it) or 0.0), str(it.get("id"))),
+        )
+        why = lost(newest)[1]
+        if why:
+            reason += f"; the newest, {newest_day}, lost on {why}"
     if all_cloudy:
         reason = f"every scene is over {RECOMMEND_MAX_CLOUD:.0f}% cloud, so this is the least bad: " + reason
     return {"id": best["id"], "covers_aoi_pct": cov(best), "cloud_cover": bc, "reason": reason}
@@ -1283,7 +1554,7 @@ def write_archive(
         out_path = str(out_dir / "archives" / f"{slug}.parquet")
     body: dict[str, Any] = {"collections": collections, "bbox": bbox, "limit": min(limit, 100)}
     if datetime_range:
-        body["datetime"] = datetime_range
+        body["datetime"] = _rfc3339_window(datetime_range)
     if max_cloud_cover is not None:
         body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
     url = f"{CATALOGS[catalog]['stac']}/search"
@@ -1329,7 +1600,8 @@ def search_imagery(
     datetime_range is RFC3339, e.g. "2026-06-01T00:00:00Z/2026-07-09T00:00:00Z".
     Returns compact items sorted newest first; feed self_url/ids into
     preview_item, compute_statistics, or render_map. Each item carries
-    covers_aoi_pct — how much of the searched area its bbox covers (100 =
+    covers_aoi_pct — how much of the searched area its footprint covers
+    (coverage_basis says footprint, or bbox when the item has no geometry; 100 =
     full coverage; a low value means the scene only clips the area, so say
     so or pick a fuller scene). When no single scene covers the AOI, the
     response also carries full_coverage_set: the newest same-day scene set
@@ -1354,7 +1626,7 @@ def search_imagery(
         "sortby": [{"field": "properties.datetime", "direction": "desc"}],
     }
     if datetime_range:
-        body["datetime"] = datetime_range
+        body["datetime"] = _rfc3339_window(datetime_range)
     if max_cloud_cover is not None:
         body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
     archive = None
@@ -1368,10 +1640,23 @@ def search_imagery(
             r = _client.post(f"{base}/search", json=body)
         r.raise_for_status()
         feats = r.json().get("features", [])
+    feats, folded = _fold_reprocessed(feats)
     items = [_compact_item(catalog, f) for f in feats]
     for it in items:
-        it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
+        if it.get("footprint"):
+            it["covers_aoi_pct"] = _union_coverage_pct(bbox, [it["footprint"]])
+            it["coverage_basis"] = "footprint"
+        else:
+            it["covers_aoi_pct"] = _bbox_coverage_pct(bbox, it.get("bbox"))
+            it["coverage_basis"] = "bbox"
     result = {"bbox": bbox, "count": len(feats), "items": items}
+    if not feats and max_cloud_cover is not None:
+        result["note"] = (f"this window returned 0 scenes at max_cloud_cover {max_cloud_cover:g}; "
+                          "a higher cap or a wider window may find some")
+    if folded:
+        result["folded_duplicates"] = folded
+        result["note"] = (f"{folded} older processing{'' if folded == 1 else 's'} of the same scene "
+                          "(same sensing time, tile and footprint) dropped; only the newest processing of each scene is kept")
     if archive:
         result["archive"] = archive
     readable = [it for it in items if "read_note" not in it]
@@ -1383,6 +1668,16 @@ def search_imagery(
         full = find_full_coverage_set(readable, bbox)
         if full and len(full["items"]) > 1:
             result["full_coverage_set"] = full
+            # no single scene covers the box, so the set is the answer: name its
+            # scenes, not a lone one that only clips it
+            ids = [it["id"] for it in full["items"]]
+            result["recommended"] = {
+                "id": ids[0], "scene_ids": ids, "covers_aoi_pct": full["union_covers_aoi_pct"],
+                "cloud_cover": full["items"][0].get("cloud_cover"),
+                "reason": f"no single scene covers this area; these {len(ids)} from {full['date']} together cover "
+                          f"{full['union_covers_aoi_pct']:.1f}% of it (full_coverage_set). "
+                          f"The best single scene covers {best_single:.1f}%",
+            }
         elif rec:
             # Field test No.8: over a county or a province the best single scene
             # is a fraction of the area, and the same-day set that would cover it
@@ -1557,12 +1852,24 @@ def compute_statistics(
     aoi_geojson: dict[str, Any] | None = None,
     bbox: list[float] | None = None,
     sel: dict[str, str] | None = None,
+    apply_scaling: bool = True,
 ) -> dict[str, Any]:
     """Compute pixel statistics (min/max/mean/std/percentiles) for a STAC item.
 
     Same shape clipped or not: {band_or_expression: {min, max, mean, std, ...}},
-    plus clipped_to when an AOI was applied and extent_note when it was not,
-    and scaling_note when the item's raster:bands carry a scale or offset (the numbers are raw).
+    plus clipped_to when an AOI was applied and extent_note when it was not.
+
+    The numbers are physical by default: the item's own raster:bands scale and offset
+    are applied (Sentinel-2 comes back as reflectance, 0 to 1, and an expression is
+    computed on the corrected bands, so an index is not biased by the post-2022 offset).
+    Earth Search's post-2022 pixels already have the offset taken out (earthsearch:boa_offset_applied),
+    so only the scale is applied there. Planetary Computer sentinel-2-l2a items carry no raster:bands and
+    its pixels keep the offset, so the collection convention is applied (scale 0.0001, offset -0.1 from
+    processing baseline 04.00, 0 before) and band_scaling's source says so; a Sentinel-2 item from any
+    other catalog without raster:bands comes back raw with scaling_applied false and a scaling_note.
+    scaling_applied: true and band_scaling (the factors used) say so. apply_scaling=False
+    is the raw escape hatch: raw digital numbers, with scaling_note naming the factors
+    that were not applied.
 
     expression is band math over asset names, e.g. "(nir-red)/(nir+red)" for
     NDVI on Sentinel-2 (Earth Search asset names; Planetary Computer uses band
@@ -1585,8 +1892,49 @@ def compute_statistics(
     if bbox and not aoi_geojson:
         aoi_geojson = _bbox_feature(bbox)
     backend = CATALOGS[catalog]["raster"]
+    item_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
+    try:
+        item = _get_json(item_url)
+    except Exception:
+        item = None
+    # earth-search already took the -1000 out of post-2022 Sentinel-2 pixels yet still declares offset -0.1;
+    # applying it again put half of an August cropland scene below zero (red median 926 DN here, 1930 on PC)
+    offset_in_pixels = bool(item and (item.get("properties") or {}).get("earthsearch:boa_offset_applied"))
+    factors: dict[str, tuple[float, float]] = {}
+    no_rb = bool(item) and not any(a.get("raster:bands") for a in item.get("assets", {}).values())
+    convention: dict[str, tuple[float, float]] = {}
+    baseline = str((item.get("properties") or {}).get("s2:processing_baseline") or "") if item else ""
+    bad_baseline = bool(baseline) and not re.fullmatch(r"\d\d\.\d\d", baseline)
+    if no_rb and catalog == "planetary-computer" and collection_id == "sentinel-2-l2a" and baseline and not bad_baseline:
+        # PC pixels keep the +1000 (red median 1930 vs 926 on earth-search), so the offset is real from 04.00 on
+        # ponytail: string compare on the NN.NN baseline, fine until a baseline passes 99.99
+        off = -0.1 if baseline >= "04.00" else 0
+        convention = {k: (0.0001, off) for k in item["assets"] if re.fullmatch(r"B(0[1-9]|1[0-2]|8A)", k)}
+    if apply_scaling and item:
+        factors.update(convention)
+        for key, a in item.get("assets", {}).items():
+            b0 = (a.get("raster:bands") or [{}])[0]
+            sc, off = b0.get("scale") or 1, 0 if offset_in_pixels else b0.get("offset") or 0
+            if (sc, off) != (1, 0):
+                factors[key] = (sc, off)
     params: list[tuple[str, str]] = [("max_size", "512")]
+    if apply_scaling and convention:
+        # PC's COGs already declare nodata 0 (same count with and without, probed on a 15SXS swath edge);
+        # sent anyway so a file without the tag cannot turn digital number 0 into -0.1 and into the index
+        params.append(("nodata", "0"))
+    corrected = False
+    raw_expression = expression
     if expression:
+        if factors:
+            # the offset does not cancel in a ratio, so each band is corrected before the index is computed
+            # fixed-point numbers only: 1e-05 would read as the identifier "e" to the band parser
+            def _corrected(m: re.Match) -> str:
+                if m[0] not in factors:
+                    return m[0]
+                sc, off = factors[m[0]]
+                return f"({m[0]}*{sc:.12f}{off:+.12f})"
+            expression = re.sub(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", _corrected, expression)
+            corrected = expression != raw_expression
         if backend == "pc":  # PC accepts named-asset expressions directly
             params += [("expression", expression), ("asset_as_band", "true")]
             assets = assets or _expression_idents(expression)
@@ -1622,10 +1970,9 @@ def compute_statistics(
         if r.status_code == 429:
             return {"error": "titiler.xyz rate-limited (429); try again later or set GROUNDSTATION_TITILER"}
     if r.status_code >= 500 and backend not in ("pc", "veda"):
-        # a traceback tells an agent nothing. Look at the item only on failure,
-        # so the working path costs no extra request
+        # a traceback tells an agent nothing
         try:
-            note = _no_cog_note(_get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"))
+            note = _no_cog_note(item) if item else None
         except Exception:
             note = None
         if note:
@@ -1659,12 +2006,45 @@ def compute_statistics(
         for i, a in enumerate(names, 1):
             if f"b{i}" in out and a not in out:
                 out[a] = out.pop(f"b{i}")
+            elif f"{a}_b1" in out and a not in out:  # PC names the band asset_b1
+                out[a] = out.pop(f"{a}_b1")
+    if corrected and isinstance(out, dict) and expression in out:
+        # PC keys the result by the expression it was sent; give back the one the caller wrote,
+        # in place: compare_dates reads the first value, and a pop would put clipped_to first
+        out = {raw_expression if k == expression else k: v for k, v in out.items()}
     if retried and isinstance(out, dict):
         out["note"] = "titiler.xyz rate-limited; statistics from raster.eoapi.dev"
+    if factors and isinstance(out, dict):
+        applied = False
+        for k, v in out.items():
+            if isinstance(v, dict) and "mean" in v and (expression is None and k in factors):
+                sc, off = factors[k]
+                n = v.get("count")
+                for f in [f for f in v if f in ("min", "max", "mean", "median", "majority", "minority") or f.startswith("percentile_")]:
+                    v[f] = v[f] * sc + off
+                if "sum" in v and n is not None:
+                    v["sum"] = v["sum"] * sc + n * off
+                if "std" in v:
+                    v["std"] *= sc
+                applied = True
+        if corrected or applied:
+            out["scaling_applied"] = True
+        # a pixel under digital number 1000 is below 0 after the -0.1 offset, so (a-b)/(a+b) is undefined there
+        flat = re.sub(r"\s+", "", raw_expression or "")
+        m = re.fullmatch(r"\((\w+)-(\w+)\)/\((\w+)\+(\w+)\)", flat)
+        st = out.get(raw_expression)
+        # the operands' own factors, so a Landsat -0.2 is not called -0.1
+        sc, off = factors.get(m[1], (1, 0)) if m and {m[3], m[4]} == {m[1], m[2]} else (1, 0)
+        if corrected and off and factors.get(m[2]) == (sc, off) and isinstance(st, dict):
+            lo, hi = st.get("min"), st.get("max")
+            if (lo is not None and lo < -1) or (hi is not None and hi > 1):
+                out["range_note"] = (
+                    f"the index ran from {lo:.4g} to {hi:.4g}, outside -1 to 1: pixels under digital number {-off / sc:.0f} "
+                    f"go below 0 after the {off:g} offset, so the index is undefined over them; the values are not clamped "
+                    "and they pull the mean, so the median and percentiles are the safer summary"
+                )
     try:
-        item = _get_json(
-            f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
-        )
+        item = item or {}
         if not aoi_geojson:
             # Unclipped stats cover the WHOLE item. For a MODIS tile that is most of
             # a continent, so the mean is real and meaningless — this is how a demo
@@ -1690,19 +2070,94 @@ def compute_statistics(
             for band in a.get("raster:bands", []) or []:
                 if band.get("scale") is not None or band.get("offset") is not None:
                     g = {k: band[k] for k in ("scale", "offset", "unit") if k in band}
+                    if offset_in_pixels and g.get("offset"):
+                        g["declared_offset"], g["offset"] = g["offset"], 0
                     groups.setdefault(tuple(sorted(g.items())), {**g, "bands": []})["bands"].append(key)
+        if convention:
+            (sc, off), = set(convention.values())
+            groups[("convention",)] = {"scale": sc, "offset": off, "bands": list(convention),
+                                       "source": "collection convention: the item carries no raster:bands"}
+        elif no_rb and collection_id.startswith("sentinel-2") and not out.get("scaling_applied"):
+            out["scaling_applied"] = False
+            out["scaling_note"] = (
+                f"processing baseline '{baseline}' is not in the NN.NN form the offset rule needs; statistics are raw digital numbers"
+                if bad_baseline and catalog == "planetary-computer" and collection_id == "sentinel-2-l2a" else
+                "values are raw digital numbers: this Sentinel-2 item carries no raster:bands and "
+                f"groundstation knows no scale or offset convention it can apply for {catalog} here, so nothing is applied"
+            )
         if groups:
             out["band_scaling"] = list(groups.values())
             raw = [g for g in groups.values() if g.get("scale") not in (None, 1) or g.get("offset") not in (None, 0)]
-            if raw:
+            if raw and not out.get("scaling_applied"):
                 g = max(raw, key=lambda g: len(g["bands"]))
                 out["scaling_note"] = (
-                    f"values are raw digital numbers: the item's raster:bands give scale {g.get('scale')} "
+                    f"values are raw digital numbers: {'the collection convention gives' if 'source' in g else "the item's raster:bands give"} scale {g.get('scale')} "
                     f"and offset {g.get('offset')} on {len(g['bands'])} bands (physical = raw * scale + offset), "
                     "and nothing here applies them; with an expression a non-zero offset shifts the index too"
+                    + (f" (the declared offset {g['declared_offset']} is already in the pixels)" if "declared_offset" in g else "")
                 )
     except Exception:
         pass
+    return out
+
+
+_STRETCH: dict[tuple, tuple[float, float] | None] = {}
+_RGB_ASSETS = ("visual", "image")
+
+
+def _auto_stretch(catalog: str, collection_id: str, item_id: str, assets: list[str],
+                  colormap_name: str | None, box: list[float] | None) -> tuple[float, float] | None:
+    """(lo, hi) from the data for a continuous single-asset layer, else None.
+
+    One statistics call per item, asset and box, kept for the process (a failure
+    is kept as None, like _item). Raw values on purpose: tiles are raw, so
+    physical-unit statistics would stretch every scaled collection to black.
+    """
+    if catalog == "zarr" or len(assets) != 1 or assets[0] in _RGB_ASSETS or colormap_name in LEGENDS:
+        return None
+    key = (f"{catalog}:{collection_id}:{item_id}", assets[0], tuple(box) if box else None)
+    if key not in _STRETCH:
+        _STRETCH[key] = None
+        a = ((_item(catalog, collection_id, item_id) or {}).get("assets") or {}).get(assets[0]) or {}
+        if "classification:classes" in a or any("classification:classes" in b for b in a.get("raster:bands") or []):
+            return None
+        try:
+            stats = compute_statistics(catalog, collection_id, item_id, assets=assets, bbox=box, apply_scaling=False)
+            b = next(v for v in stats.values() if isinstance(v, dict) and "percentile_2" in v)
+            lo, hi = float(b["percentile_2"]), float(b["percentile_98"])
+            if math.isfinite(lo) and math.isfinite(hi) and lo < hi:
+                _STRETCH[key] = (lo, hi)
+        except Exception:
+            pass
+    return _STRETCH[key]
+
+
+def _shared_stretch(layers: list[dict[str, Any]], view: list[float] | None) -> list[dict[str, Any]]:
+    """Fill rescale and rescale_basis on item layers that have neither rescale nor expression.
+
+    One range per catalog, collection, asset and colormap across all the layers:
+    the lowest 2nd and highest 98th percentile among the scenes, so a coverage
+    set's tiles, a swipe's two dates and a timelapse's frames draw one value
+    in one colour. Layers whose statistics fail take the others' range.
+    """
+    def key(l):
+        if l.get("type") != "item" or l.get("rescale") or l.get("expression"):
+            return None
+        return (l["catalog"], l["collection_id"], tuple(l.get("assets") or _default_assets(l["collection_id"])), l.get("colormap_name"))
+
+    ranges: dict[tuple, list[tuple[float, float]]] = {}
+    for l in layers:
+        if k := key(l):
+            st = _auto_stretch(k[0], k[1], l["item_id"], list(k[2]), k[3], view or l.get("bbox"))
+            ranges.setdefault(k, []).extend([st] if st else [])
+    out = []
+    for l in layers:
+        rs = ranges.get(key(l)) or []
+        if rs:
+            basis = f"2nd to 98th percentile of the raw values over the {'box' if view else 'scene'}"
+            l = {**l, "rescale": "%.6g,%.6g" % (min(r[0] for r in rs), max(r[1] for r in rs)),
+                 "rescale_basis": basis + (f", widest of {len(rs)} scenes" if len(rs) > 1 else "")}
+        out.append(l)
     return out
 
 
@@ -1715,6 +2170,7 @@ def tile_url_template(
     colormap_name: str | None = None,
     expression: str | None = None,
     sel: dict[str, str] | None = None,
+    bbox: list[float] | None = None,
 ) -> str:
     """XYZ tile URL template ({z}/{x}/{y}) for a STAC item, for web maps.
 
@@ -1727,6 +2183,13 @@ def tile_url_template(
     "(nir-red)/(nir+red)" with colormap_name="rdylgn" — supported on
     earth-search; ignored for veda/planetary-computer. Index expressions
     default to rescale="-1,1" (without a rescale they render blank).
+
+    With no rescale, a continuous single-asset layer (not visual/image, not
+    categorical, no expression) is stretched 2nd to 98th percentile of the raw
+    values over bbox (the whole item when bbox is omitted), so an unfamiliar
+    collection's units do not draw black. When the statistics fail or come
+    back flat the URL carries no rescale. Pass rescale="lo,hi" to override;
+    render_map reports what it used as rescale_used / rescale_basis.
     """
     if catalog == "zarr":
         z = ZARR_STORES.get(collection_id)
@@ -1750,6 +2213,8 @@ def tile_url_template(
     assets = assets or ([] if expression else _default_assets(collection_id))
     if expression and not rescale:
         rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
+    elif not rescale and not expression and (st := _auto_stretch(catalog, collection_id, item_id, assets, colormap_name, bbox)):
+        rescale = "%.6g,%.6g" % st
     backend = CATALOGS[catalog]["raster"]
     if backend == "pc":
         # item-tiles render empty for reprojection-heavy sources (MODIS
@@ -1943,8 +2408,16 @@ __BRAND__
   #panel h1 { font: 700 15px/1.25 "Roboto Condensed", "Roboto", system-ui, sans-serif; margin: 0 0 4px; }
   #panel p { margin: 4px 0 8px; color: var(--mid); }
   #panel label { display: block; margin: 2px 0; cursor: pointer; }
+  #panel summary { cursor: pointer; font-weight: 700; }
+  /* a timelapse never fills the toggles, and an empty fold is a heading over nothing */
+  #panel details:has(#toggles:empty) { display: none; }
+  #panel small { display: block; margin-left: 22px; color: var(--mid); font-size: 11px; overflow-wrap: anywhere; }
+  /* the STACK button sits top-right, so a phone panel stops short of it */
+  @media (max-width: 500px) { #panel { box-sizing: border-box; max-width: calc(100vw - 150px); } }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
     color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
+  /* no lift: notes, side labels and the scrubber share that corner and the attribution bar's height varies */
+  @media (max-width: 500px) { #credit { display: none; } }
   #mapL { position: absolute; inset: 0; z-index: 1; }
   #divider { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: var(--ink);
     z-index: 3; cursor: ew-resize; touch-action: none; }
@@ -1968,11 +2441,12 @@ __BRAND__
 </head><body>
 <div id="map"></div>
 __TLBAR__
-<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><div id="toggles"></div>__STACMAP__</div>
+<div id="panel"><h1>__TITLE__</h1><p>__SUBTITLE__</p><details class="fold" open><summary>Layers</summary><div id="toggles"></div></details>__STACMAP__</div>
 <div id="credit">groundstation · Development Seed labs · STAC + TiTiler</div>
 __STACK__
 __LEGEND__
 <script>
+if (innerWidth <= 500) document.querySelectorAll("#panel details").forEach(d => d.removeAttribute("open"));
 const esc = s => String(s).replace(/[&<>"']/g, c => "&#" + c.charCodeAt(0) + ";");
 const LAYERS = __LAYERS__;
 const BBOX = __BBOX__;
@@ -1980,8 +2454,10 @@ const BBOX = __BBOX__;
 // watermark tiles under every artifact. OpenFreeMap needs no key and its
 // positron style is the same light look; raster layers stack on it unchanged
 const BASE_STYLE = () => "https://tiles.openfreemap.org/styles/positron";
+// ponytail: on a phone the credit folds behind the (i) with the data credits after the first drag, and shows in clean screenshots there
+const PHONE_ATTRIB = innerWidth <= 500 ? { attributionControl: { customAttribution: document.getElementById("credit").textContent } } : {};
 const MAP_OPTS = { style: BASE_STYLE(), bounds: [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]],
-  fitBoundsOptions: { padding: 40 } };
+  fitBoundsOptions: { padding: 40 }, ...PHONE_ATTRIB };
 
 // CloudFront on titiler.xyz caches the CORS header with the tile and does not
 // vary by origin, so the URL must differ per origin or a cached tile is refused
@@ -2117,6 +2593,7 @@ if (COMPARE && rasters.length === 2) {
       const lab = document.createElement("span");
       lab.id = "lbl" + id; lab.textContent = " " + l.name;
       row.appendChild(cb); row.appendChild(lab);
+      if (l.detail) { const d = document.createElement("small"); d.textContent = l.detail; row.title = l.detail; row.appendChild(d); }
       toggles.appendChild(row);
     });
     window.gsPending--;
@@ -2184,32 +2661,72 @@ def _fallback_tiles(l: dict[str, Any]) -> str | None:
     return f"{EOAPI}/external/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + str(httpx.QueryParams(params))
 
 
-def _resolve_layer(l: dict[str, Any]) -> dict[str, Any]:
-    """An {"type": "item"} layer becomes a raster layer with tiles + scene bounds."""
+# resolved layers are serialised straight into the page's JS, so the footprint
+# lives beside them keyed by tile URL instead of riding along as another field
+_LAYER_FOOTPRINTS: dict[str, Any] = {}
+
+
+def _layer_shape(l: dict[str, Any]) -> Any:
+    """The footprint of a resolved raster layer, else its bounds."""
+    return _LAYER_FOOTPRINTS.get(l.get("tiles")) or l.get("bounds")
+
+
+def _hole_text(aoi: list[float], shapes: list[Any]) -> str:
+    pct, where = _uncovered_side(aoi, shapes)
+    return f"{pct:.0f}% of the view is uncovered, mostly {where}"
+
+
+def _dated_name(collection: str, date: str) -> str:
+    t = LEGENDS.get(collection, {}).get("title") or ""
+    return f"{t[:-4]}{date[:4]}" if t[-4:].isdigit() else f"{t or collection} {date}"
+
+
+def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[str, Any]:
+    """An {"type": "item"} layer becomes a raster layer with tiles + scene bounds.
+
+    view is the map's box; with no rescale given it is the box the stretch is
+    measured over. A map of several layers runs _shared_stretch over all of
+    them first, so this one-layer call only fills a layer nothing else shares
+    """
     if l.get("type") != "item":
         return l
+    l = _shared_stretch([l], view)[0]
+    rescale, basis = l.get("rescale"), l.get("rescale_basis", "given")
+    if not rescale and l.get("expression"):
+        rescale, basis = "-1,1", "default for an index expression"
     item_bounds = l.get("bbox")
+    item: dict[str, Any] = {}
     if item_bounds is None:
         # scene footprint bounds stop the map requesting (and the tiler
         # serving 404s for) every out-of-footprint tile in the viewport
-        item_bounds = (_item(l["catalog"], l["collection_id"], l["item_id"]) or {}).get("bbox")
+        item = _item(l["catalog"], l["collection_id"], l["item_id"]) or {}
+        item_bounds = item.get("bbox")
     fallback = _fallback_tiles(l)
+    tiles = tile_url_template(
+        l["catalog"],
+        l["collection_id"],
+        l["item_id"],
+        l.get("assets"),
+        l.get("rescale"),
+        l.get("colormap_name"),
+        l.get("expression"),
+        bbox=view or l.get("bbox"),
+    )
+    # a caller who passed bbox wants no fetch at all, so only the bbox-less path reads the item
+    geom = l.get("footprint") or item.get("geometry")
+    if isinstance(geom, dict) and geom.get("type") in ("Polygon", "MultiPolygon"):
+        _LAYER_FOOTPRINTS[tiles] = geom
+    date = ((item.get("properties") or {}).get("datetime") or "")[:10]
     return {
         "type": "raster",
-        "name": l.get("name") or l["item_id"],
-        "tiles": tile_url_template(
-            l["catalog"],
-            l["collection_id"],
-            l["item_id"],
-            l.get("assets"),
-            l.get("rescale"),
-            l.get("colormap_name"),
-            l.get("expression"),
-        ),
+        "name": l.get("name") or (_dated_name(l["collection_id"], date) if date else l["item_id"]),
+        **({"detail": l.get("detail") or l["item_id"]} if l.get("detail") or (date and not l.get("name")) else {}),
+        "tiles": tiles,
         "opacity": l.get("opacity", 1),
         **({"bounds": item_bounds} if item_bounds else {}),
         **({"pc_fallback": True} if l.get("item_id") in _PC_FALLBACKS else {}),
         **({"fallback_tiles": fallback} if fallback else {}),
+        **({"rescale_used": rescale, "rescale_basis": basis} if rescale else {}),
     }
 
 
@@ -2226,17 +2743,20 @@ def _expand_coverage_set(layer: dict[str, Any]) -> list[dict[str, Any]]:
     items = (layer.get("set") or {}).get("items") or []
     if not items:
         raise ValueError("coverage_set layer has no items — pass search_imagery's full_coverage_set")
-    prefix = layer.get("name") or (layer.get("set") or {}).get("date") or "coverage"
+    date = (layer.get("set") or {}).get("date")
+    prefix = layer.get("name") or (_dated_name(items[0]["collection"], date) if date else "coverage")
     params = {k: layer[k] for k in ("assets", "expression", "colormap_name", "rescale", "opacity") if k in layer}
     out = []
     for it in items:
         out.append({
             "type": "item",
-            "name": f"{prefix} · {it['id'].split('_')[1] if '_' in it['id'] else it['id']}",
+            "name": prefix,
+            "detail": it["id"],
             "catalog": it["catalog"],
             "collection_id": it["collection"],
             "item_id": it["id"],
             "bbox": it.get("bbox"),
+            **({"footprint": it["footprint"]} if it.get("footprint") else {}),
             **params,
         })
     return out
@@ -2252,10 +2772,12 @@ def _layer_state(l: dict[str, Any], deferred: bool = False) -> dict[str, Any]:
     """
     return {
         "name": l.get("name"),
+        **({"detail": l["detail"]} if l.get("detail") else {}),
         "kind": l.get("type"),
         **({"bounds": l["bounds"]} if l.get("bounds") else {}),
         **({"tiles": l["tiles"]} if l.get("tiles") else {}),
         **({"fallback_tiles": l["fallback_tiles"]} if l.get("fallback_tiles") else {}),
+        **({"rescale_used": l["rescale_used"], "rescale_basis": l["rescale_basis"]} if l.get("rescale_used") else {}),
         **({"opacity": l["opacity"]} if l.get("opacity") not in (None, 1) else {}),
         **({"deferred": True} if deferred else {}),
     }
@@ -2444,10 +2966,15 @@ def _snapshot_artifact(
             browser.close()
 
 
+# only a tool that ran a geocode sets this (compare_dates); a caller's stack_facts never can
+_tool_geocoded: contextvars.ContextVar[bool | str] = contextvars.ContextVar("tool_geocoded", default=False)
+
+
 def _map_stack_facts(
     resolved: list[dict[str, Any]],
     layers: list[dict[str, Any]],
     extra_facts: dict[str, Any] | None = None,
+    bbox: list[float] | None = None,
 ) -> dict[str, Any]:
     """The honest facts of a map render — shared by the panel and its postcard."""
     items = [l for l in layers if l.get("type") == "item" and l.get("catalog") and l.get("collection_id")]
@@ -2475,8 +3002,52 @@ def _map_stack_facts(
         "weather": False,
         "passes": False,
         "snapshot": False,
-        **(extra_facts or {}),
+        **{k: v for k, v in (extra_facts or {}).items() if k != "geocoded"},
+        "geocoded": _geocoded_fact(extra_facts, bbox),
     }
+
+
+_NOTES_CSS = (
+    "<style>#notes { position: absolute; bottom: 60px; left: 12px; z-index: 2; max-width: min(320px, 80vw); "
+    "background: rgba(247,244,239,.96); color: var(--ink); border-top: 3px solid var(--accent); border-radius: 4px; "
+    "padding: 8px 12px; font: 12.5px/1.45 \"Roboto\", system-ui, sans-serif; box-shadow: 0 1px 6px rgba(0,0,0,.18); } "
+    "#notes b { display: block; font: 700 10px/1 \"Roboto Mono\", monospace; letter-spacing: .14em; "
+    "text-transform: uppercase; color: var(--mid); margin-bottom: 6px; } #notes div { margin: 0 0 4px; }</style>"
+)
+
+
+def _note_lines(notes: list[str] | None) -> list[str]:
+    return [str(n) for n in (notes or []) if str(n).strip()]
+
+
+def _notes_html(notes: list[str] | None) -> str:
+    """The caller's own free-text notes as one box, escaped like every other string on the page."""
+    lines = _note_lines(notes)
+    if not lines:
+        return ""
+    return (
+        f'{_NOTES_CSS}<aside id="notes" aria-label="Notes"><b>Notes</b>'
+        + "".join(f"<div>{escape(n)}</div>" for n in lines)
+        + "</aside>"
+    )
+
+
+_KNOWN_STACK_FACTS = {
+    "catalogs", "collections_by_catalog", "collections", "tiler_hosts", "maplibre",
+    "terrain", "geocoded", "events", "weather", "passes", "snapshot", "mosaic_scenes",
+}
+
+
+def _notes_result(out: dict[str, Any], notes: list[str] | None, stack_facts: dict[str, Any] | None,
+                  bbox: list[float] | None = None) -> None:
+    """Hand the notes back, and name stack_facts keys the panel can't use instead of dropping them."""
+    if notes:
+        out["notes"] = notes
+    bad = [k for k in (stack_facts or {}) if k not in _KNOWN_STACK_FACTS or (k == "geocoded" and not _geocoded_fact(stack_facts, bbox))]
+    if bad:
+        out["stack_facts_ignored"] = bad
+        extra = "stack_facts takes provenance flags only (events, weather, passes, terrain, snapshot; geocoded is kept only for a bbox geocode returned, with the source it returned); put free text in notes"
+        out["note"] = f'{out["note"]}. {extra}' if out.get("note") else extra
 
 
 def _stack_panel_html(entries: list[dict[str, Any]]) -> str:
@@ -2512,6 +3083,8 @@ def _stack_chunk_for(
     resolved: list[dict[str, Any]],
     layers: list[dict[str, Any]],
     extra_facts: dict[str, Any] | None = None,
+    notes: list[str] | None = None,
+    bbox: list[float] | None = None,
 ) -> str | None:
     from groundstation import stack as _stack
 
@@ -2521,10 +3094,12 @@ def _stack_chunk_for(
         # a malformed curated file must not take the map down with it — the
         # parser stays loud (evals hit it directly), the artifact stays alive
         return None
-    entries = _stack.stack_instances(components, _map_stack_facts(resolved, layers, extra_facts))
+    entries = _stack.stack_instances(components, _map_stack_facts(resolved, layers, extra_facts, bbox))
     if not entries:
         return None
-    return _fill(_STACK_CHUNK, {"ENTRIES": _stack_panel_html(entries), "SUMMARY": escape(_stack.summary(entries))})
+    note_p = "".join(f"<p>{escape(n)}</p>" for n in _note_lines(notes))
+    notes_group = f'<div class="stack-group">Notes</div>{note_p}' if note_p else ""
+    return _fill(_STACK_CHUNK, {"ENTRIES": notes_group + _stack_panel_html(entries), "SUMMARY": escape(_stack.summary(entries))})
 
 
 def _artifact_postcard(
@@ -2588,12 +3163,17 @@ def render_map(
     stack_layer: bool = True,
     stack_facts: dict[str, Any] | None = None,
     postcard: dict[str, Any] | None = None,
+    notes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Write a self-contained interactive HTML map and return its file path.
 
     layers is a list of:
       {"type": "item", "name": ..., "catalog": ..., "collection_id": ...,
        "item_id": ..., "assets": [...], "rescale": "0,3000", "colormap_name": ...,
+       # no rescale on a continuous one-asset layer: stretched 2nd to 98th
+       # percentile of the raw values over bbox, one range shared by every
+       # scene of that collection and asset on the map; rescale_used /
+       # rescale_basis per layer in state.layers say what was used
        "expression": "(nir-red)/(nir+red)",  # expression for index layers
        "bbox": [w, s, e, n]}  # pass the item's bbox when you have it (from
                               # search results) — it skips a STAC re-fetch
@@ -2617,8 +3197,8 @@ def render_map(
     the map — the actual collections, tiler, formats, and buckets on screen,
     joined from docs/stack.md. Attribution to projects, never people.
     stack_facts: honest extras the panel can't see from the layers alone —
-    pass {"geocoded": <geocode's source, "gazet" or "nominatim">} if you resolved the place via geocode,
-    {"events": True} if an events layer came from active_events, and
+    {"geocoded": <geocode's source>} is kept only when bbox is one geocode returned with that
+    source, else it is named in stack_facts_ignored. Pass {"events": True} if an events layer came from active_events, and
     {"passes": True} if next_pass informed the answer. Only claim
     what actually happened.
 
@@ -2629,7 +3209,7 @@ def render_map(
     plus a postcard_note with the install command. Use when the view is
     the story; a plain one-scene imagery card is render_postcard's job.
     """
-    layers = [x for l in layers for x in _expand_coverage_set(l)]
+    layers = _shared_stretch([x for l in layers for x in _expand_coverage_set(l)], bbox)
     resolved = []
     raster_collections: list[str | None] = []
     for l in layers:
@@ -2637,7 +3217,7 @@ def render_map(
             raster_collections.append(l.get("collection_id"))
         elif l.get("type") == "raster":
             raster_collections.append(None)
-        resolved.append(_resolve_layer(l))
+        resolved.append(_resolve_layer(l, bbox))
     if compare is None:
         # swipe only for a true comparison: two rasters of the same collection
         # whose footprints actually overlap. Same-collection alone is NOT enough
@@ -2652,19 +3232,23 @@ def render_map(
         )
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for(resolved, layers, stack_facts)
+        stack_html = _stack_chunk_for(resolved, layers, stack_facts, notes, bbox)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
     legends = _legends_for(layers)
     first = next((l for l in layers if l.get("type") == "item"), None)
     stac_map_url = first and stac_map_link(first["catalog"], first["collection_id"], first["item_id"])
+    _boxes = [_layer_shape(l) for l in resolved if l.get("type") == "raster" and l.get("bounds")]
+    _cov = _union_coverage_pct(bbox, _boxes) if _boxes else None
+    _unc = _uncovered_side(bbox, _boxes) if _boxes and _cov < PARTIAL_COVERAGE_PCT else None
+    subtitle = _with_wedge(subtitle, _unc)
     html = (
         _fill(_MAP_TEMPLATE, {
             "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
             "LAYERS": _js(resolved), "BBOX": _js(bbox), "COMPARE": _js(compare),
             "TLBAR": "", "TIMELAPSE": "false", "INTERVAL": "0",
             "STACMAP": f'<a id="stacmap" href="{escape(stac_map_url)}" target="_blank">Open in stac-map</a>' if stac_map_url else "",
-            "STACK": stack_html, "LEGEND": _legend_map_html(legends),
+            "STACK": stack_html + _notes_html(notes), "LEGEND": _legend_map_html(legends),
         })
     )
     try:
@@ -2672,7 +3256,9 @@ def render_map(
     except ValueError as e:
         return {"error": str(e)}
     _write_artifact(out_path, html)
-    out = {"map_path": out_path, "layers": [l["name"] for l in resolved]}
+    # the scenes of one set share a name, so the caller's list carries the id too
+    label = lambda l: f'{l["name"]} · {l["detail"]}' if l.get("detail") else l["name"]
+    out = {"map_path": out_path, "layers": [label(l) for l in resolved]}
     # The map's contents were previously legible only to a human opening the
     # file, so every rendering bug this repo has shipped was caught by eye and
     # not by a check. `state` is the same thing the HTML was built from, in a
@@ -2692,7 +3278,8 @@ def render_map(
         out["stac_map_url"] = stac_map_url
     if stack_note:
         out["note"] = stack_note
-    fb = [l["name"] for l in resolved if l.get("pc_fallback")]
+    _notes_result(out, notes, stack_facts, bbox)
+    fb = [label(l) for l in resolved if l.get("pc_fallback")]
     if fb:
         out["note"] = (out["note"] + ". " if out.get("note") else "") + (
             f"Planetary Computer mosaic registration timed out for {', '.join(fb)}; item tiles are used "
@@ -2710,18 +3297,17 @@ def render_map(
             "no imagery layer on this map, so it renders as vectors on a blank background. "
             "Add a scene, or say plainly that none is available for this area"
         )
-    _boxes = [l["bounds"] for l in resolved if l.get("type") == "raster" and l.get("bounds")]
     if _boxes:
-        _cov = _union_coverage_pct(bbox, _boxes)
         out["state"]["coverage_pct"] = _cov
-        if _cov < PARTIAL_COVERAGE_PCT:
+        if _unc:
+            out["state"]["uncovered_pct"], out["state"]["uncovered_side"] = _unc
             out["coverage_note"] = (
-                f"layers cover {_cov:.0f}% of the requested view, so the rest renders blank. "
+                f"layers cover {_cov:.0f}% of the requested view ({_hole_text(bbox, _boxes)}), so the rest renders blank. "
                 "Pass the whole full_coverage_set from search_imagery, or tighten bbox to what you have"
             )
     if postcard:
         card_path, card_note = _artifact_postcard(
-            out_path, postcard, _map_stack_facts(resolved, layers, stack_facts), layers, stack_layer,
+            out_path, postcard, _map_stack_facts(resolved, layers, stack_facts, bbox), layers, stack_layer,
             bbox, "compare" if compare else "map",
         )
         if card_path:
@@ -2749,6 +3335,7 @@ def render_timelapse(
     max_frames: int = 8,
     stack_layer: bool = True,
     stack_facts: dict[str, Any] | None = None,
+    notes: list[str] | None = None,
 ) -> dict[str, Any]:
     """A few frames of one place over time, with prev / play / next controls.
 
@@ -2757,7 +3344,8 @@ def render_timelapse(
     tiles up front, the rest load when shown, so keep it to a few frames: more
     than max_frames (hard ceiling 12) is an error. Use for 3 or more dates, a
     season or a progression; for two dates use render_map (the swipe).
-    Returns {map_path, frames, state}.
+    Returns {map_path, frames, state}; the frames are the caller's, so a
+    window that found 0 scenes at the cloud cap is the caller's to name.
     """
     cap = min(max_frames, TIMELAPSE_MAX_FRAMES)
     if len(frames) < 2:
@@ -2767,16 +3355,16 @@ def render_timelapse(
                          "so pick fewer, evenly spaced windows (hard ceiling 12)"}
     if any(f.get("type") not in ("item", "raster") for f in frames):
         return {"error": "each frame must be one item or raster layer with a name"}
-    resolved = [_resolve_layer(f) for f in frames]
+    resolved = [_resolve_layer(f, bbox) for f in _shared_stretch(frames, bbox)]
     stack_html = ""
     if stack_layer:
-        stack_html = _stack_chunk_for(resolved, frames, stack_facts) or ""
+        stack_html = _stack_chunk_for(resolved, frames, stack_facts, notes, bbox) or ""
     html = (
         _fill(_MAP_TEMPLATE, {
             "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
             "LAYERS": _js(resolved), "BBOX": _js(bbox), "COMPARE": "false",
             "TLBAR": _TIMELAPSE_BAR, "TIMELAPSE": "true", "INTERVAL": str(int(interval_ms)),
-            "STACMAP": "", "STACK": stack_html, "LEGEND": "",
+            "STACMAP": "", "STACK": stack_html + _notes_html(notes), "LEGEND": "",
         })
     )
     try:
@@ -2784,11 +3372,13 @@ def render_timelapse(
     except ValueError as e:
         return {"error": str(e)}
     _write_artifact(out_path, html)
-    return {
+    out = {
         "map_path": out_path,
         "frames": len(resolved),
         "state": {"bbox": bbox, "interval_ms": int(interval_ms), "layers": [_layer_state(l) for l in resolved]},
     }
+    _notes_result(out, notes, stack_facts, bbox)
+    return out
 
 
 # ---------------------------------------------------------------- 3D artifact
@@ -2854,6 +3444,8 @@ __BRAND__
   #panel button:disabled { background: var(--mid); cursor: default; }
   #credit { position: absolute; bottom: 24px; left: 12px; z-index: 2; font: 11px "Roboto Mono", monospace;
     color: var(--mid); background: rgba(247,244,239,.85); padding: 2px 8px; border-radius: 6px; }
+  /* no lift: notes, side labels and the scrubber share that corner and the attribution bar's height varies */
+  @media (max-width: 500px) { #credit { display: none; } }
   .clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack,
   .clean .maplibregl-ctrl-top-right { display: none !important; }
 </style>
@@ -2879,13 +3471,17 @@ const CENTER = [(BBOX[0] + BBOX[2]) / 2, (BBOX[1] + BBOX[3]) / 2];
 const BOUNDS = [[BBOX[0], BBOX[1]], [BBOX[2], BBOX[3]]];
 let exaggeration = __EXAGGERATION__;
 
+// ponytail: on a phone the credit folds behind the (i) with the data credits after the first drag, and shows in clean screenshots there
+const PHONE_ATTRIB = innerWidth <= 500 ? { attributionControl: { customAttribution: document.getElementById("credit").textContent } } : {};
 const map = new maplibregl.Map({ container: "map", style: STYLE, bounds: BOUNDS,
-  fitBoundsOptions: { padding: 40 }, maxPitch: 85 });
+  fitBoundsOptions: { padding: 40 }, maxPitch: 85, ...PHONE_ATTRIB });
 window.gsMaps = [map];  // exposed for scripted screenshots and checks
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
 map.on("load", () => {
   map.setTerrain({ source: "dem", exaggeration });
-  map.easeTo({ center: CENTER, pitch: 60, duration: 0 });
+  // MapLibre 4.7 easeTo freezes the camera's ground height and unfreezes it only with freezeElevation,
+  // so without it the height stays at the 0 m read before any DEM tile and a tight box sits under the relief
+  map.easeTo({ center: CENTER, pitch: 60, duration: 0, freezeElevation: true });
 });
 
 const slider = document.getElementById("exaggeration");
@@ -2927,6 +3523,7 @@ def render_map_3d(
     postcard: dict[str, Any] | None = None,
     stack_facts: dict[str, Any] | None = None,
     fill_coverage: bool = True,
+    notes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Write a self-contained 3D terrain fly-through with imagery draped over it.
 
@@ -2964,16 +3561,20 @@ def render_map_3d(
     sibling_specs: list[dict[str, Any]] = []
     if (fill_coverage and not extra_layers and layer.get("type") == "item"
             and resolved.get("bounds")
-            and _union_coverage_pct(bbox, [resolved["bounds"]]) < PARTIAL_COVERAGE_PCT):
+            and _union_coverage_pct(bbox, [_layer_shape(resolved)]) < PARTIAL_COVERAGE_PCT):
         try:
             cat, coll = layer["catalog"], layer["collection_id"]
             day = ((_item(cat, coll, layer["item_id"]) or {}).get("properties", {}).get("datetime") or "")[:10]
             found = search_imagery(cat, [coll], bbox=bbox, datetime_range=f"{day}T00:00:00Z/{day}T23:59:59Z",
                                    limit=10) if day else {}
             fcs = find_full_coverage_set(found.get("items") or [], bbox, threshold=PARTIAL_COVERAGE_PCT)
+            # siblings draw on the main scene's stretch, so the drape has no seam
+            share = ({"rescale": resolved["rescale_used"], "rescale_basis": resolved["rescale_basis"]}
+                     if resolved.get("rescale_used") else {})
             for it in (fcs or {}).get("items", []):
                 if it["id"] != layer["item_id"]:
-                    spec = {**layer, "name": it["id"], "item_id": it["id"], "bbox": it.get("bbox")}
+                    spec = {**layer, **share, "name": it["id"], "item_id": it["id"], "bbox": it.get("bbox"),
+                            **({"footprint": it["footprint"]} if it.get("footprint") else {})}
                     sibling_specs.append(spec)
                     siblings.append({**_resolve_layer(spec), "reason": "same-day sibling filling the view"})
         except Exception:
@@ -3030,15 +3631,19 @@ def render_map_3d(
         ])})
     stack_html, stack_note = "", None
     if stack_layer:
-        stack_html = _stack_chunk_for([resolved, *siblings, *extras], [layer, *sibling_specs, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True})
+        stack_html = _stack_chunk_for([resolved, *siblings, *extras], [layer, *sibling_specs, *(extra_layers or [])], {**(stack_facts or {}), "terrain": True}, notes, bbox)
         if stack_html is None:
             stack_html, stack_note = "", "stack layer skipped: docs/stack.md missing, malformed, or nothing to attribute"
+    _drape = [_layer_shape(resolved), *(_layer_shape(s) for s in siblings if s.get("bounds"))] if resolved.get("bounds") else []
+    _cov = _union_coverage_pct(bbox, _drape) if _drape else None
+    _unc = _uncovered_side(bbox, _drape) if _drape and _cov < PARTIAL_COVERAGE_PCT else None
+    subtitle = _with_wedge(subtitle, _unc)
     html = (
         _fill(_MAP3D_TEMPLATE, {
             "BRAND": _BRAND_CSS, "TITLE": escape(title), "SUBTITLE": escape(subtitle),
             "STYLE": _js(style), "BBOX": _js(bbox),
             "EXAGGERATION": json.dumps(round(float(exaggeration), 2)),
-            "EXTRA": extra_html, "STACK": stack_html,
+            "EXTRA": extra_html, "STACK": stack_html + _notes_html(notes),
         })
     )
     try:
@@ -3067,29 +3672,30 @@ def render_map_3d(
     # area shows terrain with no imagery rather than blank. So report what the
     # viewer actually gets first, and what the button would add.
     if resolved.get("bounds"):
-        _cov = _union_coverage_pct(bbox, [resolved["bounds"], *(s["bounds"] for s in siblings if s.get("bounds"))])
         out["state"]["coverage_pct"] = _cov
-        if _cov < PARTIAL_COVERAGE_PCT:
-            _extra_boxes = [e["bounds"] for e in extras if e.get("bounds")]
+        if _unc:
+            out["state"]["uncovered_pct"], out["state"]["uncovered_side"] = _unc
+            _extra_boxes = [_layer_shape(e) for e in extras if e.get("bounds")]
             if _extra_boxes:
-                _full = _union_coverage_pct(bbox, [resolved["bounds"], *_extra_boxes])
+                _full = _union_coverage_pct(bbox, [*_drape, *_extra_boxes])
                 out["state"]["coverage_pct_loaded"] = _full
                 out["coverage_note"] = (
-                    f"the drape covers {_cov:.0f}% of the view on load, the rest is terrain with no "
+                    f"the drape covers {_cov:.0f}% of the view on load ({_hole_text(bbox, _drape)}), the rest is terrain with no "
                     f"imagery until someone clicks Load full coverage, which takes it to {_full:.0f}%"
                 )
             else:
                 out["coverage_note"] = (
-                    f"the drape covers {_cov:.0f}% of the view, the rest renders as terrain with no "
+                    f"the drape covers {_cov:.0f}% of the view ({_hole_text(bbox, _drape)}), the rest renders as terrain with no "
                     "imagery. Pass the rest of a same-day full_coverage_set as extra_layers"
                 )
     if stack_note:
         out["note"] = stack_note
+    _notes_result(out, notes, stack_facts, bbox)
     if postcard:
         all_layers = [layer, *(extra_layers or [])]
         card_path, card_note = _artifact_postcard(
             out_path, postcard,
-            _map_stack_facts([resolved, *extras], all_layers, {**(stack_facts or {}), "terrain": True}),
+            _map_stack_facts([resolved, *extras], all_layers, {**(stack_facts or {}), "terrain": True}, bbox),
             all_layers, stack_layer, bbox, "3d",
         )
         if card_path:
@@ -3346,18 +3952,20 @@ def render_postcard(
     scenes overlap. Same-day fills keep the seam invisible. Needs bbox;
     earth-search-style catalogs only (PC/VEDA fall back to single scene, named in `dropped`).
     """
+    shapes: dict[str, Any] = {}
     if bbox is not None:
         # clamp to the scenes' union bbox so an AOI hanging off the data
         # can't print a nodata band — center-preserving, so the subject
         # stays in the middle of the frame. ponytail: bbox math only — a
         # diagonal swath edge (footprint != bbox) can still clip a corner
-        # on single-scene cards; fills exist for exactly that case
+        # on single-scene cards; the result's coverage_note says so, fills fix it
         try:
             boxes = []
             for i in (item_id, *(fill_item_ids or [])):
                 item = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{i}")
                 if item.get("bbox"):
                     boxes.append(item["bbox"])
+                    shapes[i] = item.get("geometry") if (item.get("geometry") or {}).get("type") in ("Polygon", "MultiPolygon") else item["bbox"]
             if boxes:
                 union = [min(b[0] for b in boxes), min(b[1] for b in boxes),
                          max(b[2] for b in boxes), max(b[3] for b in boxes)]
@@ -3413,6 +4021,13 @@ def render_postcard(
         if stack_html is None:
             stack_note = "stack listing skipped: docs/stack.md missing, malformed, or nothing to attribute"
     legends = _legends_for([], colormap_name)
+    used = [shapes[i] for i in ([item_id, *fill_item_ids] if mosaic_scenes else [item_id]) if i in shapes]
+    cov_pct = pct = where = None
+    if bbox is not None and used:
+        pct, where = _uncovered_side(bbox, used)
+        cov_pct = round(100.0 - pct, 1)
+        if cov_pct < PARTIAL_COVERAGE_PCT:
+            caption = _with_wedge(caption, (pct, where))
     html = _postcard_html(
         png, place, date, collection_id,
         _catalog_source(catalog, collection_id), caption, license_, stack_html,
@@ -3435,6 +4050,22 @@ def render_postcard(
     notes = "; ".join(n for n in (mosaic_note, stack_note) if n)
     if notes:
         out["note"] = notes
+    # the scene's footprint, not its bbox, decides what the frame holds: a slanted
+    # swath edge leaves a nodata wedge inside a box the bbox says is covered
+    if cov_pct is not None:
+        out["coverage_pct"] = cov_pct
+        if out["coverage_pct"] < PARTIAL_COVERAGE_PCT:
+            out["uncovered_pct"], out["uncovered_side"] = pct, where
+            why = ""
+            if not mosaic_scenes:
+                if dropped:
+                    cause = dropped[0]["why"]
+                elif CATALOGS[catalog]["raster"] != "titiler-xyz":
+                    cause = f"mosaic cards need direct COG access, which {catalog} does not offer"
+                else:
+                    cause = "pass the rest of a same-day full_coverage_set as fill_item_ids"
+                why = f"; no same-day sibling fills it: {cause}"
+            out["coverage_note"] = f"the scene footprint leaves {pct:.0f}% of the card uncovered, mostly {where}, printed as black no-data{why}"
     return out
 
 
@@ -3450,6 +4081,7 @@ def _delta_caveats(
     mean_before: float | None,
     cloud_after: float | None,
     cloud_before: float | None,
+    ids: tuple[str, str] = ("", ""),
 ) -> list[str]:
     """Reasons this delta shouldn't be read at face value. Empty when it's clean."""
     out: list[str] = []
@@ -3461,7 +4093,7 @@ def _delta_caveats(
     if cloudy:
         out.append(
             "cloud may be driving this delta ("
-            + ", ".join(f"{w} scene {c:.0f}%" for w, c in cloudy)
+            + ", ".join(f"{w} scene {ids[w == 'before']} {c:.0f}%".replace("  ", " ") for w, c in cloudy)
             + f", threshold {CLOUD_CAVEAT_PCT:.0f}%). Cloud pushes a normalized index toward zero."
         )
     if mean_before is not None and abs(mean_before) < FLAT_BASELINE:
@@ -3469,6 +4101,60 @@ def _delta_caveats(
             f"delta_pct is unstable: the baseline mean ({mean_before}) is near zero, so a small "
             "absolute change reads as a large percentage. Trust delta over delta_pct."
         )
+    return out
+
+
+def _fold_reprocessed(feats: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Collapse STAC features sharing sensing time, MGRS tile and footprint to the newest processing
+    (higher s2:processing_baseline, then later generation or created time, then later id); a feature
+    with no tile, time or bbox is never folded"""
+    def newness(f: dict[str, Any]) -> tuple[str, str, str]:
+        p = f.get("properties") or {}
+        made = p.get("s2:generation_time") or p.get("processing:datetime") or p.get("created") or ""
+        return str(p.get("s2:processing_baseline") or ""), str(made), f.get("id") or ""
+
+    kept: dict[Any, dict[str, Any]] = {}
+    out: list[Any] = []
+    for f in feats:
+        p = f.get("properties") or {}
+        tile = p.get("s2:mgrs_tile") or p.get("grid:code")
+        # to the second, not the day: a reprocessed copy keeps the sensing time to the millisecond,
+        # while a second pass over the same tile that day is minutes apart and is a different scene
+        when = (p.get("datetime") or p.get("start_datetime") or "")[:19]
+        box = f.get("bbox")
+        if not (tile and when and box):
+            out.append(f)
+            continue
+        key = (when, tile, tuple(round(x, 3) for x in box))  # copies differ past the 4th decimal
+        old = kept.get(key)
+        if old is None:
+            kept[key] = f
+            out.append(key)
+        elif newness(f) > newness(old):
+            kept[key] = f
+    return [kept[o] if isinstance(o, tuple) else o for o in out], len(feats) - len(out)
+
+
+def _scene_key(it: dict[str, Any]) -> tuple[float, float, str]:
+    """Sort key for the best scene: coverage descending, cloud ascending, id as the last
+    tiebreak, so a tie never falls to the order the server returned"""
+    cloud = it.get("cloud_cover")
+    return (-(it.get("covers_aoi_pct") or 0.0), 100.0 if cloud is None else cloud, it["id"])
+
+
+def _scene_line(it: dict[str, Any]) -> dict[str, Any]:
+    return {"id": it["id"], "date": it["datetime"][:10], "cloud": it.get("cloud_cover"), "covers_aoi_pct": it.get("covers_aoi_pct")}
+
+
+def _picked_and_runner_up(picked: dict[str, Any], items: list[dict[str, Any]]) -> dict[str, Any]:
+    """The picked scene's coverage, the best scene it beat, and a note when only the id decided"""
+    others = sorted((i for i in items if i["id"] != picked["id"]), key=_scene_key)
+    out: dict[str, Any] = {"covers_aoi_pct": picked.get("covers_aoi_pct")}
+    if others:
+        r = others[0]
+        out["runner_up"] = _scene_line(r)
+        if _scene_key(r)[:2] == _scene_key(picked)[:2]:
+            out["pick_note"] = f"{r['id']} was equally good (same coverage and cloud); the scene id decided"
     return out
 
 
@@ -3482,6 +4168,9 @@ def compare_dates(
     label: str | None = None,
     stack_layer: bool = True,
     stack_facts: dict[str, Any] | None = None,
+    out_path: str | None = None,
+    notes: list[str] | None = None,
+    apply_scaling: bool = True,
 ) -> dict[str, Any]:
     """Compare two time windows over a place: matched scenes, index delta, swipe map.
 
@@ -3491,8 +4180,15 @@ def compare_dates(
     earlier. Picks Sentinel-2 scenes from the SAME MGRS tile (best AOI coverage,
     lowest cloud), computes the expression's stats for both dates, and writes a
     side-by-side swipe map. Returns scenes, means, delta, and map_path.
+    out_path sets where the map is written (default: a name carrying a short hash of the box,
+    so two boxes over the same dates do not overwrite each other).
     stack_layer and stack_facts pass through to the swipe map, and since this tool geocodes
     the place itself, the panel truthfully claims Gazet/Nominatim.
+
+    Means are physical by default (scale and offset applied on both dates, so a scene from
+    before 2022 and one from after compare fairly); scaling_applied says so once.
+    band_scaling rides with each date and scaling_note names the factors in words.
+    apply_scaling=False gives raw digital numbers, with scaling_note naming what was not applied.
 
     A caveat list comes back when the delta shouldn't be read at face value —
     a cloudy scene on either end, or a near-zero baseline that makes delta_pct
@@ -3526,26 +4222,28 @@ def compare_dates(
     shared = {_mgrs_tile(i["id"]) for i in after_items} & {_mgrs_tile(i["id"]) for i in before_items}
     if not shared:
         return {"error": "No shared Sentinel-2 tile between the two windows — try wider windows."}
-    best_tile = max(
-        shared,
-        key=lambda t: max(_coverage(i, bbox) for i in after_items if _mgrs_tile(i["id"]) == t),
-    )
+    # a set has no order, and two tiles can both cover the box at 100 (Horta Sud, 31SBD and 30SYJ),
+    # so the tile is the one holding the best scene by the full key, never max() over the set
+    best_tile = _mgrs_tile(min((i for i in after_items if _mgrs_tile(i["id"]) in shared), key=_scene_key)["id"])
 
     def pick(items: list[dict[str, Any]]) -> dict[str, Any]:
-        return min(
-            (i for i in items if _mgrs_tile(i["id"]) == best_tile),
-            key=lambda i: i.get("cloud_cover") or 100,
-        )
+        return min((i for i in items if _mgrs_tile(i["id"]) == best_tile), key=_scene_key)
 
     a, b = pick(after_items), pick(before_items)
 
     scope: dict[str, Any] = {}
+    scaling: dict[str, list[dict[str, Any]]] = {}
+    ranges: dict[str, str] = {}  # per date: one scene's out-of-range index says nothing about the other
 
     def _mean(it: dict[str, Any]) -> float | None:
         try:
             # without the bbox the mean is the whole Sentinel-2 tile, not the place asked about
-            s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox)
-            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_note") if k in s})
+            s = compute_statistics("earth-search", it["collection"], it["id"], expression=expression, bbox=bbox, apply_scaling=apply_scaling)
+            scope.update({k: s[k] for k in ("clipped_to", "extent_note", "scaling_applied", "scaling_note") if k in s})
+            if s.get("band_scaling"):
+                scaling[it["id"]] = s["band_scaling"]
+            if s.get("range_note"):
+                ranges[it["id"]] = s["range_note"]
             return round(next(iter(s.values()))["mean"], 4)
         except Exception:
             return None
@@ -3558,32 +4256,65 @@ def compare_dates(
             "collection_id": it["collection"], "item_id": it["id"], "bbox": it["bbox"],
             "expression": expression, "rescale": "-1,1", "colormap_name": "rdylgn",
         }
-    m = render_map(
-        title=f"{label or place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}",
-        subtitle=f"{expression} · means over the area · drag the divider · tile {best_tile}",
-        bbox=bbox,
-        layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
-        stack_layer=stack_layer,
-        stack_facts={"geocoded": geocoded, **(stack_facts or {})},
-    )
+    title = f"{label or place or 'AOI'} — {a['datetime'][:10]} vs {b['datetime'][:10]}"
+    if not out_path:
+        out_path = _artifact_path(None, "map", f"{title} {hashlib.sha1(repr(bbox).encode()).hexdigest()[:6]}")
+    token = _tool_geocoded.set(geocoded)
+    try:
+        m = render_map(
+            title=title,
+            out_path=out_path,
+            subtitle=f"{expression} · means over the area · drag the divider · tile {best_tile}",
+            bbox=bbox,
+            layers=[layer(a, f"{a['datetime'][:10]} (after)"), layer(b, f"{b['datetime'][:10]} (before)")],
+            stack_layer=stack_layer,
+            stack_facts=stack_facts,
+            notes=notes,
+        )
+    finally:
+        _tool_geocoded.reset(token)
+    if "error" in m:
+        return m
     delta = round(mean_after - mean_before, 4) if mean_after is not None and mean_before is not None else None
     out = {
         "tile": best_tile,
-        "after": {"id": a["id"], "date": a["datetime"][:10], "cloud": a.get("cloud_cover"), "mean": mean_after},
-        "before": {"id": b["id"], "date": b["datetime"][:10], "cloud": b.get("cloud_cover"), "mean": mean_before},
+        "after": {"id": a["id"], "date": a["datetime"][:10], "cloud": a.get("cloud_cover"), "mean": mean_after, **_picked_and_runner_up(a, after_items)},
+        "before": {"id": b["id"], "date": b["datetime"][:10], "cloud": b.get("cloud_cover"), "mean": mean_before, **_picked_and_runner_up(b, before_items)},
         "delta": delta,
         "delta_pct": round(delta / abs(mean_before) * 100, 1) if delta is not None and mean_before else None,
         "expression": expression,
         "map_path": m["map_path"],
         **scope,
     }
-    caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"))
+    for side, it in (("after", a), ("before", b)):
+        if it["id"] in scaling:
+            out[side]["band_scaling"] = scaling[it["id"]]
+        if it["id"] in ranges:
+            out[side]["range_note"] = ranges[it["id"]]
+    if scope.get("scaling_applied") and "scaling_note" not in scope and len(scaling) == 2:
+        out["scaling_note"] = _applied_scaling_words(
+            [(x["datetime"][:10], scaling[x["id"]]) for x in (a, b)]
+        )
+    caveats = _delta_caveats(mean_before, a.get("cloud_cover"), b.get("cloud_cover"), (a["id"], b["id"]))
     if caveats:
         out["caveat"] = caveats
+    _notes_result(out, notes, stack_facts, bbox)
     return out
 
 
+def _applied_scaling_words(dated: list[tuple[str, list[dict[str, Any]]]]) -> str:
+    parts = []
+    for d, gs in dated:
+        g = max(gs, key=lambda g: len(g["bands"]))
+        took = f" (Earth Search already took the {g['declared_offset']} offset out of its pixels)" if "declared_offset" in g else ""
+        parts.append(f"scale {g.get('scale')} and offset {g.get('offset')} applied for {d}{took}")
+    return "; ".join(parts)
+
+
 # ---------------------------------------------------------------- monitoring
+
+
+BRIEF_PAD_DEG = 1.0  # one radius for the brief page and conditions_brief
 
 
 def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 0.0) -> dict[str, Any]:
@@ -3594,9 +4325,10 @@ def active_events(bbox: list[float] | None = None, days: int = 30, pad: float = 
     degrees on every side (nearby events matter). Returns compact event lists
     with coordinates suitable for mapping.
     """
-    if bbox and pad:
+    padded = bool(bbox and pad)
+    if padded:
         bbox = [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad]
-    out: dict[str, Any] = {"eonet": [], "gdacs": []}
+    out: dict[str, Any] = {"eonet": [], "gdacs": [], **({"pad_deg": pad} if padded else {})}
     try:
         params: dict[str, Any] = {"days": days, "status": "open"}
         if bbox:
@@ -3962,7 +4694,8 @@ def next_pass(
     band sweeps the point in the next `days` (max 7). Every pass carries
     `sun_elevation_deg` and `daylight` (sun above the horizon at the point at
     pass time). Optical passes with the sun down are dropped, since optical
-    sensors do not acquire at night, and counted in `optical_passes_at_night`;
+    sensors do not acquire at night, and counted in `optical_passes_at_night` and named in
+    `optical_passes_at_night_list` (satellite, time_utc, sun_elevation_deg);
     radar (Sentinel-1) is kept day or night and carries the flag too.
 
     Honest limits, and say them when it matters: this is swath geometry, not
@@ -4001,7 +4734,7 @@ def next_pass(
     target = wgs84.latlon(lat, lon)
 
     passes = []
-    at_night = 0
+    at_night: list[dict[str, Any]] = []
     for cname in wanted:
         cfg = cfgs.get(cname)
         if not cfg:
@@ -4025,7 +4758,7 @@ def next_pass(
                 utc = t.utc_datetime()
                 sun = _sun_elevation_deg(utc, lat, lon)
                 if cfg["optical"] and sun <= 0:
-                    at_night += 1
+                    at_night.append({"satellite": sat.name, "time_utc": utc.strftime("%Y-%m-%d %H:%M"), "sun_elevation_deg": round(sun, 1)})
                     continue  # optical only acquires in daylight
                 passes.append(
                     {
@@ -4044,7 +4777,8 @@ def next_pass(
         "point": {"lat": lat, "lon": lon},
         "window_days": days,
         "passes": passes,
-        "optical_passes_at_night": at_night,
+        "optical_passes_at_night": len(at_night),
+        "optical_passes_at_night_list": at_night,
         "constellations_source": source,
         "constellations_available": list(cfgs),
         "skipped": skipped,
@@ -4258,9 +4992,9 @@ def conditions_brief(
 
     # 2. active events
     try:
-        events_data = active_events(bbox=bbox, pad=1.5)
+        events_data = active_events(bbox=bbox, pad=BRIEF_PAD_DEG)
         brief["events"] = events_data
-        for k in ("sources", "all_clear", "all_clear_note"):
+        for k in ("sources", "all_clear", "all_clear_note", "pad_deg"):
             if k in events_data:
                 brief[k] = events_data[k]
     except Exception as e:
@@ -4279,12 +5013,9 @@ def conditions_brief(
         items = img_res.get("items", [])
         latest_look = None
         if items:
-            # Find the newest item with cloud_cover <= 20.0, or fall back to lowest cloud
-            low_cloud_items = [it for it in items if it.get("cloud_cover") is not None and it["cloud_cover"] <= 20.0]
-            if low_cloud_items:
-                best_item = low_cloud_items[0]
-            else:
-                best_item = min(items, key=lambda it: it.get("cloud_cover") or 100.0)
+            # the pick search_imagery already made (coverage, cloud, recency band), else the same key over the window
+            rec_id = (img_res.get("recommended") or {}).get("id")
+            best_item = next((it for it in items if it["id"] == rec_id), None) or min(items, key=_scene_key)
 
             latest_look = {
                 "id": best_item["id"],

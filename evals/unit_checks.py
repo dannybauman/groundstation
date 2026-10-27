@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 import base64
 import json
 import os
@@ -205,6 +206,16 @@ def t_coverage_set_expands_to_item_layers():
         pass
 
 
+def t_coverage_set_nameless_reads_collection_and_date():
+    def names(coll, date, **kw):
+        fcs = {"date": date, "items": [{"catalog": "planetary-computer", "collection": coll, "id": "T1", "bbox": [0, 0, 1, 1]}]}
+        return [(l["name"], l["detail"]) for l in tools._expand_coverage_set({"type": "coverage_set", "set": fcs, **kw})]
+    assert names("esa-worldcover", "2021-01-01") == [("ESA WorldCover 2021", "T1")]
+    assert names("esa-worldcover", "2020-01-01") == [("ESA WorldCover 2020", "T1")]
+    assert names("esa-worldcover", "2021-01-01", name="Mine") == [("Mine", "T1")]
+    assert names("sentinel-2-l2a", "2024-05-01") == [("sentinel-2-l2a 2024-05-01", "T1")]
+
+
 def t_next_pass_pure_helpers():
     # one dip under the swath line = one pass; a shallow approach = none
     assert tools._pass_minima([300, 100, 50, 100, 300], 145) == [2]
@@ -319,7 +330,7 @@ def t_3d_fills_short_coverage_with_same_day_siblings():
     o_img, o_item, o_tile = tools.search_imagery, tools._item, tools.tile_url_template
     tools.search_imagery = lambda *a, **kw: {"items": [main_it, sib]}
     tools._item = lambda cat, coll, iid: {"properties": {"datetime": "2026-10-23T19:00:00Z"}}
-    tools.tile_url_template = lambda cat, coll, iid, *a: f"https://x/{iid}/{{z}}/{{x}}/{{y}}.png"
+    tools.tile_url_template = lambda cat, coll, iid, *a, **k: f"https://x/{iid}/{{z}}/{{x}}/{{y}}.png"
     try:
         with tempfile.TemporaryDirectory() as d:
             r = tools.render_map_3d("t", [0, 0, 10, 10], main, out_path=str(Path(d) / "a.html"))
@@ -608,9 +619,31 @@ def t_compare_dates_clips_means_to_bbox():
     tools.render_map = lambda **kw: maps.append(kw) or {"map_path": "x.html"}
     try:
         out = tools.compare_dates(bbox=box, window_before="a/b", window_after="c/d", stack_facts={"terrain": True})
-        assert maps[0]["stack_facts"] == {"geocoded": False, "terrain": True}, maps[0]["stack_facts"]
+        assert maps[0]["stack_facts"] == {"terrain": True}, maps[0]["stack_facts"]
         assert seen == [box, box], seen
         assert out["clipped_to"] == box and "extent_note" not in out
+    finally:
+        tools.search_imagery, tools.compute_statistics, tools.render_map = saved
+
+
+def t_compare_dates_carries_band_scaling_and_names_factors():
+    saved = (tools.search_imagery, tools.compute_statistics, tools.render_map)
+    item = lambda i, d: {"id": i, "collection": "sentinel-2-l2a", "datetime": d + "T18:00:00Z", "cloud_cover": 1, "bbox": [-122, 39, -121, 40]}
+    wins = iter([[item("S2A_10TFK_20230328_0_L2A", "2023-03-28")], [item("S2A_10TFK_20210203_0_L2A", "2021-02-03")]])
+    tools.search_imagery = lambda *a, **kw: {"items": next(wins)}
+    groups = {
+        "S2A_10TFK_20230328_0_L2A": [{"scale": 0.0001, "declared_offset": -0.1, "offset": 0, "bands": ["a"] * 13}],
+        "S2A_10TFK_20210203_0_L2A": [{"scale": 0.0001, "offset": -0.1, "bands": ["a"] * 13}],
+    }
+    tools.compute_statistics = lambda cat, coll, iid, **kw: {"nd": {"mean": 0.5}, "scaling_applied": True, "band_scaling": groups[iid],
+                                                             **({"range_note": "r"} if "2021" in iid else {})}
+    tools.render_map = lambda **kw: {"map_path": "x.html"}
+    try:
+        out = tools.compare_dates(bbox=[-121.5, 39.4, -121.4, 39.5], window_before="a/b", window_after="c/d")
+        assert out["after"]["band_scaling"][0]["declared_offset"] == -0.1 and out["before"]["band_scaling"][0]["offset"] == -0.1
+        assert out["before"]["range_note"] == "r" and "range_note" not in out["after"] and "range_note" not in out, "per date"
+        n = out["scaling_note"]
+        assert "offset -0.1 applied for 2021-02-03" in n and "offset 0 applied for 2023-03-28 (Earth Search already took the -0.1 offset out of its pixels)" in n, n
     finally:
         tools.search_imagery, tools.compute_statistics, tools.render_map = saved
 
@@ -783,6 +816,13 @@ def t_render_map_3d_controls():
     html = _render_3d(exaggeration=2.5)
     assert 'id="exaggeration"' in html and 'id="flythrough"' in html and 'id="reset"' in html
     assert 'value="2.5"' in html and "let exaggeration = 2.5" in html
+
+
+def t_render_map_3d_camera_lifts_to_terrain():
+    # field test 15: the Berkeley Pit box at zoom 14.5 put the camera at 1195 m under
+    # 2865 m of exaggerated ground; an unfrozen ground height follows the DEM as it lands
+    js = _render_3d().split('map.on("load"')[1].split("\n});")[0]
+    assert "duration: 0, freezeElevation: true })" in js
 
 
 # ---- stack layer (epic G) ----
@@ -1001,7 +1041,11 @@ def t_stack_postcard_listing_static_and_honest():
 
 def t_stack_map_honest_extra_facts():
     # callers that geocoded / fetched events say so; the panel only then claims it
-    html, _ = _render_stack_map(stack_layer=True, stack_facts={"geocoded": True, "events": True, "weather": True})
+    token = tools._tool_geocoded.set(True)  # only a tool that ran the geocode credits it
+    try:
+        html, _ = _render_stack_map(stack_layer=True, stack_facts={"events": True, "weather": True})
+    finally:
+        tools._tool_geocoded.reset(token)
     for name in ("Gazet", "Nominatim", "NASA EONET", "GDACS", "Open-Meteo", "Overture Maps"):
         assert name in html, f"{name} missing despite honest facts"
     base, _ = _render_stack_map(stack_layer=True)
@@ -1116,6 +1160,71 @@ def t_pick_best_scene_prefers_coverage():
     ]
     assert tools.pick_best_scene(items, [0, 0, 1, 1])["id"] == "full"
     assert tools.pick_best_scene([], [0, 0, 1, 1]) is None
+    # same coverage: cloud decides, whatever order the server returned
+    same = [{"id": "b", "bbox": [0, 0, 1, 1], "cloud_cover": 20.0}, {"id": "a", "bbox": [0, 0, 1, 1], "cloud_cover": 2.0}]
+    assert tools.pick_best_scene(same, [0, 0, 1, 1])["id"] == "a"
+    # an exact tie: id decides, both orders
+    tie = [{"id": "y", "bbox": [0, 0, 1, 1], "cloud_cover": 5.0}, {"id": "x", "bbox": [0, 0, 1, 1], "cloud_cover": 5.0}]
+    assert tools.pick_best_scene(tie, [0, 0, 1, 1])["id"] == "x"
+    assert tools.pick_best_scene(tie[::-1], [0, 0, 1, 1])["id"] == "x"
+
+
+def t_ndvi_change_baseline_prefers_coverage():
+    # stop 33: a clear sliver must not be the baseline the delta is read against
+    saved = (tools.search_imagery, tools.compute_statistics)
+    box = [0, 0, 1, 1]
+    best = {"id": "S2A_10TFK_20260601_0_L2A", "collection": "sentinel-2-l2a", "datetime": "2026-06-01T18:00:00Z",
+            "cloud_cover": 3.0, "bbox": [-1, -1, 2, 2], "covers_aoi_pct": 100.0}
+    seen = []
+
+    def cand(i, d, cloud, bb):
+        return {"id": i, "collection": "sentinel-2-l2a", "datetime": d + "T18:00:00Z", "cloud_cover": cloud, "bbox": bb}
+
+    items = [cand("S2A_10TFK_20260501_0_L2A", "2026-05-01", 0.0, [0, 0, 0.02, 0.02]),
+             cand("S2B_10TFK_20260503_0_L2A", "2026-05-03", 20.0, box)]
+    tools.search_imagery = lambda *a, **kw: seen.append(kw["bbox"]) or {"items": items}
+    tools.compute_statistics = lambda cat, coll, iid, **kw: {"nd": {"mean": 0.5}}
+    try:
+        out = brief.ndvi_change(best, box, dt.date(2026, 6, 10), 14)
+        assert seen == [box], seen  # ranked over the AOI, so both covers_aoi_pct mean the same area
+        assert out["baseline"]["scene"] == "S2B_10TFK_20260503_0_L2A", out
+        assert out["baseline"]["cloud"] == 20.0 and round(out["baseline"]["covers_aoi_pct"]) == 100
+        assert out["current"]["cloud"] == 3.0 and out["current"]["covers_aoi_pct"] == 100.0
+        assert out["caveats"] == [], out
+        out = brief.ndvi_change({**best, "covers_aoi_pct": 47.6}, box, dt.date(2026, 6, 10), 14)
+        assert len(out["caveats"]) == 1 and "48%" in out["caveats"][0] and "100%" in out["caveats"][0], out
+    finally:
+        tools.search_imagery, tools.compute_statistics = saved
+
+
+def t_brief_ndvi_change_is_over_the_place():
+    # stop 35: both means are clipped to the place box, the label names the place and the covered share
+    saved = (tools.search_imagery, tools.compute_statistics)
+    box = [0, 0, 1, 1]
+    best = {"id": "S2A_10TFK_20260601_0_L2A", "collection": "sentinel-2-l2a", "datetime": "2026-06-01T18:00:00Z",
+            "cloud_cover": 3.0, "bbox": [-1, -1, 2, 2], "covers_aoi_pct": 47.6}
+    ref = {"id": "S2B_10TFK_20260503_0_L2A", "collection": "sentinel-2-l2a", "datetime": "2026-05-03T18:00:00Z",
+           "cloud_cover": 5.0, "bbox": [-1, -1, 2, 2]}
+    calls = []
+
+    def stats(cat, coll, iid, **kw):
+        calls.append((iid, kw.get("bbox")))
+        if kw.get("bbox") != box:
+            return {"nd": {"mean": 0.2}}  # the whole-tile number the brief must no longer carry
+        return {"nd": {"mean": 0.7 if iid == best["id"] else 0.5}}
+
+    tools.search_imagery = lambda *a, **kw: {"items": [ref]}
+    tools.compute_statistics = stats
+    try:
+        out = brief.ndvi_change(best, box, dt.date(2026, 6, 10), 14, "Chelan County")
+        assert sorted(calls) == sorted([(best["id"], box), (ref["id"], box)]), calls
+        assert out["current"]["mean"] == 0.7 and out["baseline"]["mean"] == 0.5 and out["delta"] == 0.2, out
+        assert out["metric"] == "NDVI (vegetation) over Chelan County, 47.6% of it covered", out["metric"]
+        full = brief.ndvi_change(dict(best, covers_aoi_pct=100.0), box, dt.date(2026, 6, 10), 14, "Chelan County")
+        assert full["metric"] == "NDVI (vegetation) over Chelan County", full["metric"]
+        assert "MGRS tile 10TFK" in brief.ndvi_change(best, box, dt.date(2026, 6, 10), 14)["metric"]
+    finally:
+        tools.search_imagery, tools.compute_statistics = saved
 
 
 def t_expression_defaults_rescale():
@@ -1194,6 +1303,29 @@ def t_brief_calm_over_failed_source_becomes_watch():
     assert "WATCH — GDACS did not answer; CALM is unconfirmed" in out and "Nothing to report." in out, out
     assert brief._ensure_source_honesty(md, {"events": {"sources": {"gdacs": {"ok": True}}}}) == md
     assert brief._ensure_source_honesty(md, {"weather_error": "x"}).count("WATCH") == 1
+
+
+def t_brief_says_when_the_baseline_moved():
+    best = {"id": "S2C_10UFU_20261024"}
+    change = {"baseline": {"scene": "S2C_10UFU_20261003"}, "current": {"mean": 0.544}}
+    prev = {"pick_id": "S2C_10UFU_20261024", "baseline_id": "S2B_10UFU_20261018", "ndvi_mean": 0.544}
+    out = brief._scene_vs_last_run(prev, best, change)
+    assert "baseline changed" in out and "S2B_10UFU_20261018" in out and "S2C_10UFU_20261003" in out, out
+    assert "pick changed" not in out and "same" not in out, out
+    same = brief._scene_vs_last_run(dict(prev, baseline_id="S2C_10UFU_20261003"), best, change)
+    assert same == "same pick, same baseline, same mean" and "changed" not in same, same
+    old = brief._scene_vs_last_run({"ndvi_mean": 0.544}, best, change)
+    assert "no scene ids" in old and "same" not in old, old
+    gone = brief._scene_vs_last_run(prev, best, None)
+    assert "this run has no NDVI comparison" in gone and "None" not in gone and "same" not in gone, gone
+    nopick = brief._scene_vs_last_run(prev, None, None)
+    assert nopick.startswith("this run has no scene pick, so unchanged cannot be claimed") and "None" not in nopick, nopick
+    none = brief._scene_vs_last_run(dict(prev, baseline_id=None, ndvi_mean=None), best, None)
+    assert none.endswith("neither run has an NDVI comparison, so unchanged cannot be claimed"), none
+    noted = brief._ensure_scene_note(GOOD_MD, out)
+    assert "## What changed\nSince the last run: baseline changed: S2B_10UFU_20261018 -> S2C_10UFU_20261003." in noted, noted
+    assert brief._ensure_scene_note(GOOD_MD, same) == GOOD_MD and brief._ensure_scene_note(noted, out) == noted
+    assert _fixture(noted, events=[{"title": "Wildfire NAVARRE COULEE, Chelan, Washington"}]) == []
 
 
 def t_brief_checks_pass():
@@ -1592,7 +1724,7 @@ _NOMINATIM_SALINAS = [{"boundingbox": ["36.2", "36.8", "-121.9", "-121.3"], "lat
                        "display_name": "Salinas Valley, Monterey County, California"}]
 
 
-def _with_geocoders(gazet_payload, nominatim_payload, fn, ctype="application/json"):
+def _with_geocoders(gazet_payload, nominatim_payload, fn, ctype="application/json", reverse=lambda lat, lon: {}):
     saved_get, saved_json, saved_skip = tools._client.get, tools._get_json, tools._gazet_skip_until
     calls = {"gazet": 0, "nominatim": 0}
 
@@ -1602,6 +1734,9 @@ def _with_geocoders(gazet_payload, nominatim_payload, fn, ctype="application/jso
         return _FakeResp(gazet_payload, ctype)
 
     def fake_json(url, **kw):
+        if url.endswith("/reverse"):
+            calls["reverse"] = calls.get("reverse", 0) + 1
+            return {"address": reverse(kw["params"]["lat"], kw["params"]["lon"])}
         calls["nominatim"] += 1
         return nominatim_payload
 
@@ -1757,6 +1892,59 @@ def t_recommended_ties_go_to_the_newest_clean_scene():
     assert rec["id"] == "new" and "newest of 2 near-equal scenes" in rec["reason"] and "2026-08-03" in rec["reason"], rec
 
 
+def t_recommended_names_the_step_that_dropped_the_newest_scene():
+    # Field test No.16, Casco Bay: the Oct 21 scene lost at the cloud tie and the reason never said so
+    casco = [
+        {"id": "LC09_L2SP_012030_20261021_02_T1", "datetime": "2026-10-21", "cloud_cover": 23.01, "covers_aoi_pct": 100.0},
+        {"id": "LC09_L2SP_012029_20261021_02_T1", "datetime": "2026-10-21", "cloud_cover": 2.63, "covers_aoi_pct": 66.6},
+        {"id": "LC09_L2SP_011030_20261014_02_T1", "datetime": "2026-10-14", "cloud_cover": 53.29, "covers_aoi_pct": 87.0},
+        {"id": "LC08_L2SP_012030_20261013_02_T1", "datetime": "2026-10-13", "cloud_cover": 100.0, "covers_aoi_pct": 100.0},
+        {"id": "LC08_L2SP_011030_20261006_02_T1", "datetime": "2026-10-06", "cloud_cover": 0.33, "covers_aoi_pct": 84.2},
+        {"id": "LC09_L2SP_012030_20261005_02_T1", "datetime": "2026-10-05", "cloud_cover": 15.28, "covers_aoi_pct": 100.0},
+    ]
+    rec = tools._recommend(casco)
+    assert rec["id"] == "LC09_L2SP_012030_20261005_02_T1", rec
+    assert "the newest, 2026-10-21, lost on cloud: 23.0% against the pick's 15.3%, outside the 5-point tie" in rec["reason"], rec
+    assert "the clearest scene (0.3% cloud) covers 84.2%" in rec["reason"], rec
+    # two scenes share Oct 21 and STAC order is not stable: either order explains the one that got furthest
+    assert tools._recommend([casco[1], casco[0]] + casco[2:])["reason"] == rec["reason"]
+
+
+def t_recommended_names_the_ceiling_and_coverage_steps():
+    ceiling = [
+        {"id": "new", "datetime": "2026-10-21", "cloud_cover": 45.0, "covers_aoi_pct": 100.0},
+        {"id": "old", "datetime": "2026-10-05", "cloud_cover": 10.0, "covers_aoi_pct": 100.0},
+        {"id": "clear", "datetime": "2026-10-04", "cloud_cover": 1.0, "covers_aoi_pct": 50.0},
+    ]
+    rec = tools._recommend(ceiling)
+    assert rec["id"] == "old" and "the newest, 2026-10-21, lost on cloud: 45.0%, over the 30% ceiling" in rec["reason"], rec
+    short = [
+        {"id": "new", "datetime": "2026-10-21", "cloud_cover": 2.0, "covers_aoi_pct": 66.6},
+        {"id": "old", "datetime": "2026-10-05", "cloud_cover": 10.0, "covers_aoi_pct": 100.0},
+        {"id": "clear", "datetime": "2026-10-04", "cloud_cover": 1.0, "covers_aoi_pct": 50.0},
+    ]
+    rec = tools._recommend(short)
+    assert rec["id"] == "old" and "the newest, 2026-10-21, lost on coverage: 66.6% against the pick's 100.0%, outside the 5-point band" in rec["reason"], rec
+    # the newest scene won: no clause
+    assert "newest, " not in tools._recommend([{"id": "a", "datetime": "2026-01-02", "cloud_cover": 1.0, "covers_aoi_pct": 100.0},
+                                               {"id": "b", "datetime": "2026-01-01", "cloud_cover": 9.0, "covers_aoi_pct": 100.0}])["reason"]
+    # the coverage band is measured from the best cover, not the pick, when the cloud tie dropped the best cover
+    band = [
+        {"id": "top", "datetime": "2026-10-05", "cloud_cover": 20.0, "covers_aoi_pct": 100.0},
+        {"id": "pick", "datetime": "2026-10-04", "cloud_cover": 1.0, "covers_aoi_pct": 96.0},
+        {"id": "new", "datetime": "2026-10-21", "cloud_cover": 1.0, "covers_aoi_pct": 93.0},
+    ]
+    rec = tools._recommend(band)
+    assert rec["id"] == "pick" and "lost on coverage: 93.0% against the best-covering scene's 100.0%, outside the 5-point band" in rec["reason"], rec
+    # every scene over the ceiling: never blame the ceiling; no cloud figure or no datetime: no crash
+    cloudy = [{"id": "new", "datetime": "2026-10-21", "cloud_cover": 90.0, "covers_aoi_pct": 100.0},
+              {"id": "old", "datetime": "2026-10-05", "cloud_cover": 40.0, "covers_aoi_pct": 100.0}]
+    assert "ceiling" not in tools._recommend(cloudy)["reason"].split("; the newest")[-1]
+    sar = [{"id": "new", "datetime": "2026-10-21", "cloud_cover": None, "covers_aoi_pct": 50.0},
+           {"id": "old", "datetime": None, "cloud_cover": None, "covers_aoi_pct": 100.0}]
+    assert "lost on coverage: 50.0%" in tools._recommend(sar)["reason"]
+
+
 def t_stack_panel_credits_the_geocoder_that_answered():
     # Field test No.8: every geocoded map credited Gazet, including the ones
     # Nominatim answered. geocode() returns `source`; the panel claims that one.
@@ -1764,7 +1952,11 @@ def t_stack_panel_credits_the_geocoder_that_answered():
     lay = [{"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 10]}]
     with tempfile.TemporaryDirectory() as d:
         def names(fact):
-            m = tools.render_map("t", [0, 0, 10, 10], lay, out_path=str(Path(d) / "m.html"), stack_layer=True, stack_facts={"geocoded": fact})
+            token = tools._tool_geocoded.set(fact)
+            try:
+                m = tools.render_map("t", [0, 0, 10, 10], lay, out_path=str(Path(d) / "m.html"), stack_layer=True)
+            finally:
+                tools._tool_geocoded.reset(token)
             return {n for n in pat.findall(Path(m["map_path"]).read_text()) if n in ("Gazet", "Nominatim")}
         assert names("gazet") == {"Gazet"}
         assert names("nominatim") == {"Nominatim"}
@@ -1808,21 +2000,125 @@ def t_statistics_have_one_shape_clipped_or_not():
     assert "scaling_note" not in out, "scale 1 offset 0 is not a caveat"
 
 
-def t_statistics_say_when_scale_and_offset_are_unapplied():
-    # Field test No.12: Sentinel-2 stats were raw DN and nothing said so in words.
-    feature = {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
-               "properties": {"statistics": {"b1": {"min": 1.0, "max": 9.0, "mean": 5.0, "percentile_2": 2.0, "percentile_98": 8.0, "histogram": [1, 2]}}}}
-    band = [{"scale": 0.0001, "offset": -0.1}]
-    item = {"bbox": [0, 0, 1, 1], "assets": {k: {"raster:bands": band} for k in ("green", "swir16", "nir")}}
+def _scaled_stats(item, catalog="earth-search", lo=1000.0, **kw):
+    # one compute_statistics call against a fake tiler; returns (result, params the tiler was sent)
+    # PC keys a band asset_b1 and an expression result by the expression it was sent, the tilers b1
+    def _feature(p):
+        key = "b1" if catalog != "planetary-computer" else p.get("expression") or f"{p['assets']}_b1"
+        return {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": []},
+                "properties": {"statistics": {key: {"count": 10, "min": lo, "max": 3000.0, "mean": 2000.0, "std": 500.0,
+                                                    "percentile_2": 1100.0, "percentile_98": 2900.0, "histogram": [1, 2]}}}}
+    sent = {}
     saved_post, saved_json = tools._client.post, tools._get_json
-    tools._client.post = lambda url, **kw: _FakeResp(feature)
-    tools._get_json = lambda url, **kw: item
+    tools._client.post = lambda url, **k: (sent.update(k), _FakeResp(_feature(dict(k["params"]))))[1]
+    tools._get_json = lambda url, **k: item
     try:
-        out = tools.compute_statistics("earth-search", "sentinel-2-l2a", "S2X", assets=["green"], bbox=[0.2, 0.2, 0.8, 0.8])
+        out = tools.compute_statistics(catalog, "sentinel-2-l2a", "S2X", bbox=[0.2, 0.2, 0.8, 0.8], **kw)
     finally:
         tools._client.post, tools._get_json = saved_post, saved_json
-    assert len(out["band_scaling"]) == 1 and len(out["band_scaling"][0]["bands"]) == 3, out["band_scaling"]
-    assert "0.0001" in out["scaling_note"] and "-0.1" in out["scaling_note"] and "3 bands" in out["scaling_note"], out
+    return out, dict(sent["params"])
+
+
+_S2_BAND = [{"scale": 0.0001, "offset": -0.1}]
+_S2_ITEM = {"bbox": [0, 0, 1, 1], "assets": {k: {"raster:bands": _S2_BAND} for k in ("green", "swir16", "nir", "red")}}
+
+
+def t_statistics_apply_scale_and_offset_by_default():
+    # Field test No.15: ratios cancel the scale but not the offset, so raw NDVI was biased after 2022
+    out, _ = _scaled_stats(_S2_ITEM, assets=["green"])
+    g = out["green"]
+    assert abs(g["min"] - 0.0) < 1e-9 and abs(g["max"] - 0.2) < 1e-9 and abs(g["mean"] - 0.1) < 1e-9, g
+    assert abs(g["percentile_2"] - 0.01) < 1e-9 and abs(g["std"] - 0.05) < 1e-9, "std scales only"
+    assert g["count"] == 10, "count is not a value"
+    assert out["scaling_applied"] is True and "scaling_note" not in out, out
+    assert out["band_scaling"][0]["scale"] == 0.0001, "the factors used travel with the result"
+
+
+def t_statistics_raw_path_keeps_the_scaling_note():
+    # Field test No.12: raw digital numbers must still say so in words when scaling is off
+    out, _ = _scaled_stats(_S2_ITEM, assets=["green"], apply_scaling=False)
+    assert out["green"]["mean"] == 2000.0 and out["green"]["std"] == 500.0, out
+    assert "scaling_applied" not in out, out
+    assert len(out["band_scaling"]) == 1 and len(out["band_scaling"][0]["bands"]) == 4, out["band_scaling"]
+    assert "0.0001" in out["scaling_note"] and "-0.1" in out["scaling_note"] and "4 bands" in out["scaling_note"], out
+
+
+def t_expression_bands_are_corrected_before_the_index():
+    _, params = _scaled_stats(_S2_ITEM, expression="(nir-red)/(nir+red)")
+    e = params["expression"]
+    assert e == "((b1*0.000100000000-0.100000000000)-(b2*0.000100000000-0.100000000000))/((b1*0.000100000000-0.100000000000)+(b2*0.000100000000-0.100000000000))", e
+    # factor-less bands are left as written
+    plain = {"bbox": [0, 0, 1, 1], "assets": {k: {"raster:bands": [{"scale": 1.0}]} for k in ("nir", "red")}}
+    out, params = _scaled_stats(plain, expression="(nir-red)/(nir+red)")
+    assert params["expression"] == "(b1-b2)/(b1+b2)", params
+    assert "scaling_applied" not in out, out
+    _, params = _scaled_stats(_S2_ITEM, expression="(nir-red)/(nir+red)", apply_scaling=False)
+    assert params["expression"] == "(b1-b2)/(b1+b2)", "the raw path sends the expression as written"
+
+
+def t_earth_search_offset_already_in_the_pixels_is_not_applied_twice():
+    # stop 23 review: S2A_15SXS_20230818 red median is 926 DN on earth-search, 1930 on PC; the -1000 is already gone
+    item = {**_S2_ITEM, "properties": {"earthsearch:boa_offset_applied": True}}
+    out, _ = _scaled_stats(item, assets=["green"])
+    assert abs(out["green"]["mean"] - 0.2) < 1e-9 and abs(out["green"]["min"] - 0.1) < 1e-9, out["green"]
+    assert out["band_scaling"][0]["offset"] == 0 and out["band_scaling"][0]["declared_offset"] == -0.1, out["band_scaling"]
+    _, params = _scaled_stats(item, expression="(nir-red)/(nir+red)")
+    assert "-0.1" not in params["expression"] and "where" not in params["expression"], params
+    out, _ = _scaled_stats(item, assets=["green"], apply_scaling=False)
+    assert "already in the pixels" in out["scaling_note"], out
+
+
+def _pc_item(baseline):
+    # Planetary Computer shape: band-id assets, no raster:bands, the offset still in the pixels
+    return {"bbox": [0, 0, 1, 1], "properties": {"s2:processing_baseline": baseline},
+            "assets": {k: {} for k in ("B02", "B04", "B08", "B8A", "SCL", "AOT", "WVP", "visual")}}
+
+
+def t_planetary_computer_sentinel2_gets_the_collection_convention():
+    # stop 31: PC items carry no raster:bands, so the means were raw DN and a post-2022 NDVI was biased silently
+    for baseline, off in (("05.09", -0.1), ("03.01", 0)):
+        out, params = _scaled_stats(_pc_item(baseline), catalog="planetary-computer", assets=["B04"])
+        g = out["band_scaling"][0]
+        assert out["scaling_applied"] is True and g["scale"] == 0.0001 and g["offset"] == off, out
+        assert g["bands"] == ["B02", "B04", "B08", "B8A"], "reflectance bands only, never SCL, AOT, WVP or visual"
+        assert g["source"].startswith("collection convention"), g
+        assert abs(out["B04"]["mean"] - (0.2 + off)) < 1e-9 and "B04_b1" not in out, out
+        assert abs(out["B04"]["percentile_98"] - (0.29 + off)) < 1e-9 and abs(out["B04"]["std"] - 0.05) < 1e-9, out
+    out, params = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", expression="(B08-B04)/(B08+B04)")
+    assert list(out)[0] == "(B08-B04)/(B08+B04)", "the caller's expression, first, as compare_dates reads it"
+    e = params["expression"]
+    assert e.count("-0.100000000000") == 4 and "B08*0.000100000000" in e and "SCL" not in e, e
+    _, params = _scaled_stats(_pc_item("03.01"), catalog="planetary-computer", expression="(B08-B04)/(B08+B04)")
+    assert "B04*0.000100000000+0.000000000000" in params["expression"], params
+    out, _ = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", assets=["B04"], apply_scaling=False)
+    assert "scaling_applied" not in out and "collection convention" in out["scaling_note"], out
+
+
+def t_index_outside_its_range_after_the_offset_says_so():
+    # stop 36: field test 18's 2023 Rolling Fork NDVI ran -64.0 to 4.07; a dark pixel is below 0 after the -0.1 offset
+    out, params = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", lo=-64.0, expression="(B08-B04)/(B08+B04)")
+    assert out["(B08-B04)/(B08+B04)"]["min"] == -64.0, "not clamped"
+    assert "outside -1 to 1" in out["range_note"] and "-0.1 offset" in out["range_note"] and "not clamped" in out["range_note"], out
+    assert "under digital number 1000" in out["range_note"] and "median" in out["range_note"], out
+    assert params.get("nodata") == "0", "digital number 0 is masked before the offset"
+    out, _ = _scaled_stats(_pc_item("05.09"), catalog="planetary-computer", lo=-64.0, expression="(B03-B08)/(B03+B08)*2")
+    assert "range_note" not in out, "not a normalized index, so -1 to 1 is no claim to make"
+    out, _ = _scaled_stats(_pc_item("03.01"), catalog="planetary-computer", expression="(B08-B04)/(B08+B04)")
+    assert "range_note" not in out, "an index inside its range earns no note"
+
+
+def t_baseline_not_in_nn_nn_form_is_raw_with_the_form_named():
+    # stop 36: a baseline like 5.09 used to get the -0.1 by a string compare that only worked by accident
+    out, _ = _scaled_stats(_pc_item("5.09"), catalog="planetary-computer", assets=["B04"])
+    assert out["scaling_applied"] is False and "'5.09' is not in the NN.NN form" in out["scaling_note"], out
+    assert out["B04"]["mean"] == 2000.0 and "band_scaling" not in out, out
+
+
+def t_sentinel2_without_raster_bands_or_a_convention_says_raw():
+    # stop 31: any other catalog with no raster:bands must not look scaled
+    out, _ = _scaled_stats(_pc_item("05.09"), assets=["B04"])
+    assert out["scaling_applied"] is False and "raw digital numbers" in out["scaling_note"], out
+    assert "band_scaling" not in out and out["B04"]["mean"] == 2000.0, out
 
 
 def t_nominatim_fallback_says_what_it_matched():
@@ -1841,48 +2137,86 @@ def t_nominatim_fallback_says_what_it_matched():
         out = tools.geocode("the Ashburn data center corridor")
     finally:
         tools._client.get, tools._get_json, tools._gazet_skip_until = saved_get, saved_json, saved_skip
-    assert out["source"] == "nominatim" and out["bbox"][0] == -83.67, out
+    # neither row carries an importance, so extent decides: Virginia's box is the larger
+    assert out["source"] == "nominatim" and out["bbox"][0] == -77.5, out
+    assert len(out["candidates"]) == 2, ("the same place twice is not two candidates", out["candidates"])
     note = out["geocode_note"]
     assert "matched 'Ashburn' after simplifying 'the Ashburn data center corridor'" in note, note
-    assert note.count("Ashburn, Virginia, United States") == 1, ("the same place twice is not two other places", note)
+    assert note.count("Ashburn, Georgia, United States") == 1, note
 
 
 def _nom(name, kind, box, imp=0.5):
-    return {"boundingbox": [str(box[1]), str(box[3]), str(box[0]), str(box[2])], "lat": "0", "lon": "0",
+    lat, lon = (box[1] + box[3]) / 2, (box[0] + box[2]) / 2
+    return {"boundingbox": [str(box[1]), str(box[3]), str(box[0]), str(box[2])], "lat": str(lat), "lon": str(lon),
             "display_name": name, "addresstype": kind, "importance": imp}
+
+
+def _scored_on_its_inputs(out):
+    # Stop 18: every candidate shows what it was scored on, best score first
+    for c in out["candidates"]:
+        assert {"kind", "extent", "importance", "source", "score"} <= c.keys(), c
+    scores = [c["score"] for c in out["candidates"]]
+    assert scores == sorted(scores, reverse=True), scores
+
+
+# boxes and importances are the live Nominatim ones from field test No.14
+_SHASTA_TOWN = _nom("Shasta Lake, Shasta County, California, United States", "town", [-122.411, 40.651, -122.337, 40.710], 0.441)
+_SHASTA_RES = _nom("Shasta Lake, Shasta County, California, United States", "reservoir", [-122.55, 40.70, -122.097, 40.933], 0.342)
+_KILAUEA_VILLAGE = _nom("Kilauea, Kauai County, Hawaii, 96754, United States", "locality", [-159.42, 22.19, -159.39, 22.215], 0.35)
+_KILAUEA_VOLCANO = _nom("Kilauea, Hawaii County, Hawaii, 96718, United States", "volcano", [-155.28705, 19.42105, -155.28695, 19.42115], 0.477)
 
 
 def t_geocode_candidates_carry_kind_and_feature_word_picks():
     # Field test No.12: "Shasta Lake" landed on the town, and Kilauea's candidates
     # said nothing about which was the volcano
-    town = _nom("Shasta Lake, Shasta County, California, United States", "town", [-122.4, 40.5, -122.3, 40.6], 0.6)
-    res = _nom("Shasta Lake, Shasta County, California, United States", "reservoir", [-122.5, 40.6, -122.1, 40.9], 0.5)
-    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta Lake, California"))
-    assert out["candidates"][0]["kind"] == "reservoir" and out["bbox"][2] - out["bbox"][0] > 0.3, out
+    out, _ = _with_geocoders({"ids": []}, [_SHASTA_TOWN, _SHASTA_RES], lambda: tools.geocode("Shasta Lake, California"))
+    _scored_on_its_inputs(out)
     assert [c["kind"] for c in out["candidates"]] == ["reservoir", "town"] and not out.get("ambiguous"), out
-    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta, California"))
-    assert out["candidates"][0]["kind"] == "town", "no feature word: the source's order stands"
-    kau = _nom("Kilauea, Kauai County, Hawaii, United States", "locality", [-159.4, 22.2, -159.3, 22.3], 0.5)
-    vol = _nom("Kilauea, Hawaii County, Hawaii, United States", "volcano", [-155.4, 19.3, -155.2, 19.5], 0.5)
-    out, _ = _with_geocoders({"ids": []}, [kau, vol], lambda: tools.geocode("Kilauea, Hawaii"))
-    assert out["ambiguous"] and [c["kind"] for c in out["candidates"]] == ["locality", "volcano"], out
-    err = tools._ambiguous_error("Kilauea, Hawaii", out)["error"]
-    assert "locality (Kauai County, Hawaii, United States) or volcano (Hawaii County, Hawaii, United States)?" in err, err
-    out, _ = _with_geocoders({"ids": []}, [kau, vol], lambda: tools.geocode("Kilauea volcano, Hawaii"))
-    assert out["candidates"][0]["kind"] == "volcano" and not out["ambiguous"], out
+    assert out["bbox"] == [-122.55, 40.70, -122.097, 40.933] and "bbox_note" not in out, out
+    with_word = out["candidates"][0]["score"]
+    out, _ = _with_geocoders({"ids": []}, [_SHASTA_TOWN, _SHASTA_RES], lambda: tools.geocode("Shasta, California"))
+    res = next(c for c in out["candidates"] if c["kind"] == "reservoir")
+    assert round(with_word - res["score"], 3) == 0.2, ("the word is worth 0.2 and nothing else", with_word, res)
+    # no feature word: importance 0.48 over 0.35 plus the feature kind clears the margin
+    out, _ = _with_geocoders({"ids": []}, [_KILAUEA_VILLAGE, _KILAUEA_VOLCANO], lambda: tools.geocode("Kilauea, Hawaii"))
+    _scored_on_its_inputs(out)
+    assert out["candidates"][0]["kind"] == "volcano" and not out.get("ambiguous"), out
+    assert out["candidates"][0]["extent"] == [0.0001, 0.0001] and "bbox_note" in out, "a node is a point, widened"
+    assert out["extent_basis"] == "kind" and abs((out["bbox"][3] - out["bbox"][1]) * 111.32 / 2 - 5) < 1e-6, ("a volcano node is 5 km half-width", out)
+    out, _ = _with_geocoders({"ids": []}, [_KILAUEA_VILLAGE, _KILAUEA_VOLCANO], lambda: tools.geocode("Kilauea volcano, Hawaii"))
+    assert out["candidates"][0]["kind"] == "volcano" and not out.get("ambiguous"), out
+
+
+def t_geocode_point_extent_comes_from_its_kind():
+    # Stop 27: a point is padded by what it is, not one 0.3 deg square
+    def half_km(out):
+        return round((out["bbox"][3] - out["bbox"][1]) * 111.32 / 2, 3)
+    pt = lambda kind, lat=37.0: _nom("Foo, Utah, United States", kind, [-111.0, lat, -111.0, lat], 0.4)
+    for kind, km in [("bay", 2), ("town", 5), ("city", 10)]:
+        out, _ = _with_geocoders({"ids": []}, [pt(kind)], lambda: tools.geocode("Foo, Utah"))
+        assert out["extent_basis"] == "kind" and out["candidates"][0]["extent_basis"] == "kind" and half_km(out) == km, (kind, out)
+        assert abs((out["bbox"][2] - out["bbox"][0]) / (out["bbox"][3] - out["bbox"][1]) - 1 / math.cos(math.radians(37.0))) < 1e-6, out
+    out, _ = _with_geocoders({"ids": []}, [pt("quux")], lambda: tools.geocode("Foo, Utah"))
+    assert out["extent_basis"] == "default" and abs(out["bbox"][2] - out["bbox"][0] - 0.3) < 1e-9, out
+    out, _ = _with_geocoders({"ids": []}, [pt("bay", 90.0)], lambda: tools.geocode("Foo, Utah"))
+    w, s, e, n = out["bbox"]
+    assert s < n <= 90.0 and w < e and e - w <= 360.0, ("a pole stays a box, not inverted or infinite", out)
+    own = _nom("Foo, Utah, United States", "bay", [-111.2, 36.9, -111.0, 37.1], 0.4)
+    out, _ = _with_geocoders({"ids": []}, [own], lambda: tools.geocode("Foo, Utah"))
+    assert out["extent_basis"] == "own" and out["bbox"] == [-111.2, 36.9, -111.0, 37.1] and "bbox_note" not in out, out
 
 
 def t_geocode_feature_word_yields_to_a_place_named_for_it():
     # Field test No.13: "Lake Charles, Louisiana" took the lake over the city.
-    # Importances are the live ones: city 0.55 over lake 0.18, town 0.44 over reservoir 0.34
-    city = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "city", [-93.3, 30.1, -93.1, 30.3], 0.547)
-    lake = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "lake", [-93.24, 30.21, -93.22, 30.24], 0.182)
+    # The same rule that gives Shasta the reservoir gives Lake Charles the city:
+    # 0.55 over 0.18 is more than the word and the feature kind are worth
+    city = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "city", [-93.317, 30.124, -93.129, 30.272], 0.547)
+    lake = _nom("Lake Charles, Calcasieu Parish, Louisiana, United States", "lake", [-93.245, 30.215, -93.218, 30.237], 0.182)
     out, _ = _with_geocoders({"ids": []}, [city, lake], lambda: tools.geocode("Lake Charles, Louisiana"))
+    _scored_on_its_inputs(out)
     assert [c["kind"] for c in out["candidates"]] == ["city", "lake"] and not out.get("ambiguous"), out
-    assert "'lake' is part of the city's own name" in out["geocode_note"], out
-    town = _nom("Shasta Lake, Shasta County, California, United States", "town", [-122.4, 40.5, -122.3, 40.6], 0.441)
-    res = _nom("Shasta Lake, Shasta County, California, United States", "reservoir", [-122.5, 40.6, -122.1, 40.9], 0.342)
-    out, _ = _with_geocoders({"ids": []}, [town, res], lambda: tools.geocode("Shasta Lake, California"))
+    assert out["candidates"][1]["importance"] == 0.182, "the importance the margin was judged on is on the output"
+    out, _ = _with_geocoders({"ids": []}, [_SHASTA_TOWN, _SHASTA_RES], lambda: tools.geocode("Shasta Lake, California"))
     assert out["candidates"][0]["kind"] == "reservoir" and not out.get("ambiguous"), "a close town does not outrank the feature"
 
 
@@ -1900,6 +2234,23 @@ def t_geocode_water_and_lake_are_one_kind():
     ]}
     out, _ = _with_geocoders(gz, [], lambda: tools.geocode("Lake Powell"))
     assert out["name"] == "Powell (reservoir)" and not out.get("ambiguous"), "the word picks among Gazet's ties too"
+    _scored_on_its_inputs(out)
+    assert [c["importance"] for c in out["candidates"]] == [None, None], "Gazet has no importance; extent and kind decide"
+    # Gazet scores "Lake Powell, Utah" under its gate, so Nominatim answers with
+    # the reservoir's own polygon, the lake and not a county
+    res = _nom("Lake Powell, San Juan County, Utah, United States", "reservoir", [-111.6, 36.85, -110.319, 37.915], 0.435)
+    out, _ = _with_geocoders({"ids": []}, [res], lambda: tools.geocode("Lake Powell, Utah"))
+    assert out["candidates"][0]["kind"] == "reservoir" and out["bbox"] == [-111.6, 36.85, -110.319, 37.915], out
+
+
+def t_geocode_real_extent_stays_however_small():
+    # Field test No.14: the pit's one candidate carried its 0.024 by 0.013 deg
+    # box and the top level was still the 0.3 deg point box. A real extent stays
+    pit = _nom("Berkeley Pit, Butte, Silver Bow County, Montana, United States", "water", [-112.524, 46.008, -112.5, 46.021], 0.353)
+    out, _ = _with_geocoders({"ids": []}, [pit], lambda: tools.geocode("Berkeley Pit"))
+    _scored_on_its_inputs(out)
+    assert out["bbox"] == [-112.524, 46.008, -112.5, 46.021] and "bbox_note" not in out, out
+    assert out["candidates"][0]["extent"] == [0.024, 0.013], out["candidates"]
 
 
 def t_geocode_refusal_names_state_or_country():
@@ -1909,15 +2260,27 @@ def t_geocode_refusal_names_state_or_country():
     out, _ = _with_geocoders({"ids": []}, [ore, me], lambda: tools.geocode("Portland"))
     err = tools._ambiguous_error("Portland", out)["error"]
     assert "city (Multnomah County, Oregon, United States) or city (Cumberland County, Maine, United States)?" in err, err
+    # Field test No.14: Gazet answers a bare "Portland" and its rows carry no
+    # state, so the refusal was word for word No.13's. The live four rows
     gz = {"ids": [
+        {"source": "urban_centres", "id": "ghsl_4941", "name": "Portland", "country": "United States", "subtype": "urban_centre",
+         "bbox": [-123.01, 45.358, -122.36, 45.718], "similarity": 1.0},
         {"source": "divisions_area", "id": "or", "name": "Portland", "country": "US", "subtype": "locality",
-         "bbox": [-122.84, 45.43, -122.47, 45.65], "similarity": 1.0},
+         "bbox": [-122.837, 45.433, -122.472, 45.653], "similarity": 1.0},
         {"source": "divisions_area", "id": "me", "name": "Portland", "country": "US", "subtype": "locality",
-         "bbox": [-70.35, 43.54, -69.98, 43.73], "similarity": 1.0},
+         "bbox": [-70.347, 43.544, -69.976, 43.728], "similarity": 1.0},
+        {"source": "urban_centres", "id": "ghsl_8297", "name": "Portland", "country": "United States", "subtype": "urban_centre",
+         "bbox": [-70.328, 43.621, -70.209, 43.694], "similarity": 1.0},
     ]}
-    out, _ = _with_geocoders(gz, [], lambda: tools.geocode("Portland"))
+    state = lambda lat, lon: {"state": "Oregon" if lon < -100 else "Maine", "country": "United States"}
+    out, calls = _with_geocoders(gz, [], lambda: tools.geocode("Portland"), reverse=state)
+    _scored_on_its_inputs(out)
+    assert out["ambiguous"] and calls["reverse"] == 4 and calls["nominatim"] == 0, (out, calls)
     err = tools._ambiguous_error("Portland", out)["error"]
-    assert "locality (US, at 45.5N 122.7W) or locality (US, at 43.6N 70.2W)?" in err, err
+    assert ("urban_centre (Oregon, United States) or locality (Oregon, United States)"
+            " or locality (Maine, United States) or urban_centre (Maine, United States)?") in err, err
+    out, calls = _with_geocoders(_GAZET_CHELAN, [], lambda: tools.geocode("Chelan County"), reverse=state)
+    assert "reverse" not in calls, "a name that is not refused costs no lookup"
 
 
 def t_gdacs_feed_is_windowed_and_counted():
@@ -2174,7 +2537,7 @@ def t_geoparquet_archive_searches_like_a_catalog():
             assert [i["id"] for i in wrap["items"]] == ["w"]
             assert "'earth-search'" in out["archive"]["note"]
             noc = tools._recommend([{"id": "x", "cloud_cover": None, "covers_aoi_pct": 50.0, "datetime": "d"}, {"id": "y", "cloud_cover": 5.0, "covers_aoi_pct": 50.0, "datetime": "c"}])
-            assert noc["id"] == "x"  # a None cloud value must not crash the reason text
+            assert noc["id"] == "y" and isinstance(noc["reason"], str)  # a None cloud value must not crash the reason text, and reads as the worst
             err = tools.write_archive("earth-search", ["c"], bbox=[0, 0, 1, 1], out_path=str(Path(d) / "a.txt"))
             assert "error" in err and not (Path(d) / "a.txt").exists()
     finally:
@@ -2508,6 +2871,570 @@ def t_zarr_uncurated_variable_in_store_is_accepted():
     finally:
         tools._open_zarr = saved
     assert "total_precipitation_6hr" in tools.describe_collection("zarr", "weatherbench2-era5")["variables"]
+
+
+def t_date_only_window_becomes_rfc3339():
+    assert tools._rfc3339_window("2024-10-01/2024-10-20") == "2024-10-01T00:00:00Z/2024-10-20T23:59:59Z"
+    full = "2026-06-01T00:00:00Z/2026-07-09T00:00:00Z"
+    assert tools._rfc3339_window(full) == full
+
+
+def t_compare_dates_default_path_per_box_and_out_path():
+    item = lambda i, d: {"id": i, "datetime": f"{d}T10:00:00Z", "collection": "sentinel-2-l2a", "bbox": [0, 0, 1, 1], "cloud_cover": 1}
+    saved = tools.search_imagery, tools.compute_statistics, tools._coverage
+    tools.search_imagery = lambda *a, **k: {"items": [item("S2B_31TBF_20240101_0_L2A", "2024-01-01")]}
+    tools.compute_statistics = lambda *a, **k: {"x": {"mean": 0.5}}
+    tools._coverage = lambda *a, **k: 1.0
+    try:
+        w = dict(window_before="2024-01-01/2024-01-02", window_after="2024-02-01/2024-02-02")
+        p1 = tools.compare_dates(bbox=[0, 0, 1, 1], stack_layer=False, **w)["map_path"]
+        p2 = tools.compare_dates(bbox=[5, 5, 6, 6], stack_layer=False, **w)["map_path"]
+        assert p1 != p2, p1
+        want = str(Path(tempfile.gettempdir()) / "mine.html")
+        assert tools.compare_dates(bbox=[0, 0, 1, 1], stack_layer=False, out_path=want, **w)["map_path"] == want
+    finally:
+        tools.search_imagery, tools.compute_statistics, tools._coverage = saved
+
+
+def _notes_map(**kw):
+    with tempfile.TemporaryDirectory() as d:
+        out = str(Path(d) / "m.html")
+        res = tools.render_map("t", [0, 0, 1, 1], [{"type": "raster", "name": "A", "tiles": "https://x/{z}/{x}/{y}.png"}], out_path=out, **kw)
+        return res, Path(out).read_text(encoding="utf-8")
+
+
+def t_notes_render_escaped_in_box_and_stack():
+    res, html = _notes_map(notes=["claim 2024-03-01", "<script>x</script>"])
+    assert res["notes"] == ["claim 2024-03-01", "<script>x</script>"]
+    assert 'id="notes"' in html and "<b>Notes</b>" in html and "claim 2024-03-01" in html
+    assert "&lt;script&gt;x&lt;/script&gt;" in html and "<script>x</script>" not in html
+    assert html.count("claim 2024-03-01") == 2  # box and Stack panel
+
+
+def t_notes_absent_changes_nothing():
+    res, html = _notes_map()
+    assert 'id="notes"' not in html and "notes" not in res and "stack_facts_ignored" not in res
+    res2, html2 = _notes_map(notes=[])
+    assert html2 == html and "notes" not in res2
+
+
+def t_stack_facts_unknown_key_named_known_key_kept():
+    res, html = _notes_map(stack_facts={"claim_event": "x", "track": "y", "events": True})
+    assert res["stack_facts_ignored"] == ["claim_event", "track"] and "notes" in res["note"]
+    assert "claim_event" not in html
+
+
+def t_compare_dates_passes_notes_through():
+    item = lambda i, d: {"id": i, "datetime": f"{d}T10:00:00Z", "collection": "sentinel-2-l2a", "bbox": [0, 0, 1, 1], "cloud_cover": 1}
+    saved = tools.search_imagery, tools.compute_statistics, tools._coverage
+    tools.search_imagery = lambda *a, **k: {"items": [item("S2B_31TBF_20240101_0_L2A", "2024-01-01")]}
+    tools.compute_statistics = lambda *a, **k: {"x": {"mean": 0.5}}
+    tools._coverage = lambda *a, **k: 1.0
+    try:
+        out = tools.compare_dates(bbox=[0, 0, 1, 1], window_before="2024-01-01/2024-01-02", window_after="2024-02-01/2024-02-02",
+                                  notes=["storm <b>"], stack_facts={"bogus": 1})
+        assert out["notes"] == ["storm <b>"] and out["stack_facts_ignored"] == ["bogus"]
+        assert "storm &lt;b&gt;" in Path(out["map_path"]).read_text(encoding="utf-8")
+    finally:
+        tools.search_imagery, tools.compute_statistics, tools._coverage = saved
+
+
+def t_compare_dates_same_call_same_scene():
+    # Stop 20: two tiles both cover the box at 100, so the tile came from set order and flipped between runs
+    def item(tile, d, cloud, cov=100.0):
+        return {"id": f"S2A_{tile}_{d}_0_L2A", "datetime": f"2024-{d[4:6]}-{d[6:]}T10:00:00Z", "collection": "sentinel-2-l2a",
+                "bbox": [0, 0, 1, 1], "cloud_cover": cloud, "covers_aoi_pct": cov}
+
+    def run(items):
+        saved = tools.search_imagery, tools.compute_statistics, tools.render_map
+        tools.search_imagery = lambda *a, **k: {"items": list(items)}
+        tools.compute_statistics = lambda *a, **k: {"x": {"mean": 0.5}}
+        tools.render_map = lambda **k: {"map_path": "x.html"}
+        try:
+            return tools.compare_dates(bbox=[0, 0, 1, 1], window_before="a/b", window_after="c/d")
+        finally:
+            tools.search_imagery, tools.compute_statistics, tools.render_map = saved
+
+    tied = [item("31SBD", "20241115", 20.0), item("30SYJ", "20241115", 20.0)]
+    one, two = run(tied), run(tied[::-1])
+    assert one["tile"] == two["tile"] == "30SYJ" and one["after"]["id"] == two["after"]["id"], (one["tile"], two["tile"])
+    assert one["after"]["runner_up"]["id"] == "S2A_31SBD_20241115_0_L2A" and "scene id decided" in one["after"]["pick_note"]
+    better = [item("31SBD", "20241115", 20.0, cov=100.0), item("30SYJ", "20241115", 5.0, cov=80.0)]
+    for order in (better, better[::-1]):
+        out = run(order)
+        assert out["tile"] == "31SBD" and "pick_note" not in out["after"], out["after"]
+        assert out["after"]["runner_up"]["covers_aoi_pct"] == 80.0
+
+
+def t_brief_page_and_conditions_brief_share_one_radius():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("brief", Path(__file__).resolve().parents[1] / "briefing" / "brief.py")
+    src = Path(spec.origin).read_text()
+    assert "pad = tools.BRIEF_PAD_DEG" in src and "pad=BRIEF_PAD_DEG" in Path(tools.__file__).read_text()
+    saved = tools._get_json
+    tools._get_json = lambda *a, **k: {"events": []}
+    try:
+        assert tools.active_events(bbox=[0, 0, 1, 1], pad=tools.BRIEF_PAD_DEG)["pad_deg"] == tools.BRIEF_PAD_DEG == 1.0
+    finally:
+        tools._get_json = saved
+
+
+def t_same_collection_layers_read_as_collection_and_date_with_the_id_in_the_detail():
+    items = [{"catalog": "planetary-computer", "collection": "esa-worldcover", "id": f"ESA_WorldCover_10m_2021_v200_{t}_Map", "bbox": [0, 0, 1, 1]}
+             for t in ("N45W123", "N45W120", "N42W123", "N42W120", "N39W123", "N39W120")]
+    out = tools._expand_coverage_set({"type": "coverage_set", "set": {"items": items}, "name": "WorldCover 2021"})
+    assert {l["name"] for l in out} == {"WorldCover 2021"}, [l["name"] for l in out]
+    assert len({l["detail"] for l in out}) == 6 and all("_Map" in l["detail"] for l in out)
+    # the caller's state keeps them apart too, not only the page
+    assert len({tools._layer_state(l)["detail"] for l in out}) == 6
+
+
+def t_layer_panel_folds_at_phone_width_like_the_legend():
+    t = tools._MAP_TEMPLATE
+    assert '<details class="fold" open>' in t and 'innerWidth <= 500' in t and "#panel details" in t
+    assert "max-width: calc(100vw - 150px)" in t  # clear of the STACK button
+    assert "#panel details:has(#toggles:empty) { display: none; }" in t  # a timelapse has no rows
+    for tpl in (t, tools._MAP3D_TEMPLATE):  # the credit folds into MapLibre's attribution on a phone
+        assert "@media (max-width: 500px) { #credit { display: none; } }" in tpl
+        assert 'attributionControl: { customAttribution: document.getElementById("credit").textContent }' in tpl
+
+
+def t_next_pass_names_the_night_passes_it_dropped():
+    tle = Path(tempfile.mkdtemp()) / "tle.txt"
+    tle.write_text("ISS\n1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927\n"
+                   "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537\n")
+    cfg = {"x": {"norad_ids": [25544], "swath_km": 40000, "reach_km": 20000, "optical": True}}
+    saved = tools._load_constellations, tools._fetch_tles, tools._TLE_CACHE
+    tools._load_constellations = lambda: (cfg, "test", [])
+    tools._fetch_tles = lambda c, p: []
+    tools._TLE_CACHE = tle.with_name("tle.txt")
+    tle.rename(tle.with_name("tle-eo-predictor.txt"))
+    try:
+        r = tools.next_pass(0.0, 0.0, days=3)
+    finally:
+        tools._load_constellations, tools._fetch_tles, tools._TLE_CACHE = saved
+    night = r["optical_passes_at_night_list"]
+    assert night and len(night) == r["optical_passes_at_night"], r
+    assert all({"satellite", "time_utc", "sun_elevation_deg"} <= set(n) and n["sun_elevation_deg"] <= 0 for n in night), night
+
+
+def _poly(*pts):
+    return {"type": "Polygon", "coordinates": [[list(p) for p in pts] + [list(pts[0])]]}
+
+
+# bbox [-71, 43, -69, 44.5] reads 100 on the Casco Bay box, but the swath edge cuts across its south
+_SLANT = _poly((-71, 44.5), (-69, 44.5), (-69, 43.5), (-71, 43.9))
+_CASCO = [-70.40, 43.55, -69.90, 43.85]
+
+
+def _geo_item(id_, bbox, geometry=None, day="2026-08-24"):
+    f = _stac_item(id_, bbox, day)
+    if geometry:
+        f["geometry"] = geometry
+    return f
+
+
+def t_footprint_coverage_beats_the_bbox_and_names_the_side():
+    r = _with_stac_search([_geo_item("slant", [-71, 43, -69, 44.5], _SLANT)],
+                          lambda: tools.search_imagery("planetary-computer", ["landsat-c2-l2"], bbox=_CASCO))
+    it = r["items"][0]
+    assert tools._bbox_coverage_pct(_CASCO, it["bbox"]) == 100.0
+    assert 30 < it["covers_aoi_pct"] < 80 and it["coverage_basis"] == "footprint", it
+    pct, where = tools._uncovered_side(_CASCO, [_SLANT])
+    assert 20 < pct < 70 and "south" in where, (pct, where)
+
+
+def t_footprint_that_misses_the_box_reads_zero_and_is_not_recommended():
+    away = _poly((-80, 40), (-78, 40), (-78, 41), (-80, 41))
+    items = [_geo_item("miss", [-71, 43, -69, 44.5], away, day="2026-08-25"),
+             _geo_item("hit", [-71, 43, -69, 44.5], _poly((-71, 43), (-69, 43), (-69, 44.5), (-71, 44.5)), day="2026-08-24")]
+    r = _with_stac_search(items, lambda: tools.search_imagery("planetary-computer", ["landsat-c2-l2"], bbox=_CASCO))
+    by_id = {it["id"]: it for it in r["items"]}
+    assert by_id["miss"]["covers_aoi_pct"] == 0.0 and by_id["hit"]["covers_aoi_pct"] == 100.0, by_id
+    assert r["recommended"]["id"] == "hit", r["recommended"]
+
+
+def t_full_coverage_set_is_built_on_footprints():
+    box = [-70.40, 43.55, -69.90, 43.85]
+    west = _fcs_item("west", "2026-07-19", [-71, 43, -69, 44.5])
+    east = _fcs_item("east", "2026-07-19", [-71, 43, -69, 44.5])
+    west["footprint"] = _poly((-71, 43), (-70.15, 43), (-70.15, 44.5), (-71, 44.5))
+    east["footprint"] = _poly((-70.2, 43), (-69, 43), (-69, 44.5), (-70.2, 44.5))
+    # the bboxes alone would call either one a full cover and need no set
+    assert tools._union_coverage_pct(box, [west["bbox"]]) == 100.0
+    assert 40 < tools._union_coverage_pct(box, [west["footprint"]]) < 70
+    got = tools.find_full_coverage_set([west, east], box)
+    assert got and {i["id"] for i in got["items"]} == {"west", "east"} and got["union_covers_aoi_pct"] >= 99.0, got
+    # a hole in a footprint is not covered, a multipolygon is the union of its parts
+    holed = {"type": "Polygon", "coordinates": [[[-71, 43], [-69, 43], [-69, 44.5], [-71, 44.5], [-71, 43]],
+                                                [[-70.3, 43.6], [-70.0, 43.6], [-70.0, 43.8], [-70.3, 43.8], [-70.3, 43.6]]]}
+    assert 0 < tools._union_coverage_pct(box, [holed]) < 90
+    multi = {"type": "MultiPolygon", "coordinates": [west["footprint"]["coordinates"], east["footprint"]["coordinates"]]}
+    assert tools._union_coverage_pct(box, [multi]) >= 99.0
+
+
+def t_item_without_geometry_falls_back_to_bbox_and_says_so():
+    r = _with_stac_search([_geo_item("plain", [-71, 43, -69, 44.5])],
+                          lambda: tools.search_imagery("planetary-computer", ["landsat-c2-l2"], bbox=_CASCO))
+    it = r["items"][0]
+    assert it["covers_aoi_pct"] == 100.0 and it["coverage_basis"] == "bbox" and "footprint" not in it, it
+
+
+def t_recommendation_comes_from_the_set_when_no_scene_covers_the_box():
+    west = _geo_item("w", [-71, 43, -69, 44.5], _poly((-71, 43), (-70.15, 43), (-70.15, 44.5), (-71, 44.5)))
+    east = _geo_item("e", [-71, 43, -69, 44.5], _poly((-70.2, 43), (-69, 43), (-69, 44.5), (-70.2, 44.5)))
+    r = _with_stac_search([west, east], lambda: tools.search_imagery("planetary-computer", ["landsat-c2-l2"], bbox=_CASCO))
+    assert r["full_coverage_set"] and set(r["recommended"]["scene_ids"]) == {"w", "e"}, r["recommended"]
+    assert r["recommended"]["covers_aoi_pct"] >= 99.0
+
+
+def t_postcard_names_the_uncovered_side_and_why_it_cannot_fill():
+    saved = tools._client.get, tools._get_json
+    tools._client.get = lambda url, **k: _ImgResp(200)
+    tools._get_json = lambda url, **k: {"bbox": [-71, 43, -69, 44.5], "geometry": _SLANT, "license": "x"}
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            out = tools.render_postcard("planetary-computer", "landsat-c2-l2", "I", "P", "2026-10-21",
+                                        out_path=str(Path(d) / "c.html"), bbox=_CASCO)
+            out2 = tools.render_postcard("planetary-computer", "landsat-c2-l2", "I", "P", "2026-10-21",
+                                         out_path=str(Path(d) / "d.html"), bbox=_CASCO, fill_item_ids=["J"])
+    finally:
+        tools._client.get, tools._get_json = saved
+    assert out["uncovered_pct"] > 20 and "south" in out["uncovered_side"], out
+    assert "south" in out["coverage_note"] and "direct COG access" in out["coverage_note"], out
+    assert "direct COG access" in out2["coverage_note"] and out2["dropped"], out2
+
+
+def _compare_fixture(before_cloud, render, **kw):
+    item = lambda i, d, c: {"id": i, "datetime": f"{d}T10:00:00Z", "collection": "sentinel-2-l2a", "bbox": [0, 0, 1, 1], "cloud_cover": c}
+    saved = tools.search_imagery, tools.compute_statistics, tools.render_map
+    wins = iter([[item("S2B_31TBF_20240201_0_L2A", "2024-02-01", 1)], [item("S2B_31TBF_20240101_0_L2A", "2024-01-01", before_cloud)]])
+    tools.search_imagery = lambda *a, **k: {"items": next(wins)}
+    tools.compute_statistics = lambda *a, **k: {"x": {"mean": 0.5}}
+    tools.render_map = render
+    try:
+        return tools.compare_dates(bbox=[0, 0, 1, 1], window_before="2024-01-01/2024-01-02", window_after="2024-02-01/2024-02-02", **kw)
+    finally:
+        tools.search_imagery, tools.compute_statistics, tools.render_map = saved
+
+
+def t_compare_dates_returns_render_maps_error():
+    # Field test 15: an out_path outside the repo made render_map return an error and compare_dates index map_path
+    out = _compare_fixture(1, lambda **kw: {"error": "out_path must be inside the out root"}, out_path="/tmp/outside.html")
+    assert out == {"error": "out_path must be inside the out root"}, out
+
+
+_PORTLAND_GAZET = [
+    {"source": "divisions_area", "id": "or", "name": "Portland", "country": "US", "subtype": "locality",
+     "bbox": [-122.837, 45.433, -122.472, 45.653], "similarity": 1.0},
+    {"source": "divisions_area", "id": "me", "name": "Portland", "country": "US", "subtype": "locality",
+     "bbox": [-70.347, 43.544, -69.976, 43.728], "similarity": 1.0},
+]
+_STATE_OF = lambda lat, lon: {"state": "Oregon" if lon < -100 else "Maine", "country": "United States"}
+
+
+def t_geocode_refusal_drops_names_without_the_ask():
+    # Field test 15: Le Moule (Guadeloupe) sat in the Portland refusal; its name shares no word with the ask
+    moule = {"source": "divisions_area", "id": "gp", "name": "Le Moule", "country": "GP", "subtype": "locality",
+             "bbox": [-61.4, 16.3, -61.3, 16.4], "similarity": 1.0}
+    out, _ = _with_geocoders({"ids": [*_PORTLAND_GAZET, moule]}, [], lambda: tools.geocode("Portland"), reverse=_STATE_OF)
+    assert out["ambiguous"] and len(out["candidates"]) == 2, out["candidates"]
+    assert "Le Moule" not in str(out) and out["geocode_note"].startswith("2 places match"), out
+
+
+def t_geocode_note_names_the_state():
+    # Field test 15: the refusal named Oregon and Maine while the note still gave 45.5N 122.7W
+    out, _ = _with_geocoders({"ids": _PORTLAND_GAZET}, [], lambda: tools.geocode("Portland"), reverse=_STATE_OF)
+    note = out["geocode_note"]
+    assert "Oregon, United States" in note and "Maine, United States" in note and "122.7W" not in note, note
+    assert "using Portland (Oregon" in note, note
+
+
+def t_search_imagery_names_an_empty_window_at_the_cap():
+    # Field test 15: Hobet's 2016 window found 0 scenes at the cap and nothing said so
+    saved = tools._client.post
+    class R:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"features": []}
+    tools._client.post = lambda *a, **k: R()
+    try:
+        out = tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1], max_cloud_cover=15)
+        bare = tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1])
+    finally:
+        tools._client.post = saved
+    assert "0 scenes at max_cloud_cover 15" in out["note"] and "higher cap" in out["note"], out
+    assert "note" not in bare, bare
+
+
+def t_search_imagery_folds_reprocessed_duplicates():
+    # Field test 18: Planetary Computer served a reprocessed scene twice and the reason compared it with itself
+    saved = tools._client.post
+    box = {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}
+    feat = lambda i, base, when="2023-08-18T16:38:41.024000Z", tile="15SXS", cc=0.0144: {
+        "id": i, "collection": "sentinel-2-l2a", "bbox": [0, 0, 1, 1], "geometry": box, "assets": {},
+        "properties": {"datetime": when, "eo:cloud_cover": cc, "s2:mgrs_tile": tile, "s2:processing_baseline": base}}
+    half = {**feat("S2A_T15SYS_20241026", "05.10", tile="15SYS"), "bbox": [0.5, 0, 1.5, 1],
+            "geometry": {"type": "Polygon", "coordinates": [[[0.5, 0], [1.5, 0], [1.5, 1], [0.5, 1], [0.5, 0]]]}}
+    half["properties"]["eo:cloud_cover"] = 0.0  # clearer than the pick by less than the 0.1% the reason prints, as live
+    second_pass = feat("S2A_T15SXS_PASS2", "05.10", when="2023-08-18T18:18:41.024000Z", cc=80.0)
+    other = {**feat("S2A_OTHER_DAY", "05.09"), "properties": {"datetime": "2023-08-10T16:38:41Z", "eo:cloud_cover": 30.0, "s2:mgrs_tile": "15SXS"}}
+    class R:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"features": [half, feat("S2A_T15SXS_20230819", "05.09"), feat("S2A_T15SXS_20241026", "05.10"), second_pass, other]}
+    tools._client.post = lambda *a, **k: R()
+    try:
+        out = tools.search_imagery("planetary-computer", ["sentinel-2-l2a"], bbox=[0, 0, 1, 1])
+    finally:
+        tools._client.post = saved
+    ids = [i["id"] for i in out["items"]]
+    assert out["count"] == 4 and out["folded_duplicates"] == 1 and "S2A_T15SXS_20241026" in ids and "S2A_T15SXS_20230819" not in ids, out
+    assert "S2A_T15SXS_PASS2" in ids, ids  # a same-day second pass is a different scene
+    assert "older processing of the same scene" in out["note"] and "newest" in out["note"], out["note"]
+    # the half-covering tile ties on 0.0% cloud: the pick is the clearest, not a contrast with it
+    rec = out["recommended"]
+    assert rec["id"] == "S2A_T15SXS_20241026" and "not a tradeoff" in rec["reason"] and " but " not in rec["reason"], rec
+
+
+def t_compare_dates_cloud_caveat_names_side_and_scene():
+    # Field test 15: Rolling Fork's before scene was 46% cloud and only the cloud field said so
+    ok = lambda **kw: {"map_path": "x.html"}
+    cav = _compare_fixture(46, ok)["caveat"][0]
+    assert "before scene S2B_31TBF_20240101_0_L2A 46%" in cav, cav
+    assert "caveat" not in _compare_fixture(10, ok)
+
+
+def t_stack_facts_geocoded_is_the_tools_alone():
+    # Field test 15: a caller's {"geocoded": "nominatim"} for a hand-picked box credited a lookup that never ran
+    out = _compare_fixture(1, lambda **kw: {"map_path": "x.html"}, stack_facts={"geocoded": "nominatim"})
+    assert out["stack_facts_ignored"] == ["geocoded"], out
+    assert tools._map_stack_facts([], [], {"geocoded": "nominatim"}, [0, 0, 1, 1])["geocoded"] is False
+    # a box geocode returned keeps the claim, with its source, matched at 4 decimals
+    tools._record_geocode({"bbox": [10.00001, 20, 11, 21], "source": "gazet"})
+    keep = lambda v, b: tools._map_stack_facts([], [], {"geocoded": v}, b)["geocoded"]
+    assert keep("gazet", [10, 20, 11, 21]) == "gazet"
+    assert keep("nominatim", [10, 20, 11, 21]) is False, "source must match"
+    assert keep("gazet", [10, 20, 12, 21]) is False, "a box geocode never returned"
+    token = tools._tool_geocoded.set("gazet")
+    try:
+        assert tools._map_stack_facts([], [], {"geocoded": "nominatim"}, [0, 0, 1, 1])["geocoded"] == "gazet"
+    finally:
+        tools._tool_geocoded.reset(token)
+
+
+def t_geocode_accent_strip_matches_zurich():
+    assert tools._names_the_ask("Zürich", "Zurich") and not tools._names_the_ask("Le Moule", "Portland")
+
+
+def t_one_scene_key_in_recommended():
+    # Casco Bay: a 100% scene at 23% cloud and a newer 68% scene at 5%. Coverage is outside the
+    # tie band of the 100% one, so the key decides, not recency
+    full = {"id": "full", "datetime": "2026-10-10T15:00:00Z", "cloud_cover": 23.0, "covers_aoi_pct": 100.0}
+    part = {"id": "part", "datetime": "2026-10-21T15:00:00Z", "cloud_cover": 5.0, "covers_aoi_pct": 68.0}
+    assert tools._recommend([part, full])["id"] == "full"
+    # inside the tie bands and the recency band, _scene_key picks: the newer scene is no better on it
+    a = {"id": "a", "datetime": "2026-10-10T15:00:00Z", "cloud_cover": 6.0, "covers_aoi_pct": 99.0}
+    b = {"id": "b", "datetime": "2026-10-13T15:00:00Z", "cloud_cover": 3.0, "covers_aoi_pct": 97.0}
+    rec = tools._recommend([a, b])
+    assert rec["id"] == "a" and "and newest of" not in rec["reason"] and "best on coverage, then cloud, of 2 near-equal scenes within 7 days of the newest" in rec["reason"], rec
+    # outside the recency band the newer look still wins the tie, as stop 8 set it
+    c = {**b, "id": "c", "datetime": "2026-10-25T15:00:00Z"}
+    rec = tools._recommend([a, c])
+    assert rec["id"] == "c", rec
+    # an archive with no cloud figures: a dead tie keeps the newest, not the id as text
+    old = {"id": "a", "datetime": "2026-10-10T15:00:00Z", "cloud_cover": None, "covers_aoi_pct": 90.0}
+    new = {"id": "z", "datetime": "2026-10-12T15:00:00Z", "cloud_cover": None, "covers_aoi_pct": 90.0}
+    assert tools._recommend([old, new])["id"] == "z"
+
+
+def t_postcard_prints_the_uncovered_wedge_on_the_card():
+    saved = tools._client.get, tools._get_json
+    tools._client.get = lambda url, **k: _ImgResp(200)
+    tools._get_json = lambda url, **k: {"bbox": [-71, 43, -69, 44.5], "geometry": _SLANT, "license": "x"}
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            p = str(Path(d) / "c.html")
+            out = tools.render_postcard("planetary-computer", "landsat-c2-l2", "I", "P", "2026-10-21",
+                                        caption="Casco Bay", out_path=p, bbox=_CASCO)
+            html = Path(p).read_text()
+    finally:
+        tools._client.get, tools._get_json = saved
+    want = f"{out['uncovered_pct']:.1f}% of the box uncovered, mostly {out['uncovered_side']}"
+    assert want in html and "Casco Bay" in html, (want, out)
+
+
+def t_map_subtitle_prints_the_uncovered_wedge():
+    lay = [{"type": "raster", "name": "r", "tiles": "https://titiler.xyz/x/{z}/{x}/{y}.png", "bounds": [0, 0, 10, 4]}]
+    with tempfile.TemporaryDirectory() as d:
+        p = str(Path(d) / "m.html")
+        out = tools.render_map("t", [0, 0, 10, 10], lay, subtitle="hello", out_path=p)
+        html = Path(p).read_text()
+        assert f"{out['state']['uncovered_pct']:.1f}% of the box uncovered, mostly north" in html and "hello" in html, out
+        full = [{**lay[0], "bounds": [0, 0, 10, 10]}]
+        tools.render_map("t", [0, 0, 10, 10], full, out_path=p)
+        assert "uncovered" not in Path(p).read_text()
+
+
+class _StatsResp:
+    status_code = 200
+
+    def __init__(self, body):
+        self._b = body
+
+    def json(self):
+        return self._b
+
+    def raise_for_status(self):
+        pass
+
+
+def _stretch_env(item_assets, calls):
+    """Stub the item fetch and the tiler statistics POST; returns the restore function."""
+    saved = tools._get_json, tools._client.post
+    item = {"bbox": [0, 0, 2, 2], "assets": item_assets}
+    tools._get_json = lambda url, **k: item
+
+    def post(url, **k):
+        if "statistics" not in url:
+            return _StatsResp({"id": "mosaic1"})  # the PC mosaic registration shares this POST
+        calls.append(url)
+        return _StatsResp({"b1": {"min": 0, "max": 99999, "percentile_2": 14000.0, "percentile_98": 15500.0}})
+
+    tools._client.post = post
+    tools._STRETCH.clear()
+    tools._ITEMS.clear()
+
+    def restore():
+        tools._get_json, tools._client.post = saved
+        tools._STRETCH.clear()
+        tools._ITEMS.clear()
+
+    return restore
+
+
+def _stretch_layer(**kw):
+    return {"type": "item", "name": "lst", "catalog": "planetary-computer", "collection_id": "modis-11A1-061",
+            "item_id": "I1", "assets": ["LST_Day_1km"], **kw}
+
+
+def t_stretch_from_data_when_no_rescale():
+    # field test 15: MODIS LST drew black on a guessed rescale and took 2 hand-tuned tries
+    calls = []
+    restore = _stretch_env({"LST_Day_1km": {"raster:bands": [{"scale": 0.02}]}}, calls)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            r = tools.render_map("t", [0, 0, 1, 1], [_stretch_layer()], out_path=str(Path(d) / "a.html"))
+        st = r["state"]["layers"][0]
+        # raw numbers, not x0.02 physical: tiles are raw, so a scaled stretch would draw black
+        assert st["rescale_used"] == "14000,15500", st
+        assert "2nd to 98th percentile" in st["rescale_basis"] and "box" in st["rescale_basis"], st
+        assert "rescale=14000%2C15500" in st["tiles"], st["tiles"]
+        assert len(calls) == 1
+    finally:
+        restore()
+
+
+def t_stretch_given_rescale_passes_through():
+    calls = []
+    restore = _stretch_env({"LST_Day_1km": {}}, calls)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            r = tools.render_map("t", [0, 0, 1, 1], [_stretch_layer(rescale="13500,15500")], out_path=str(Path(d) / "a.html"))
+        st = r["state"]["layers"][0]
+        assert st["rescale_used"] == "13500,15500" and st["rescale_basis"] == "given", st
+        assert "rescale=13500%2C15500" in st["tiles"] and not calls
+    finally:
+        restore()
+
+
+def t_stretch_leaves_expression_visual_and_categorical_alone():
+    calls = []
+    restore = _stretch_env({"map": {"raster:bands": [{"classification:classes": [{"value": 10}]}]}, "visual": {}}, calls)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            out = str(Path(d) / "a.html")
+            e = tools.render_map("t", [0, 0, 1, 1], [{**_stretch_layer(), "assets": None, "expression": "(nir-red)/(nir+red)"}], out_path=out)
+            assert e["state"]["layers"][0]["rescale_used"] == "-1,1", e
+            v = tools.render_map("t", [0, 0, 1, 1], [_stretch_layer(assets=["visual"])], out_path=out)
+            c = tools.render_map("t", [0, 0, 1, 1], [_stretch_layer(assets=["map"])], out_path=out)
+            w = tools.render_map("t", [0, 0, 1, 1], [_stretch_layer(colormap_name="esa-worldcover")], out_path=out)
+        for r in (v, c, w):
+            assert "rescale_used" not in r["state"]["layers"][0] and "rescale=" not in r["state"]["layers"][0]["tiles"], r
+        assert not calls
+    finally:
+        restore()
+
+
+def t_stretch_fetched_once_per_item_asset_box():
+    calls = []
+    restore = _stretch_env({"LST_Day_1km": {}}, calls)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            for i in range(2):
+                tools.render_map("t", [0, 0, 1, 1], [_stretch_layer()], out_path=str(Path(d) / f"{i}.html"))
+            assert len(calls) == 1, calls
+            tools.render_map("t", [0, 0, 1, 2], [_stretch_layer()], out_path=str(Path(d) / "c.html"))
+            assert len(calls) == 2, calls
+        # tile_url_template shares the same stretch and the same cache
+        u = tools.tile_url_template("planetary-computer", "modis-11A1-061", "I1", assets=["LST_Day_1km"], bbox=[0, 0, 1, 2])
+        assert "rescale=14000%2C15500" in u and len(calls) == 2, (u, calls)
+    finally:
+        restore()
+
+
+def t_stretch_one_range_across_a_coverage_set():
+    # 2 tiles of one product side by side on 2 ranges draw a seam: one temperature, 2 colours
+    calls = []
+    restore = _stretch_env({"LST_Day_1km": {}}, calls)
+    post = tools._client.post
+
+    def per_item(url, **k):
+        r = post(url, **k)
+        if "statistics" in url and "I2" in url + json.dumps(k, default=str):
+            r._b = {"b1": {"percentile_2": 13900.0, "percentile_98": 15800.0}}
+        return r
+
+    tools._client.post = per_item
+    try:
+        items = [{"id": i, "catalog": "planetary-computer", "collection": "modis-11A1-061", "bbox": [0, 0, 2, 2]} for i in ("I1", "I2")]
+        layer = {"type": "coverage_set", "set": {"date": "d", "items": items}, "assets": ["LST_Day_1km"]}
+        with tempfile.TemporaryDirectory() as d:
+            r = tools.render_map("t", [0, 0, 1, 1], [layer], out_path=str(Path(d) / "a.html"))
+        a, b = r["state"]["layers"][:2]
+        assert len(calls) == 2, calls
+        assert a["rescale_used"] == b["rescale_used"] == "13900,15800", (a, b)
+        assert "widest of 2 scenes" in a["rescale_basis"], a
+        assert "rescale=13900%2C15800" in a["tiles"] and "rescale=13900%2C15800" in b["tiles"]
+    finally:
+        restore()
+
+
+def t_pc_mosaic_register_reads_searchid_or_id():
+    # field test 16: Planetary Computer's register reply switched "id" to
+    # "searchid" and every WorldCover map died on KeyError; both keys serve
+    class R:
+        def __init__(self, j): self._j = j
+        def raise_for_status(self): pass
+        def json(self): return self._j
+    saved_post = tools._client.post
+    try:
+        tools._client.post = lambda url, **kw: R({"searchid": "pc1-new"})
+        tools._pc_mosaic_cache.pop("esa-worldcover:A", None)
+        assert tools._pc_mosaic_id("esa-worldcover", "A") == "pc1-new"
+        tools._client.post = lambda url, **kw: R({"id": "old-style"})
+        tools._pc_mosaic_cache.pop("esa-worldcover:B", None)
+        assert tools._pc_mosaic_id("esa-worldcover", "B") == "old-style"
+        tools._client.post = lambda url, **kw: R({"links": []})
+        tools._pc_mosaic_cache.pop("esa-worldcover:C", None)
+        import httpx as _hx
+        try:
+            tools._pc_mosaic_id("esa-worldcover", "C")
+            assert False, "no id should raise the HTTPError the fallback catches"
+        except _hx.HTTPError:
+            pass
+    finally:
+        tools._client.post = saved_post
 
 
 def t_versions_agree():

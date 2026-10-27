@@ -17,8 +17,10 @@ inline markup the cards use (<b>, <em>).
 
 from __future__ import annotations
 
+import html
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -28,6 +30,7 @@ PAGE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="only light">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
@@ -37,6 +40,7 @@ PAGE = """<!doctype html>
   --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
   --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
   --calm: #2e7d32; --blue: #1d4e8f;
+  color-scheme: only light;
 }
 * { box-sizing: border-box; }
 body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
@@ -54,8 +58,8 @@ main { padding: 10px 24px 60px; }
 h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
   display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
 h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(480px, 100%), 1fr)); gap: 16px; }
-@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+.grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; } }
 .card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .card .top { display: flex; align-items: center; gap: 10px; }
 .card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
@@ -70,14 +74,36 @@ details.data summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing:
 .learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
 .learning b { color: var(--accent); font-style: normal; }
 .shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.headline { font-size: 12.5px; color: var(--mid); border-left: 3px solid var(--accent); padding-left: 10px; }
+.headline b { color: var(--accent); }
+details.more > summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+details.more[open] > summary { margin-bottom: 10px; }
+details.more > * + * { margin-top: 10px; }
+@media (max-width: 999px) {
+  .card { display: grid; grid-template-columns: 300px minmax(0, 1fr); grid-auto-rows: min-content; align-content: start; gap: 8px 20px; padding: 16px; }
+  .card > * { grid-column: 2; min-width: 0; }
+  .card > .fig { grid-column: 1; grid-row: 1 / span 5; align-self: start; }
+  .card.nofig { grid-template-columns: minmax(0, 1fr); }
+  .card.nofig > * { grid-column: 1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/10; object-fit: cover; }
+}
+@media (max-width: 700px) {
+  .card { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px; }
+  .card > *, .card > .fig { grid-column: 1; grid-row: auto; }
+  .card > .fig { order: -1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/7; }
+  .card .top { flex-wrap: wrap; }
+  .card .who { margin-left: 0; }
+}
 .repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
-.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; overflow-x: auto; white-space: pre; }
-.fig { position: relative; display: block; border: 1px solid var(--rule); text-decoration: none; }
-.fig img { width: 100%; display: block; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fig { position: relative; display: block; min-height: 44px; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; aspect-ratio: 10/7; }
+.fig:not(:has(img)) { aspect-ratio: 16/10; background: var(--paper); }
 .fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
   background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
 .fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
-footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 0 40px; }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 16px 40px; }
 </style>
 </head>
 <body>
@@ -189,22 +215,35 @@ def _preflight_server_freshness() -> None:
 
 
 def _card(n: int, c: dict) -> str:
-    parts = [f'<div class="card"><div class="top"><div class="num">{n}</div>'
+    def first(t: str) -> str:
+        t = re.sub(r"<[^>]+>", "", t or "")
+        m = re.match(r"(.+?[.!?])(\s|$)", t)
+        t = m.group(1) if m else t
+        return html.escape(t if len(t) <= 190 else t[:190].rsplit(" ", 1)[0] + "…")
+
+    cls = "card" if c.get("artifact") else "card nofig"
+    parts = [f'<div class="{cls}"><div class="top"><div class="num">{n}</div>'
              f'<div class="tag">{c["tag"]}</div><div class="who">{c.get("who", "")}</div></div>']
     parts.append(f'<div><div class="label">Input</div><div class="prompt">{c["prompt"]}</div></div>')
     read_label = "Our read" if c.get("returned") else "Output"
-    parts.append(f'<div class="answer"><div class="label">{read_label}</div>{c["answer"]}</div>')
+    parts.append(f'<div><div class="label">{read_label}</div><div class="answer">{first(c["answer"])}</div></div>')
+    if c.get("learning"):
+        m = re.match(r"\s*<b>(.*?)</b>", c["learning"], re.S)
+        head = html.escape(re.sub(r"<[^>]+>", "", m.group(1))) if m else first(c["learning"])
+        parts.append(f'<div class="headline"><b>Learning →</b> {head}</div>')
     if c.get("artifact"):
         img = f'<img src="{c["image"]}" alt="artifact produced by example {n}" loading="lazy">' if c.get("image") else ""
         label = c.get("artifact_label", "live artifact ↗")
         parts.append(f'<a class="fig" href="{c["artifact"]}" target="_blank" title="open the live artifact">{img}<span class="open">{label}</span></a>')
+    more = [f'<div class="answer"><div class="label">{read_label}</div>{c["answer"]}</div>']
     if c.get("returned"):
-        parts.append(f'<details class="data"><summary>show the data</summary>'
-                     f'<div class="returned">{c["returned"]}</div></details>')
+        more.append(f'<details class="data"><summary>show the data</summary>'
+                    f'<div class="returned">{c["returned"]}</div></details>')
     if c.get("learning"):
-        parts.append(f'<div class="learning"><b>Learning →</b> {c["learning"]}</div>')
+        more.append(f'<div class="learning"><b>Learning →</b> {c["learning"]}</div>')
     if c.get("shows"):
-        parts.append(f'<div class="shows">{c["shows"]}</div>')
+        more.append(f'<div class="shows">{c["shows"]}</div>')
+    parts.append('<details class="more"><summary>full read</summary>' + "\n".join(more) + "</details>")
     parts.append("</div>")
     return "\n".join(parts)
 
@@ -240,7 +279,9 @@ def _autoshoot(case: dict, cases_path: Path) -> None:
 
 
 def build(cases_path: str | Path) -> Path:
-    cases_path = Path(cases_path)
+    # _autoshoot resolves the artifact, so the cases folder must be resolved too:
+    # on macOS /tmp is /private/tmp and the still's relpath climbs to / otherwise
+    cases_path = Path(cases_path).resolve()
     _preflight_server_freshness()
     _preflight_version_bumped()
     spec = json.loads(cases_path.read_text(encoding="utf-8"))
