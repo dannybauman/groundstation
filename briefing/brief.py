@@ -217,8 +217,8 @@ def _scene_vs_last_run(prev: dict, best: dict | None, change: dict | None) -> st
     mean, old_mean = (change["current"]["mean"] if change else None), prev.get("ndvi_mean")
     out = [f"pick changed: {old_pick} -> {pick}"] if pick != old_pick else []
     if None in (base, old_base, mean, old_mean):
-        who = "neither run has" if base is None and old_base is None else "this run has" if base is None else "the last run had"
-        out.append(f"{who} no NDVI comparison, so unchanged cannot be claimed")
+        who = "neither run has an" if base is None and old_base is None else "this run has no" if base is None else "the last run had no"
+        out.append(f"{who} NDVI comparison, so unchanged cannot be claimed")
     else:
         if base != old_base:
             out.append(f"baseline changed: {old_base} -> {base}")
