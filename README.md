@@ -129,42 +129,42 @@ The first `search_datasets` call takes 20 to 30 seconds while collection lists c
 | `next_pass` | when a satellite could next image a place | Celestrak orbits, constellations read from [eo-predictor](https://github.com/developmentseed/eo-predictor)'s catalog |
 | `conditions_brief` | current conditions around a place in one call: dryness, wind, events, the latest look, the next pass | the tools above |
 
-The tools try to flag when a number should not be trusted. A tool that returns a derived number also returns, on the same object, the conditions under which it should not be read at face value: a cloudy scene behind a change figure, statistics that cover a whole tile, a scene the tiler cannot read. The rule is in `docs/adr-caveats.md`.
+When a tool returns a derived number, it tries to say what could make that number misleading: a cloudy scene behind a change figure, statistics that cover a whole tile instead of the place, a scene the tiler could not read. Those caveats come back on the same object as the number. How that works is in `docs/adr-caveats.md`.
 
-Every artifact carries a Stack panel. It shows the pipeline that made it, in order, with only the components that actually ran and Development Seed's own listed first. `docs/stack.md` is the curated source, and adding a tool is one entry.
+Every map, postcard and brief has a Stack panel listing the components that made it, in order, only the ones that actually ran. `docs/stack.md` is the list it draws from, and adding a tool is one entry.
 
-The skills in `skills/` carry the judgment: which catalog for what, asset conventions, index recipes, and "always end a spatial answer with a map".
+The skills in `skills/` hold the know-how an agent needs: which catalog to use for what, how the assets are named, how to compute the common indexes, and to always end a spatial answer with a map.
 
-## Earth briefs you
+## Briefings
 
-Briefings run without anyone asking. Each brief has fresh scenes, events, weather, an NDVI change signal against last month, a CALM, WATCH or ACT level, and suggested next steps, as a shareable HTML page. It keeps a memory per place, so "what changed" means changed since the last run.
+A briefing runs on a schedule and tells you what changed at a place: fresh scenes, events, weather, an NDVI change against last month, a CALM, WATCH or ACT level, and what to look at next, as an HTML page you can share. It remembers the last run for each place, so "what changed" means since last time.
 
-Scheduling it with cron or launchd, Slack delivery, and running the synthesis on a local model are in `docs/briefing.md`.
+Scheduling with cron or launchd, Slack delivery, and writing the summary with a local model are in `docs/briefing.md`.
 
-## Be a good neighbor: titiler.xyz
+## titiler.xyz is shared
 
-All tiling, previews and pixel math ride titiler.xyz by default, a free shared endpoint that Development Seed runs as a demo. It rate-limits (HTTP 429) under heavy use. For scheduled briefings, batch runs, or a demo to a room, run your own:
+Tiling, previews and pixel math go through titiler.xyz by default. It is a free endpoint Development Seed runs as a demo, and it rate-limits (HTTP 429) when it gets busy. For scheduled briefings, batch runs, or a demo in front of a room, run your own:
 
 ```bash
 docker compose up -d titiler                          # TiTiler is one container, see compose.yml
 export GROUNDSTATION_TITILER=http://localhost:8000    # everything routes there
 ```
 
-Any TiTiler deployment with the `/stac` router works. One caveat: NAIP and Landsat on Earth Search are in requester-pays buckets. titiler.xyz carries AWS credentials for those, and a local TiTiler returns 500s on them unless you provide your own (see `compose.yml`), or use Planetary Computer's copies.
+Any TiTiler with the `/stac` router works. One catch: NAIP and Landsat on Earth Search sit in requester-pays buckets. titiler.xyz has AWS credentials for those; a local TiTiler returns 500s on them until you add your own (see `compose.yml`) or use Planetary Computer's copies.
 
-## Reliability
+## Checks
 
-3 layers of checks:
+3 kinds:
 
 - `uv run evals/unit_checks.py`: offline and deterministic, runs in CI on every push
 - `uv run evals/run_evals.py`: live checks against the real endpoints, on demand and weekly in CI
-- `uv run evals/brief_checks.py`: grounding checks on generated briefs. Every claimed event must exist in the input data
+- `uv run evals/brief_checks.py`: checks that every event a brief claims exists in its input data
 
 ## More
 
-- `docs/field-test-*.html`: the field tests, one page per round, the highest № is the newest. Each runs real prompts through an agent, grades the answers, and lists the fixes that round produced. `docs/field-test.html` and `docs/examples.md` are the first edition, served at `/docs/field-test.html` when the console is running
-- `docs/architecture.md`: how it fits together, the design decisions, and what is deliberately not built
-- `docs/plan-2026-10-devseed-stack.md`: where it is going next: Zarr through titiler.xyz, HRRR smoke in the briefs, cross-catalog discovery, stac-geoparquet archives, and a hosted toolset on mcp-toolsets-runtime, each tied to the Development Seed work it rides on
-- Deep exploration hands off to [stac-map](https://github.com/developmentseed/stac-map) (Pete Gadomski), which renders COGs client-side with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster) (Kyle Barron). Tiling and pixel math ride [TiTiler](https://github.com/developmentseed/titiler)
+- `docs/field-test-*.html`: the field tests, one page per round, highest № is the newest. Each one runs real prompts through an agent, grades the answers, and lists what got fixed. `docs/field-test.html` and `docs/examples.md` are the first edition, served at `/docs/field-test.html` when the console is running
+- `docs/architecture.md`: how it fits together, the design decisions, and what is on purpose not built
+- `docs/plan-2026-10-devseed-stack.md`: what comes next: Zarr through titiler.xyz, HRRR smoke in the briefs, cross-catalog discovery, stac-geoparquet archives, and a hosted toolset on mcp-toolsets-runtime, each tied to the Development Seed work it builds on
+- For deeper exploration there is [stac-map](https://github.com/developmentseed/stac-map) (Pete Gadomski), which renders COGs in the browser with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster) (Kyle Barron). Tiling and pixel math use [TiTiler](https://github.com/developmentseed/titiler)
 
 MIT licensed, see `LICENSE`.
