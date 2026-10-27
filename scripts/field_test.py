@@ -291,6 +291,9 @@ def build(cases_path: str | Path) -> Path:
         cards = []
         for c in rnd["cases"]:
             n += 1
+            # the input is what a person asked; a command belongs in the data block (field tests 8, 18 and 19 slipped)
+            if re.match(r"^\S+\.(py|sh)\b|^(uv|python3?|node|npx)\s", c["prompt"]) or " --" in c["prompt"]:
+                sys.exit(f"case {n}: the input reads as a command, not an ask: {c['prompt'][:80]!r}")
             _autoshoot(c, cases_path)
             cards.append(_card(n, c))
         rounds_html.append(f'<h2 class="round">{rnd["name"]}</h2>\n<div class="grid">\n' + "\n\n".join(cards) + "\n</div>")
