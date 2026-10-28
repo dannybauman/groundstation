@@ -279,10 +279,12 @@ def _autoshoot(case: dict, cases_path: Path) -> None:
 
 
 def _autoshoot_page(html_path: Path) -> Path | None:
-    """Shoot a full page still of the compiled field test, so every run has visual proof."""
+    """Shoot the first screen of the compiled field test, so every run has visual proof.
+
+    Unlike a map still this reshoots every build: the page changes whenever the
+    cases do, and a same-day rerun reuses the name
+    """
     png = html_path.with_suffix(".png")
-    if png.exists():
-        return png
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
         from groundstation.tools import _snapshot_artifact

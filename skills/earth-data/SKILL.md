@@ -104,9 +104,14 @@ A field test is a showcase page: a set of prompts run live, each with its output
 
 - run every case for real first: live searches, real artifacts written to `demo/`. A field test with made-up outputs is worthless.
 - write a cases JSON (in `docs/` for repo tests, or in `groundstation/` under the folder the chat works in). Copy the shape of `docs/field-test-2026-07-22.cases.json`: rounds of cases, each with tag, who, prompt, answer, artifact, returned, optional image, learning, shows.
-- build the page: `uv run scripts/field_test.py <cases-file>.cases.json` (the script owns the design, builds the HTML, shoots stills for each map case, and shoots a full page screenshot as `<name>.png`).
+- build the page: `uv run scripts/field_test.py <cases-file>.cases.json` (the script owns the design, builds the HTML, shoots stills for each map case, and screenshots the page's first screen as `<name>.png`).
 - include what went wrong as `learning` lines. Honest stumbles are the most credible part of the format.
-- format the chat reply cleanly: 1-line lede, a concise markdown table with clean relative links (never raw absolute filesystem paths), grouped caveats, and return the field test screenshot at the end (in an `images` block on Astrolabe, or inline markdown image in Claude Code). End by asking which prompt to explore deeper.
+- the chat reply, in this order:
+  1. 1 lede sentence on what ran and how it went.
+  2. a short table, `# | Prompt | Result | Scene date | Artifact`, with descriptive link labels and paths relative to the folder the chat works in (`[Mount Hood 3D](groundstation/img/...)`), never absolute machine paths.
+  3. caveats and learnings grouped under short bold heads that name what actually came up.
+  4. the page screenshot the build already took, as a markdown image (`![Field test](groundstation/field-test-<date>.png)`). A host with its own way to show images uses that instead.
+  5. 1 question: which prompt to go deeper on.
 
 ## Monitoring and briefings
 
