@@ -27,6 +27,8 @@ The value here is the groundstation tools. If they aren't visible yet, the serve
 
 When the ask names no place and no question (the Astrolabe card's first press, which says "ask me which place to look at", or "show me what this can do"), do not pick a place for them. Open the way the groundstation skill's "The first reply" says: 1 short message that asks what they want from Earth data and, in the same breath, offers to run a 3-prompt field test as a first show, then wait. Anything that names a place or a question skips the offer and starts the flow below.
 
+On a yes to the 3-prompt field test offer: run the cases live and build the field-test page following "Field tests" below. Never stop at a text-only dump of raw paths.
+
 ## The standard flow
 
 1. `geocode` the place (concise names work best: "Barotse Floodplain", not "the floodplain area along the Zambezi in western Zambia").
@@ -96,15 +98,20 @@ Triggers: "postcard", "share card", "something I can post", "can I put this on L
 - The license line only appears when the collection declares a real one. Earth Search says `proprietary` for Sentinel-2, which is STAC's placeholder rather than the actual terms, so the card leaves it off instead of printing something misleading.
 - Where and whether to post is the user's decision, never yours. Hand them the file and say what's in it.
 
-## Field tests (only when asked)
+## Field tests (only when asked or on a yes to the first offer)
 
-A field test is a showcase page: a set of prompts run live, each with its output, its artifact linked, and any learnings — the repeatable "watch it actually work" format. Users normally don't want this; they want their specific question answered directly. Build one only when someone explicitly asks for a field test, a test report, or a page showing off a series of use cases.
+A field test is a showcase page: a set of prompts run live, each with its output, its artifact linked, and any learnings: the repeatable "watch it actually work" format. Users normally want their specific question answered directly; run a field test only when someone asks for one, asks for a demo, or says yes to the 3-prompt offer above.
 
-- run every case for real first — live searches, real artifacts written to `demo/`. A field test with made-up outputs is worthless.
-- write a cases JSON next to the existing ones in `docs/` (copy the shape of `docs/field-test-2026-07-22.cases.json`: rounds of cases, each with tag / who / prompt / answer / artifact / optional image + learning + shows).
-- build the page: `uv run scripts/field_test.py docs/<name>.cases.json` — the script owns the design, you own the cases.
+- run every case for real first: live searches, real artifacts written to `demo/`. A field test with made-up outputs is worthless.
+- write a cases JSON (in `docs/` for repo tests, or in `groundstation/` under the folder the chat works in). Copy the shape of `docs/field-test-2026-07-22.cases.json`: rounds of cases, each with tag, who, prompt, answer, artifact, returned, optional image, learning, shows.
+- build the page: `uv run scripts/field_test.py <cases-file>.cases.json` (the script owns the design, builds the HTML, shoots stills for each map case, and screenshots the page's first screen as `<name>.png`).
 - include what went wrong as `learning` lines. Honest stumbles are the most credible part of the format.
-- screenshots are optional; artifact links are not.
+- the chat reply, in this order:
+  1. 1 lede sentence on what ran and how it went.
+  2. a short table, `# | Prompt | Result | Scene date | Artifact`, with descriptive link labels and paths relative to the folder the chat works in (`[Mount Hood 3D](groundstation/img/...)`), never absolute machine paths.
+  3. caveats and learnings grouped under short bold heads that name what actually came up.
+  4. the page screenshot the build already took, as a markdown image (`![Field test](groundstation/field-test-<date>.png)`). A host with its own way to show images uses that instead.
+  5. 1 question: which prompt to go deeper on.
 
 ## Monitoring and briefings
 

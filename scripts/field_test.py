@@ -278,6 +278,25 @@ def _autoshoot(case: dict, cases_path: Path) -> None:
         print(f"  no still for {src.name}: {e}", file=sys.stderr)
 
 
+def _autoshoot_page(html_path: Path) -> Path | None:
+    """Shoot the first screen of the compiled field test, so every run has visual proof.
+
+    Unlike a map still this reshoots every build: the page changes whenever the
+    cases do, and a same-day rerun reuses the name
+    """
+    png = html_path.with_suffix(".png")
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+        from groundstation.tools import _snapshot_artifact
+
+        png.write_bytes(_snapshot_artifact(str(html_path), width=1200, height=900))
+        print(f"  shot page {png.name} ({png.stat().st_size // 1024} KB)")
+        return png
+    except Exception as e:
+        print(f"  no page still for {html_path.name}: {e}", file=sys.stderr)
+        return None
+
+
 def build(cases_path: str | Path) -> Path:
     # _autoshoot resolves the artifact, so the cases folder must be resolved too:
     # on macOS /tmp is /private/tmp and the still's relpath climbs to / otherwise
@@ -314,6 +333,7 @@ def build(cases_path: str | Path) -> Path:
     out = Path(cases_path).with_suffix("").with_suffix(".html")  # x.cases.json -> x.html
     out.write_text(html, encoding="utf-8")
     print(f"wrote {out} ({n} cases)")
+    _autoshoot_page(out)
     return out
 
 
