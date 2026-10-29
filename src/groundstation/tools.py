@@ -9,6 +9,7 @@ that scaffold as a toolset later.
 
 from __future__ import annotations
 
+import base64
 import contextvars
 import datetime as dt
 import hashlib
@@ -2484,7 +2485,10 @@ const originKey = (u) => u + (u.includes("?") ? "&" : "?") + "o=" + (location.or
 
 function addLayerTo(m, l, i) {
   const id = "layer" + i;
-  if (l.type === "raster") {
+  if (l.type === "raster" && l.image) {
+    m.addSource(id, { type: "image", url: l.image, coordinates: l.coordinates });
+    m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": l.opacity ?? 1 } });
+  } else if (l.type === "raster") {
     m.addSource(id, { type: "raster", tiles: [originKey(l.tiles)], tileSize: 256,
       ...(l.bounds ? { bounds: l.bounds } : {}) });
     m.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": l.opacity ?? 1 } });
@@ -2710,6 +2714,8 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
     measured over. A map of several layers runs _shared_stretch over all of
     them first, so this one-layer call only fills a layer nothing else shares
     """
+    if l.get("type") == "file":
+        return _file_layer(l, view)
     if l.get("type") != "item":
         return l
     l = _shared_stretch([l], view)[0]
@@ -2750,6 +2756,53 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
         **({"pc_fallback": True} if l.get("item_id") in _PC_FALLBACKS else {}),
         **({"fallback_tiles": fallback} if fallback else {}),
         **({"rescale_used": rescale, "rescale_basis": basis} if rescale else {}),
+    }
+
+
+def _file_layer(l: dict[str, Any], view: list[float] | None) -> dict[str, Any]:
+    """A {"type": "file"} layer (a local GeoTIFF) baked into one PNG.
+
+    rio-tiler reads the view's box in web mercator, honouring the file's nodata
+    and any orientation GDAL understands (south-up included), so the image sits
+    on the map's 4 corners with no tiler in the path
+    """
+    # ponytail: one image per layer, fine for an AOI, blurry for a continent; a local TiTiler (compose.yml) is the upgrade
+    from rio_tiler.io import Reader
+    from rio_tiler.colormap import cmap as _cmap
+
+    if not view:
+        raise ValueError("file layer needs the map's bbox")
+    w, s, e, n = view
+    path = str(l["path"])
+    # local only: a URL would let a prompt probe internal hosts; a public COG has its tiler route already
+    if "://" in path or path.lower().startswith("/vsi") or not Path(path).is_file():
+        raise ValueError("file layer path must be a local file; a public COG goes on as a raster layer through a TiTiler /cog tile URL")
+    import rasterio
+
+    # the console's agent passes paths from user prompts: GeoTIFF only, so a VRT
+    # or XML file cannot point GDAL at other files or internal URLs
+    with rasterio.open(path, driver="GTiff") as ds, Reader(path, dataset=ds) as r:
+        img = r.part(tuple(view), bounds_crs="epsg:4326", dst_crs="epsg:3857",
+                     indexes=l.get("bands"), nodata=l.get("nodata"), max_size=l.get("max_size", 1024))
+        fb = r.get_geographic_bounds("epsg:4326")
+    if l.get("rescale"):
+        lo, hi = (float(v) for v in str(l["rescale"]).split(","))
+        img = img.rescale(((lo, hi),))
+    if l.get("colormap"):
+        # class value -> "#rrggbb", e.g. a land-cover map's legend
+        img = img.apply_colormap({int(k): tuple(int(c.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)) + (255,)
+                                  for k, c in l["colormap"].items()})
+    elif l.get("colormap_name"):
+        img = img.apply_colormap(_cmap.get(l["colormap_name"]))
+    png = base64.b64encode(img.render(img_format="PNG")).decode()
+    return {
+        "type": "raster",
+        "name": l.get("name") or Path(path).name,
+        "image": "data:image/png;base64," + png,
+        "coordinates": [[w, n], [e, n], [e, s], [w, s]],
+        "bounds": [max(w, fb[0]), max(s, fb[1]), min(e, fb[2]), min(n, fb[3])],
+        "opacity": l.get("opacity", 1),
+        "local": True,
     }
 
 
@@ -2799,6 +2852,7 @@ def _layer_state(l: dict[str, Any], deferred: bool = False) -> dict[str, Any]:
         "kind": l.get("type"),
         **({"bounds": l["bounds"]} if l.get("bounds") else {}),
         **({"tiles": l["tiles"]} if l.get("tiles") else {}),
+        **({"local": True} if l.get("local") else {}),
         **({"fallback_tiles": l["fallback_tiles"]} if l.get("fallback_tiles") else {}),
         **({"rescale_used": l["rescale_used"], "rescale_basis": l["rescale_basis"]} if l.get("rescale_used") else {}),
         **({"opacity": l["opacity"]} if l.get("opacity") not in (None, 1) else {}),
@@ -3015,6 +3069,7 @@ def _map_stack_facts(
         "catalogs": sorted(by_catalog),
         "collections_by_catalog": by_catalog,
         "tiler_hosts": sorted(hosts),
+        "local_rasters": sum(1 for r in resolved if r.get("local")),
         "maplibre": True,  # both map artifacts render through MapLibre
         # facts this function can't see default to false — callers that
         # actually geocoded, fetched events, or draped terrain say so via
@@ -3201,6 +3256,11 @@ def render_map(
        "bbox": [w, s, e, n]}  # pass the item's bbox when you have it (from
                               # search results) — it skips a STAC re-fetch
       {"type": "raster", "name": ..., "tiles": "https://..{z}/{x}/{y}.."}
+      {"type": "file", "name": ..., "path": "/local/file.tif",
+       "bands": [1], "nodata": 255,  # both optional; the file's own nodata is used
+       "colormap": {"1": "#hex", ...} or "colormap_name": ..., "rescale": "lo,hi",
+       "opacity": ...}  # a raster with no STAC item and no tiler: read over bbox
+                        # with rio-tiler and embedded in the HTML as one image
       {"type": "geojson", "name": ..., "data": <FeatureCollection>, "color": "#hex",
        "fill_opacity": 0.35}  # polygons are filled, lines and points are not
       {"type": "coverage_set", "set": <full_coverage_set from search_imagery>,
@@ -3915,7 +3975,6 @@ def _postcard_html(
     dropped: list[dict[str, str]] | None = None,
     legends: list[dict[str, Any]] | None = None,
 ) -> str:
-    import base64
 
     return (
         _fill(_POSTCARD_TEMPLATE, {
