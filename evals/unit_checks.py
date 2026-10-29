@@ -3010,6 +3010,33 @@ def t_classifier_labels_in_map_out():
         tools._open_zone = saved
 
 
+def t_classifier_labels_stack_sources():
+    # a land cover polygon first, a water mask second: the mask fills only
+    # what the polygon left blank, 2 water values merge, land named null stays out
+    import numpy as np
+    import rasterio
+    from rasterio.warp import transform_geom
+
+    win = {"rows": (0, 10), "cols": (0, 10), "crs": "EPSG:32646", "transform": (10, 0, 500000, 0, -10, 100100)}
+    ring = [[500000, 100100], [500050, 100100], [500050, 100000], [500000, 100000], [500000, 100100]]
+    poly = {"type": "Feature", "properties": {"class": "forest"},
+            "geometry": transform_geom("EPSG:32646", "EPSG:4326", {"type": "Polygon", "coordinates": [ring]})}
+    mask = np.ones((10, 10), "uint8")
+    mask[:, 6:8], mask[:, 8:] = 3, 4  # freshwater, buffer ocean
+    mask[:, :2] = 4  # under the polygon: the polygon keeps it
+    with tempfile.TemporaryDirectory() as d:
+        path = str(Path(d) / "mask.tif")
+        with rasterio.open(path, "w", driver="GTiff", height=10, width=10, count=1, dtype="uint8",
+                           crs=win["crs"], transform=rasterio.Affine(*win["transform"]), nodata=255) as ds:
+            ds.write(mask, 1)
+        grid, names = tools._labels_grid([{"type": "FeatureCollection", "features": [poly]}, path], "class", win,
+                                         {"1": None, "3": "water", "4": "water"})
+        box = tools._labels_bbox([path, path])
+    assert names == ["forest", "water"], names
+    assert (grid[:, :5] == 1).all() and (grid[:, 5] == 0).all() and (grid[:, 6:] == 2).all(), grid
+    assert box[0] < box[2] and box[1] < box[3], box
+
+
 def t_embedding_store_decodes_and_picks_the_zone():
     # OlmoEarth: one group per UTM zone, int8 with -128 nodata and a signed
     # power rule in its attrs; the number is a feature, so it says so
