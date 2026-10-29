@@ -44,7 +44,7 @@ Ask before any download in the hundreds of megabytes. Delete downloads when the 
 
 ## 5. Look at it
 
-Put it on a `render_map` over imagery of the same place (`search_imagery` for a clear Sentinel-2 or NAIP scene). Class outlines go in as `geojson` layers, which are filled by default so classes read over imagery. Say plainly what you had to do by hand to get it on the map; that is a groundstation gap.
+Put it on a `render_map` over imagery of the same place (`search_imagery` for a clear Sentinel-2 or NAIP scene). A raster you downloaded or can open by URL, with no catalog or tiler behind it, goes on as a `file` layer (`path`, plus `colormap` for classes); its nodata stays clear. Vectors go in as `geojson` layers, which are filled by default. Say plainly what you had to do by hand to get it on the map; that is a groundstation gap.
 
 ## 6. Look for a pairing
 
