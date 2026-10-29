@@ -2326,6 +2326,15 @@ def t_pc_registration_timeout_falls_back_to_item_tiles():
         tools._PC_FALLBACKS.discard("X")
 
 
+def t_burned_area_tiles_draw_unburned_clear():
+    # Field test on Danny's Mac, 2026-10-25: MODIS burned area stores "did not
+    # burn" as 0, and an unmasked layer laid a black wash over eastern Oregon
+    t = tools.tile_url_template("earth-search", "modis-64A1-061", "X", assets=["Burn_Date"])
+    assert "nodata=0" in t, t
+    assert "nodata=" not in tools.tile_url_template("earth-search", "sentinel-2-l2a", "X")
+    assert "nodata=-9999" in tools.tile_url_template("earth-search", "sentinel-2-l2a", "X", nodata="-9999")
+
+
 def t_no_artifact_rides_the_watermarked_basemap():
     # Field test No.8: CARTO's free basemap began returning "API KEY REQUIRED"
     # tiles under every map. No artifact may reference it again.
