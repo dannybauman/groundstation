@@ -2944,6 +2944,67 @@ def t_zarr_uncurated_variable_in_store_is_accepted():
     assert "total_precipitation_6hr" in tools.describe_collection("zarr", "weatherbench2-era5")["variables"]
 
 
+def t_classifier_labels_in_map_out():
+    # labels over one year's embeddings, a class map for another; the 2025 east
+    # half flips to the other class's signature, so changes name that move,
+    # and the caveats travel with the agreement number
+    import numpy as np
+    import rasterio
+    import zarr
+    from rasterio.warp import transform
+
+    xs, ys = transform("EPSG:4326", "EPSG:32646", [95.95], [4.31])
+    x0, y0 = xs[0] - 500, ys[0] + 500
+    g = zarr.open_group(zarr.storage.MemoryStore(), mode="w")
+    g.attrs.update({"proj:code": "EPSG:32646", "spatial:transform": [10, 0, x0, 0, -10, y0],
+                    "geoemb:quantization": {"power": 2.0, "nodata": -128}})
+    g.create_array("time", data=np.array([2020, 2025]))
+    rng = np.random.default_rng(1)
+    q = rng.integers(-10, 10, (2, 64, 100, 100)).astype("int8")
+    q[:, :32, :, :50] += 90   # forest signature on the west half
+    q[:, 32:, :, 50:] += 90   # crops signature on the east half
+    q[1, :32, 30:70, 50:] += 90  # by 2025 part of the east looks like forest
+    q[1, 32:, 30:70, 50:] -= 90
+    g.create_array("embeddings", data=q)
+
+    def box(lo_x, hi_x):
+        xs_ = [x0 + lo_x, x0 + hi_x, x0 + hi_x, x0 + lo_x]
+        ys_ = [y0 - 50, y0 - 50, y0 - 950, y0 - 950]
+        lon, lat = transform("EPSG:32646", "EPSG:4326", xs_, ys_)
+        ring = [list(p) for p in zip(lon, lat)]
+        return {"type": "Polygon", "coordinates": [ring + [ring[0]]]}
+    labels = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"class": "forest"}, "geometry": box(50, 450)},
+        {"type": "Feature", "properties": {"class": "crops"}, "geometry": box(550, 950)},
+        {"type": "Feature", "properties": {"class": "reef"}, "geometry": {"type": "Point", "coordinates": [95.95, 4.31]}}]}
+    saved = tools._open_zone
+    tools._open_zone = lambda z, zone: g
+    try:
+        lon, lat = transform("EPSG:32646", "EPSG:4326", [x0 + 5, x0 + 995], [y0 - 995, y0 - 5])
+        bbox = [lon[0], lat[0], lon[1], lat[1]]
+        r = tools.classify_embeddings(labels, 2020, [2020, 2025], bbox=bbox)
+        assert r["held_out_agreement_pct"] > 95, r
+        assert sorted(r["classes"].values()) == ["crops", "forest"], r["classes"]
+        assert any("dropped reef" in c for c in r["caveats"]), r["caveats"]
+        assert any(c.startswith("labels inherited") for c in r["caveats"])
+        top = r["changes"]["top"][0]
+        assert (top["from"], top["to"]) == ("crops", "forest") and top["ha"] > 10, r["changes"]
+        with rasterio.open(r["years"]["2025"]["path"]) as ds:
+            assert ds.nodata == 0 and ds.crs.to_epsg() == 32646
+        assert r["layer"]["type"] == "file" and r["layer"]["classified"]
+        assert "error" in tools.classify_embeddings(labels, 2019, bbox=bbox)
+        assert "error" in tools.classify_embeddings(labels, 2020, bbox=[95.0, 4.0, 95.5, 4.5])
+        assert "error" in tools.classify_embeddings(labels, 2020, bbox=bbox, store="noaa-gfs-forecast")
+        for bad in ("http://169.254.169.254/x.tif", "/vsicurl/http://x/y.tif"):
+            try:
+                tools.classify_embeddings(bad, 2020, bbox=bbox)
+            except ValueError:
+                continue
+            raise AssertionError(f"labels opened {bad}")
+    finally:
+        tools._open_zone = saved
+
+
 def t_embedding_store_decodes_and_picks_the_zone():
     # OlmoEarth: one group per UTM zone, int8 with -128 nodata and a signed
     # power rule in its attrs; the number is a feature, so it says so

@@ -64,7 +64,7 @@ REQUIRED_FIELDS = ("what", "ds-role", "integration", "speaks-to", "link", "when"
 # typo in stack.md cannot silently drop a component from every panel
 FACTS = (
     "catalogs", "collections", "tiler_hosts", "maplibre", "terrain",
-    "geocoded", "events", "weather", "passes", "mosaic_scenes", "snapshot", "local_rasters",
+    "geocoded", "events", "weather", "passes", "mosaic_scenes", "snapshot", "local_rasters", "classified",
 )
 _ALIASES = {"catalog": "catalogs", "collection": "collections", "host": "tiler_hosts", "mosaic": "mosaic_scenes"}
 

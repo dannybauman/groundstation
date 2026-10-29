@@ -8,7 +8,7 @@ Fields per component:
 - `what`: one plain line
 - `ds-role`: `created` / `maintains` / `contributes` / `uses`. Projects, never people. `created` and `maintains` are Development Seed's own; panels show those with a filled badge and list them first within a stage
 - `island`: optional, `cng` / `dib` / `geoai` / `agentic`. The Development Seed island the component sits in; the panel says which islands an artifact exercised
-- `when`: the rule that puts the component on screen, over the artifact's render facts. Bare fact names test truthiness (`terrain`), `fact=a,b` tests membership (`catalog=veda,planetary-computer`, `collection=naip`), `!` negates, `&` is and, `|` is or, `always` is always. Facts: `catalogs`, `collections`, `tiler_hosts`, `maplibre`, `terrain`, `geocoded` (`gazet` or `nominatim`), `events`, `weather`, `passes`, `mosaic_scenes`, `local_rasters`, `snapshot`. An unknown fact name fails the parser, so a typo cannot silently drop a component from every panel
+- `when`: the rule that puts the component on screen, over the artifact's render facts. Bare fact names test truthiness (`terrain`), `fact=a,b` tests membership (`catalog=veda,planetary-computer`, `collection=naip`), `!` negates, `&` is and, `|` is or, `always` is always. Facts: `catalogs`, `collections`, `tiler_hosts`, `maplibre`, `terrain`, `geocoded` (`gazet` or `nominatim`), `events`, `weather`, `passes`, `mosaic_scenes`, `local_rasters`, `classified`, `snapshot`. An unknown fact name fails the parser, so a typo cannot silently drop a component from every panel
 - `integration`: what it does in this system (the panel's line when it has nothing more specific to say)
 - `speaks-to`: edges of the web
 - `link`
@@ -383,6 +383,16 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - speaks-to: Zarr, obstore
 - link: https://xarray.dev
 - when: collection=noaa-gfs-forecast,noaa-hrrr-forecast,nasa-mur-sst,weatherbench2-era5
+
+## scikit-learn
+- stage: pixels
+- what: the standard Python machine-learning library; a small classifier (nearest neighbours, logistic regression or nearest class mean) over annual embeddings
+- ds-role: uses
+- island: geoai
+- integration: `classify_embeddings` trains on labels over one year's OlmoEarth embeddings and maps other years into local GeoTIFFs. New dep `scikit-learn`: geoai wraps the same classifiers but pulls in torch, rs-embed only fetches embeddings, geotessera is Tessera-only
+- speaks-to: Zarr, rio-tiler
+- link: https://scikit-learn.org
+- when: classified
 
 ## obstore
 - stage: data
