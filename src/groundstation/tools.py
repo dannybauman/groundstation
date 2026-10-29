@@ -2537,6 +2537,8 @@ __BRAND__
     display: flex; align-items: center; justify-content: center; font: 13px system-ui; }
   .side-label { position: absolute; bottom: 52px; z-index: 2; background: rgba(247,244,239,.96); color: var(--ink);
     padding: 4px 11px; border-radius: 6px; font: 12px "Roboto", system-ui, sans-serif; box-shadow: 0 1px 5px rgba(0,0,0,.15); }
+  /* notes and legends share the side labels' corners, so a swipe lifts them clear */
+  .swipe #notes, .swipe #legends { bottom: 88px; }
   #tl { position: absolute; bottom: 64px; left: 50%; transform: translateX(-50%); z-index: 3;
     display: flex; align-items: center; gap: 8px; background: rgba(247,244,239,.96); color: var(--ink);
     padding: 6px 12px; border-radius: 8px; font: 14px "Roboto", system-ui, sans-serif; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
@@ -2624,6 +2626,7 @@ const geojsons = LAYERS.map((l, i) => ({ ...l, i })).filter(l => l.type === "geo
 
 if (COMPARE && rasters.length === 2) {
   // comparison: two synced maps, right one on top clipped left of a draggable divider
+  document.documentElement.classList.add("swipe");
   document.getElementById("map").insertAdjacentHTML("afterend",
     `<div id="mapL"></div><div id="divider"><div class="knob">◂▸</div></div>
      <div class="side-label" style="left:12px">◂ ${esc(rasters[1].name)}</div>

@@ -3080,6 +3080,7 @@ def t_notes_render_escaped_in_box_and_stack():
     assert 'id="notes"' in html and "<b>Notes</b>" in html and "claim 2024-03-01" in html
     assert "&lt;script&gt;x&lt;/script&gt;" in html and "<script>x</script>" not in html
     assert html.count("claim 2024-03-01") == 2  # box and Stack panel
+    assert ".swipe #notes" in html and 'classList.add("swipe")' in html  # a swipe lifts notes off the left layer's name
 
 
 def t_notes_absent_changes_nothing():
