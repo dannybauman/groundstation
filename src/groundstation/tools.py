@@ -1302,31 +1302,49 @@ def _open_zone(z: dict[str, Any], zone: str):
     return zarr.open_group(zarr.storage.ObjectStore(s3, read_only=True), mode="r")[zone]
 
 
-def _embedding_statistics(store_id: str, z: dict[str, Any], bbox: list[float], sel: dict[str, str] | None) -> dict[str, Any]:
-    """One decoded embedding dimension over a small bbox, plus how much of the box has embeddings that year."""
-    import numpy as np
+def _embedding_window(z: dict[str, Any], bbox: list[float]) -> dict[str, Any]:
+    """The UTM-zone group, years and pixel window an embeddings store holds for a small bbox."""
     from rasterio.warp import transform_bounds
 
-    sel = sel or {}
     w, s, e, n = bbox
     zone = f"utm{int(((w + e) / 2 + 180) // 6) + 1:02d}"
     g = _open_zone(z, zone)
-    years = [int(y) for y in g["time"][:]]
-    year = int(str(sel.get("time") or years[-1])[:4])
-    if year not in years:
-        return {"error": f"year {year} is not in {z['title']}; it holds {years[0]} to {years[-1]}"}
-    band = int(sel.get("band", 0))
     a, _, c, _, ey, f = g.attrs["spatial:transform"][:6]
     x0, y0, x1, y1 = transform_bounds("EPSG:4326", g.attrs["proj:code"], w, s, e, n)
     c0, c1, r0, r1 = int((x0 - c) / a), int((x1 - c) / a) + 1, int((y1 - f) / ey), int((y0 - f) / ey) + 1
     # ponytail: about 10 km a side, a 64-dim chunk read per 2.5 km tile; downsampled reads are the upgrade for bigger boxes
     if c1 - c0 > 1024 or r1 - r0 > 1024:
         return {"error": f"bbox is {(c1 - c0) * a / 1000:.0f} x {(r1 - r0) * a / 1000:.0f} km; {z['title']} reads at most about 10 km a side, since every 2.5 km costs a 4 MB chunk"}
-    q = np.asarray(g["embeddings"][years.index(year), band, r0:r1, c0:c1])
-    rule = g.attrs.get("geoemb:quantization") or {}
-    valid = q != rule.get("nodata", -128)
-    p = float(rule.get("power", 2.0))
-    v = (np.abs(q[valid]) / 127.5) ** p * np.sign(q[valid])
+    return {"g": g, "zone": zone, "years": [int(y) for y in g["time"][:]], "rows": (r0, r1), "cols": (c0, c1),
+            "crs": g.attrs["proj:code"], "transform": (a, 0.0, c + c0 * a, 0.0, ey, f + r0 * ey),
+            "rule": g.attrs.get("geoemb:quantization") or {}}
+
+
+def _decode_embeddings(q, rule: dict[str, Any]):
+    """int8 to float with the store's own geoemb:quantization rule; nodata becomes nan."""
+    import numpy as np
+
+    v = (np.abs(q) / 127.5).astype("float32") ** float(rule.get("power", 2.0)) * np.sign(q)
+    return np.where(q == rule.get("nodata", -128), np.nan, v)
+
+
+def _embedding_statistics(store_id: str, z: dict[str, Any], bbox: list[float], sel: dict[str, str] | None) -> dict[str, Any]:
+    """One decoded embedding dimension over a small bbox, plus how much of the box has embeddings that year."""
+    import numpy as np
+
+    sel = sel or {}
+    win = _embedding_window(z, bbox)
+    if "error" in win:
+        return win
+    g, zone, years, rule = win["g"], win["zone"], win["years"], win["rule"]
+    year = int(str(sel.get("time") or years[-1])[:4])
+    if year not in years:
+        return {"error": f"year {year} is not in {z['title']}; it holds {years[0]} to {years[-1]}"}
+    band = int(sel.get("band", 0))
+    (r0, r1), (c0, c1) = win["rows"], win["cols"]
+    d = _decode_embeddings(np.asarray(g["embeddings"][years.index(year), band, r0:r1, c0:c1]), rule)
+    valid = ~np.isnan(d)
+    v = d[valid]
     out: dict[str, Any] = {
         "coverage_pct": round(100 * float(valid.mean()), 1),
         "clipped_to": bbox,
@@ -2830,6 +2848,12 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
     }
 
 
+def _require_local_file(path: str, what: str) -> None:
+    # local only: a URL would let a prompt probe internal hosts; a public COG has its tiler route already
+    if "://" in path or path.lower().startswith("/vsi") or not Path(path).is_file():
+        raise ValueError(f"{what} must be a local file; a public COG goes on as a raster layer through a TiTiler /cog tile URL")
+
+
 def _file_layer(l: dict[str, Any], view: list[float] | None) -> dict[str, Any]:
     """A {"type": "file"} layer (a local GeoTIFF) baked into one PNG.
 
@@ -2845,9 +2869,7 @@ def _file_layer(l: dict[str, Any], view: list[float] | None) -> dict[str, Any]:
         raise ValueError("file layer needs the map's bbox")
     w, s, e, n = view
     path = str(l["path"])
-    # local only: a URL would let a prompt probe internal hosts; a public COG has its tiler route already
-    if "://" in path or path.lower().startswith("/vsi") or not Path(path).is_file():
-        raise ValueError("file layer path must be a local file; a public COG goes on as a raster layer through a TiTiler /cog tile URL")
+    _require_local_file(path, "file layer path")
     import rasterio
 
     # the console's agent passes paths from user prompts: GeoTIFF only, so a VRT
@@ -2874,6 +2896,7 @@ def _file_layer(l: dict[str, Any], view: list[float] | None) -> dict[str, Any]:
         "bounds": [max(w, fb[0]), max(s, fb[1]), min(e, fb[2]), min(n, fb[3])],
         "opacity": l.get("opacity", 1),
         "local": True,
+        **({"classified": True} if l.get("classified") else {}),
     }
 
 
@@ -3141,6 +3164,7 @@ def _map_stack_facts(
         "collections_by_catalog": by_catalog,
         "tiler_hosts": sorted(hosts),
         "local_rasters": sum(1 for r in resolved if r.get("local")),
+        "classified": any(r.get("classified") for r in resolved),
         "maplibre": True,  # both map artifacts render through MapLibre
         # facts this function can't see default to false — callers that
         # actually geocoded, fetched events, or draped terrain say so via
@@ -4310,6 +4334,222 @@ def _picked_and_runner_up(picked: dict[str, Any], items: list[dict[str, Any]]) -
         if _scene_key(r)[:2] == _scene_key(picked)[:2]:
             out["pick_note"] = f"{r['id']} was equally good (same coverage and cloud); the scene id decided"
     return out
+
+
+# a class with fewer labelled pixels is dropped: too few to place it in embedding space,
+# and its held-out agreement would rest on a handful of pixels
+CLASSIFIER_MIN_PIXELS = 30
+# a class the model maps on this many times its labelled share, and at least
+# OVERCALL_POINTS above it, is named as over-called; lower catches more noise
+OVERCALL_RATIO = 1.5
+OVERCALL_POINTS = 5.0
+# each year read costs about 64 MB at the 10 km cap; 4 years keeps a call near 250 MB
+CLASSIFIER_MAX_YEARS = 4
+CLASS_COLORS = ("#1b7837", "#a6dba0", "#d9a03f", "#8c510a", "#e7298a", "#7570b3", "#66a61e", "#bdbdbd")
+
+
+def _labels_grid(labels: str | dict[str, Any], class_property: str, win: dict[str, Any]):
+    """Labels burned onto the embedding window: an int grid (0 = unlabelled) and the class names, 1-based."""
+    import numpy as np
+    import rasterio
+    from rasterio.features import rasterize
+    from rasterio.transform import Affine
+    from rasterio.warp import Resampling, reproject, transform_geom
+
+    shape = (win["rows"][1] - win["rows"][0], win["cols"][1] - win["cols"][0])
+    tr = Affine(*win["transform"])
+    if isinstance(labels, str) and labels.lower().endswith((".geojson", ".json")):
+        _require_local_file(labels, "labels path")
+        labels = json.loads(Path(labels).read_text())
+    if isinstance(labels, dict):
+        feats = labels.get("features") or [labels]
+        names = sorted({str(f["properties"][class_property]) for f in feats if f.get("properties", {}).get(class_property) is not None})
+        if not names:
+            raise ValueError(f"no feature carries a '{class_property}' property; pass class_property= the field that names the class")
+        idx = {c: i + 1 for i, c in enumerate(names)}
+        shapes = [(transform_geom("EPSG:4326", win["crs"], f["geometry"]), idx[str(f["properties"][class_property])])
+                  for f in feats if f.get("properties", {}).get(class_property) is not None]
+        return rasterize(shapes, out_shape=shape, transform=tr, fill=0, dtype="int32"), names
+    _require_local_file(labels, "labels path")
+    dst = np.full(shape, -1, "int32")
+    with rasterio.open(labels, driver="GTiff") as ds:
+        reproject(rasterio.band(ds, 1), dst, dst_transform=tr, dst_crs=win["crs"], dst_nodata=-1,
+                  src_nodata=ds.nodata, resampling=Resampling.nearest)
+    values = sorted(int(v) for v in np.unique(dst) if v != -1)
+    grid = np.zeros(shape, "int32")
+    for i, v in enumerate(values):
+        grid[dst == v] = i + 1
+    return grid, [str(v) for v in values]
+
+
+def _labels_bbox(labels: str | dict[str, Any]) -> list[float]:
+    import rasterio
+    from rasterio.warp import transform_bounds
+
+    if isinstance(labels, str) and not labels.lower().endswith((".geojson", ".json")):
+        _require_local_file(labels, "labels path")
+        with rasterio.open(labels, driver="GTiff") as ds:
+            return list(transform_bounds(ds.crs, "EPSG:4326", *ds.bounds))
+    if isinstance(labels, str):
+        _require_local_file(labels, "labels path")
+        labels = json.loads(Path(labels).read_text())
+    xs, ys = [], []
+
+    def walk(c):
+        if c and isinstance(c[0], (int, float)):
+            xs.append(c[0]), ys.append(c[1])
+        else:
+            for x in c:
+                walk(x)
+    for f in labels.get("features") or [labels]:
+        walk(f["geometry"]["coordinates"])
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def classify_embeddings(
+    labels: str | dict[str, Any],
+    label_year: int,
+    years: list[int] | None = None,
+    bbox: list[float] | None = None,
+    class_property: str = "class",
+    method: str = "knn",
+    store: str = "olmoearth-v1-3-embeddings",
+) -> dict[str, Any]:
+    """Labels in, class maps out: train a small scikit-learn classifier on annual embeddings, map other years.
+
+    labels: a local GeoTIFF of class values (band 1, its nodata skipped), or GeoJSON
+    points or polygons with a class property (a FeatureCollection, or a local .geojson path).
+    label_year: the year the labels describe; the classifier trains on that year's embeddings.
+    years: the years to map (default: label_year alone). Each becomes a local GeoTIFF that
+    render_map draws with the returned `layer` ({"type": "file", ...}; swap `path` for another year).
+    bbox: [w, s, e, n], default the labels' extent; about 10 km a side at most.
+    method: "knn" (5 nearest neighbours), "logistic", or "centroid" (nearest class mean).
+
+    Returns held_out_agreement_pct (agreement with the labels on a quarter of labelled
+    pixels the model never saw), per_class labelled vs predicted shares, per year the
+    class shares and hectares, `changes` from the first mapped year to the last when there
+    are 2 or more, and `caveats`. Each year read costs about 64 MB at the 10 km cap.
+    """
+    import numpy as np
+    import rasterio
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.model_selection import train_test_split
+    from sklearn.neighbors import KNeighborsClassifier, NearestCentroid
+
+    models = {"knn": lambda: KNeighborsClassifier(n_neighbors=5),
+              "logistic": lambda: LogisticRegression(max_iter=1000),
+              "centroid": lambda: NearestCentroid()}
+    if method not in models:
+        return {"error": f"method must be one of {sorted(models)}"}
+    z = ZARR_STORES.get(store)
+    if not z or z.get("layout") != "utm_zones":
+        return {"error": f"{store} is not an embeddings store; one with layout utm_zones is: "
+                         + ", ".join(k for k, v in ZARR_STORES.items() if v.get("layout") == "utm_zones")}
+    bbox = bbox or _labels_bbox(labels)
+    win = _embedding_window(z, bbox)
+    if "error" in win:
+        return win
+    want = list(dict.fromkeys([int(label_year), *(int(y) for y in (years or [label_year]))]))
+    missing = [y for y in want if y not in win["years"]]
+    if missing:
+        return {"error": f"{missing} not in {z['title']} for {win['zone']}; it holds {win['years'][0]} to {win['years'][-1]}, and 2017 to 2020 are still backfilling in places"}
+    if len(want) > CLASSIFIER_MAX_YEARS:
+        return {"error": f"{len(want)} years asked; at most {CLASSIFIER_MAX_YEARS} per call, since each year reads about 64 MB at the 10 km cap"}
+
+    grid, names = _labels_grid(labels, class_property, win)
+    g, (r0, r1), (c0, c1) = win["g"], win["rows"], win["cols"]
+
+    def read(year):
+        e = _decode_embeddings(np.asarray(g["embeddings"][win["years"].index(year), 0:64, r0:r1, c0:c1]), win["rule"])
+        return e.reshape(64, -1).T, ~np.isnan(e).any(0).ravel()
+
+    emb = {y: read(y) for y in want}
+    X, ok = emb[int(label_year)]
+    y = grid.ravel()
+    caveats: list[str] = []
+    counts = {k: int(((y == k) & ok).sum()) for k in range(1, len(names) + 1)}
+    kept = [k for k, c in counts.items() if c >= CLASSIFIER_MIN_PIXELS]
+    dropped = [names[k - 1] for k in counts if k not in kept]
+    if dropped:
+        caveats.append(f"dropped {', '.join(dropped)}: fewer than {CLASSIFIER_MIN_PIXELS} labelled pixels with embeddings, so the maps never show them")
+    if len(kept) < 2:
+        return {"error": f"need at least 2 classes with {CLASSIFIER_MIN_PIXELS}+ labelled pixels that have {label_year} embeddings; got {counts}", "classes": names}
+    idx = np.flatnonzero(ok & np.isin(y, kept))
+    tr_i, te_i = train_test_split(idx, test_size=0.25, random_state=0, stratify=y[idx])
+    # ponytail: 20k training pixels keeps knn fast on a laptop; more barely moves agreement on one 10 km box
+    if tr_i.size > 20000:
+        tr_i = np.random.default_rng(0).choice(tr_i, 20000, replace=False)
+    model = models[method]().fit(X[tr_i], y[tr_i])
+    held = model.predict(X[te_i])
+    agreement = round(100 * float((held == y[te_i]).mean()), 1)
+    per_class = {}
+    for k in kept:
+        lab, pred = 100 * float((y[te_i] == k).mean()), 100 * float((held == k).mean())
+        per_class[names[k - 1]] = {"labelled_pct": round(lab, 1), "predicted_pct": round(pred, 1),
+                                   "agreement_pct": round(100 * float((held[y[te_i] == k] == k).mean()), 1)}
+        if pred >= OVERCALL_RATIO * lab and pred - lab >= OVERCALL_POINTS:
+            caveats.append(f"over-calls {names[k - 1]}: {pred:.0f}% of held-out pixels predicted vs {lab:.0f}% labelled, so {names[k - 1]} area is overstated")
+
+    out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tag = hashlib.sha1(json.dumps([bbox, label_year, method, names], sort_keys=True).encode()).hexdigest()[:8]
+    colormap = {str(k): CLASS_COLORS[(k - 1) % len(CLASS_COLORS)] for k in kept}
+    maps, per_year = {}, {}
+    for yr in want:
+        Xy, oky = emb[yr]
+        m = np.zeros(oky.size, "uint8")
+        if oky.any():
+            m[oky] = model.predict(Xy[oky])
+        maps[yr] = m
+        path = out_dir / f"classes-{win['zone']}-{yr}-{tag}.tif"
+        with rasterio.open(path, "w", driver="GTiff", height=r1 - r0, width=c1 - c0, count=1, dtype="uint8",
+                           crs=win["crs"], transform=rasterio.Affine(*win["transform"]), nodata=0, compress="deflate") as ds:
+            ds.write(m.reshape(r1 - r0, c1 - c0), 1)
+            ds.update_tags(1, **{f"class_{k}": names[k - 1] for k in kept})
+        n_ok = int(oky.sum())
+        per_year[str(yr)] = {
+            "path": str(path),
+            "coverage_pct": round(100 * n_ok / oky.size, 1),
+            "shares_pct": {names[k - 1]: round(100 * float((m[oky] == k).mean()), 1) for k in kept} if n_ok else {},
+            "area_ha": {names[k - 1]: round(float((m == k).sum()) * 0.01, 1) for k in kept},  # 10 m pixels, 0.01 ha each
+        }
+        if per_year[str(yr)]["coverage_pct"] < PARTIAL_COVERAGE_PCT:
+            caveats.append(f"{yr} has embeddings over only {per_year[str(yr)]['coverage_pct']}% of the box, so its shares describe that part alone")
+    result: dict[str, Any] = {
+        "store": store, "zone": win["zone"], "bbox": bbox, "label_year": int(label_year), "method": method,
+        "classes": {str(k): names[k - 1] for k in kept},
+        "training": {"labelled_px": int(idx.size), "train_px": int(tr_i.size), "held_out_px": int(te_i.size),
+                     "per_class_px": {names[k - 1]: counts[k] for k in kept}},
+        "held_out_agreement_pct": agreement,
+        "per_class": per_class,
+        "years": per_year,
+        "colormap": colormap,
+        "layer": {"type": "file", "name": f"classes {want[-1]}", "path": per_year[str(want[-1])]["path"],
+                  "colormap": colormap, "nodata": 0, "opacity": 0.8, "classified": True},
+    }
+    if len(want) > 1:
+        a, b = sorted(want)[0], sorted(want)[-1]
+        both = emb[a][1] & emb[b][1]
+        moved = both & (maps[a] != maps[b])
+        pairs: dict[tuple[int, int], int] = {}
+        for f, t in zip(maps[a][moved], maps[b][moved]):
+            pairs[(int(f), int(t))] = pairs.get((int(f), int(t)), 0) + 1
+        top = sorted(pairs.items(), key=lambda kv: -kv[1])[:5]
+        result["changes"] = {
+            "from": a, "to": b,
+            "changed_pct": round(100 * float(moved.sum()) / max(int(both.sum()), 1), 1),
+            "top": [{"from": names[f - 1], "to": names[t - 1], "ha": round(n * 0.01, 1)} for (f, t), n in top],
+        }
+        caveats.append("a class change between years includes classifier noise, which flips scattered single pixels; read a change as land change only where it forms patches")
+    caveats += [
+        f"labels inherited: the model learns the labels' mistakes too, and {agreement}% held-out agreement is agreement with the labels, not with the ground",
+        "embeddings from other years carry the classifier forward without new labels; a class that did not exist in the label year cannot appear",
+        # ponytail: a random pixel split; a spatial block split is the upgrade that makes agreement honest on its own
+        "held-out pixels sit beside training pixels, so agreement runs high; expect lower on ground the labels never touched",
+        f"every pixel gets one of {len(kept)} classes: land the labels did not cover (water, towns, bare ground) is forced into the nearest one unless the labels include a class for it",
+    ]
+    result["caveats"] = caveats
+    return result
 
 
 def compare_dates(

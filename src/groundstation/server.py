@@ -41,6 +41,7 @@ TOOLS = (
     tools.write_archive,
     tools.preview_item,
     tools.compute_statistics,
+    tools.classify_embeddings,
     tools.compare_dates,
     tools.tile_url_template,
     tools.render_map,
