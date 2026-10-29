@@ -774,7 +774,7 @@ def list_catalogs() -> list[dict[str, str]]:
     """List the STAC catalogs this server can search, with what each is good for."""
     return [{"catalog": k, **v} for k, v in CATALOGS.items()] + [{
         "catalog": "zarr",
-        "notes": "Curated Zarr stores, not STAC: forecast and reanalysis grids (GFS, HRRR, ERA5, MUR SST). "
+        "notes": "Curated Zarr stores, not STAC: forecast and reanalysis grids (GFS, HRRR, ERA5, MUR SST) and OlmoEarth embeddings. "
         "search_datasets finds them, describe_collection('zarr', id) lists variables, compute_statistics "
         "reads a clipped number, tile_url_template draws it where the store renders.",
     }]
@@ -1057,6 +1057,22 @@ ZARR_STORES: dict[str, dict[str, Any]] = {
         "time_range": ["1959-01-01T00:00", "2023-01-10T18:00"],
         "source": "ECMWF ERA5 regridded by Google Research WeatherBench 2 (CC-BY-4.0)",
     },
+    "olmoearth-v1-3-embeddings": {
+        "title": "OlmoEarth v1.3 annual embeddings, 10 m (Ai2)",
+        "url": "s3://olmoearth/olmoearth-v1-3-embeddings/embeddings.zarr",
+        "endpoint": "https://data.source.coop",
+        "layout": "utm_zones",
+        "variables": {"embeddings": {"description": "128-dimension annual embedding from Sentinel-1, Sentinel-2 and Landsat (the first 64 dimensions work alone); decoded from int8 with the store's own geoemb:quantization rule", "units": "none (model features)"}},
+        "sel": "time (year, 2017 to 2025) and band (embedding dimension, 0 to 127, default 0)",
+        "coverage": "global land, 10 m, one group per UTM zone; 2021 to 2025 global, 2017 to 2020 still backfilling",
+        "chunks": "1 year x 64 dims x 256 x 256 per chunk (about 4 MB): one dimension costs the 64 beside it",
+        "stats": True,
+        "time_dim": "time",
+        "time_range": ["2017-01-01", "2025-12-31"],
+        "tiles": False,
+        "tiles_note": "titiler.xyz opens the store but reads its UTM metres as degrees (it ignores the zarr proj convention), so it cannot tile it yet; an embedding also has no natural colours, the usual view is 3 dimensions as RGB",
+        "source": "Ai2 OlmoEarth v1.3 on Source Cooperative, anonymous Zarr v3 following the geo-embeddings convention",
+    },
 }
 _ZARR_X = ("longitude", "lon", "x")
 _ZARR_Y = ("latitude", "lat", "y")
@@ -1276,6 +1292,59 @@ def _zarr_time_refusal(store_id: str, z: dict[str, Any], sel: dict[str, str] | N
     return f"time {asked} is outside {store_id}'s range ({lo} to {hi})"
 
 
+def _open_zone(z: dict[str, Any], zone: str):
+    """One UTM-zone group of an embeddings store, read straight with zarr (its x/y coordinates are megabytes, the transform is in attrs)."""
+    import zarr
+    from obstore.store import S3Store
+
+    zarr.config.set({"array.sharding_coalesce_max_gap_bytes": 0})  # fetch only the inner chunks asked for
+    s3 = S3Store.from_url(z["url"], endpoint=z["endpoint"], skip_signature=True)
+    return zarr.open_group(zarr.storage.ObjectStore(s3, read_only=True), mode="r")[zone]
+
+
+def _embedding_statistics(store_id: str, z: dict[str, Any], bbox: list[float], sel: dict[str, str] | None) -> dict[str, Any]:
+    """One decoded embedding dimension over a small bbox, plus how much of the box has embeddings that year."""
+    import numpy as np
+    from rasterio.warp import transform_bounds
+
+    sel = sel or {}
+    w, s, e, n = bbox
+    zone = f"utm{int(((w + e) / 2 + 180) // 6) + 1:02d}"
+    g = _open_zone(z, zone)
+    years = [int(y) for y in g["time"][:]]
+    year = int(str(sel.get("time") or years[-1])[:4])
+    if year not in years:
+        return {"error": f"year {year} is not in {z['title']}; it holds {years[0]} to {years[-1]}"}
+    band = int(sel.get("band", 0))
+    a, _, c, _, ey, f = g.attrs["spatial:transform"][:6]
+    x0, y0, x1, y1 = transform_bounds("EPSG:4326", g.attrs["proj:code"], w, s, e, n)
+    c0, c1, r0, r1 = int((x0 - c) / a), int((x1 - c) / a) + 1, int((y1 - f) / ey), int((y0 - f) / ey) + 1
+    # ponytail: about 10 km a side, a 64-dim chunk read per 2.5 km tile; downsampled reads are the upgrade for bigger boxes
+    if c1 - c0 > 1024 or r1 - r0 > 1024:
+        return {"error": f"bbox is {(c1 - c0) * a / 1000:.0f} x {(r1 - r0) * a / 1000:.0f} km; {z['title']} reads at most about 10 km a side, since every 2.5 km costs a 4 MB chunk"}
+    q = np.asarray(g["embeddings"][years.index(year), band, r0:r1, c0:c1])
+    rule = g.attrs.get("geoemb:quantization") or {}
+    valid = q != rule.get("nodata", -128)
+    p = float(rule.get("power", 2.0))
+    v = (np.abs(q[valid]) / 127.5) ** p * np.sign(q[valid])
+    out: dict[str, Any] = {
+        "coverage_pct": round(100 * float(valid.mean()), 1),
+        "clipped_to": bbox,
+        "dataset": f"{z['title']}: embedding dimension {band}, {year}, {zone}",
+        "units": "none",
+        "sel": {"time": str(year), "band": str(band), "zone": zone},
+        "caveats": [
+            "an embedding dimension is a model feature, not a measurement: compare places or years with it, never read the number as a physical value",
+            f"decoded from int8 with the store's rule ({rule.get('formula', 'signed power')}), nodata excluded",
+        ],
+    }
+    if v.size == 0:
+        return out | {"error": f"no embeddings here for {year}; 2017 to 2020 are still backfilling, try 2021 to 2025"}
+    out["embeddings"] = {"min": float(v.min()), "max": float(v.max()), "mean": float(v.mean()),
+                         "median": float(np.median(v)), "std": float(v.std()), "count": int(v.size)}
+    return out
+
+
 def _zarr_statistics(store_id: str, variable: str, bbox: list[float] | None, sel: dict[str, str] | None) -> dict[str, Any]:
     z = ZARR_STORES.get(store_id)
     if not z:
@@ -1286,6 +1355,8 @@ def _zarr_statistics(store_id: str, variable: str, bbox: list[float] | None, sel
         return {"error": f"statistics are not offered for {z['title']}: {z.get('stats_note') or z['chunks']}"}
     if not bbox:
         return {"error": "bbox [w, s, e, n] is required: a Zarr store is a whole grid, so unclipped statistics would describe the globe or the continent"}
+    if z.get("layout") == "utm_zones":
+        return _embedding_statistics(store_id, z, bbox, sel)
     ds = _open_zarr(store_id)
     if variable in z["variables"]:
         meta = z["variables"][variable]
