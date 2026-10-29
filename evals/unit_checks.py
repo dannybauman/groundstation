@@ -406,6 +406,47 @@ def t_geojson_polygons_are_filled():
         assert '"-area", type: "fill"' in html and 'id + "-area", id + "-line"' in html
 
 
+def t_local_raster_file_goes_on_the_map():
+    # ForTy had no STAC item and signed links no tiler could follow, so its
+    # classes went on as 900 KB of polygons. A file layer bakes the raster in;
+    # its nodata (the sea, 255) stays clear and a south-up file stays north-up
+    import base64 as b64
+    import numpy as np
+    import rasterio
+    from rasterio.io import MemoryFile
+    from rasterio.transform import Affine
+
+    a = np.full((20, 20), 255, "uint8")
+    a[:10, 10:] = 1  # rows 0-9 are SOUTH in a south-up file
+    a[10:, 10:] = 2
+    with tempfile.TemporaryDirectory() as d:
+        tif = Path(d) / "classes.tif"
+        with rasterio.open(tif, "w", driver="GTiff", width=20, height=20, count=1, dtype="uint8",
+                           crs="EPSG:4326", nodata=255, transform=Affine(0.1, 0, 10, 0, 0.1, 0)) as w:
+            w.write(a, 1)
+        out = tools.render_map("t", [10, 0, 12, 2], [{"type": "file", "name": "classes", "path": str(tif),
+                               "colormap": {"1": "#ff0000", "2": "#0000ff"}}], out_path=str(Path(d) / "m.html"))
+        st = out["state"]["layers"][0]
+        assert st["kind"] == "raster" and st["local"] and st["bounds"] == [10, 0, 12, 2], st
+        html = Path(out["map_path"]).read_text()
+        assert 'type: "image"' in html and "rio-tiler" in html
+        png = b64.b64decode(html.split("data:image/png;base64,")[1].split('"')[0])
+        with MemoryFile(png) as m, m.open() as r:
+            img = r.read()
+        h, wd = img.shape[1:]
+        assert img[3, h // 4, wd // 4] == 0, "nodata (west half) should be transparent"
+        north, south = img[:3, h // 4, 3 * wd // 4], img[:3, 3 * h // 4, 3 * wd // 4]
+        assert list(north) == [0, 0, 255] and list(south) == [255, 0, 0], (north, south)
+        vrt = Path(d) / "x.vrt"
+        vrt.write_text(f"<VRTDataset><SimpleSource><SourceFilename>{tif}</SourceFilename></SimpleSource></VRTDataset>")
+        for bad in (str(vrt), "/vsicurl/http://127.0.0.1/x.tif", "http://169.254.169.254/x.tif"):
+            try:
+                tools.render_map("t", [10, 0, 12, 2], [{"type": "file", "path": bad}], out_path=str(Path(d) / "b.html"))
+            except Exception:
+                continue
+            raise AssertionError(f"file layer opened {bad}")
+
+
 def t_state_never_changes_the_file():
     # state is additive: the artifact a partner opens must be byte-identical
     # whether or not anything reads the structured half

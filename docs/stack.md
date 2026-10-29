@@ -8,7 +8,7 @@ Fields per component:
 - `what`: one plain line
 - `ds-role`: `created` / `maintains` / `contributes` / `uses`. Projects, never people. `created` and `maintains` are Development Seed's own; panels show those with a filled badge and list them first within a stage
 - `island`: optional, `cng` / `dib` / `geoai` / `agentic`. The Development Seed island the component sits in; the panel says which islands an artifact exercised
-- `when`: the rule that puts the component on screen, over the artifact's render facts. Bare fact names test truthiness (`terrain`), `fact=a,b` tests membership (`catalog=veda,planetary-computer`, `collection=naip`), `!` negates, `&` is and, `|` is or, `always` is always. Facts: `catalogs`, `collections`, `tiler_hosts`, `maplibre`, `terrain`, `geocoded` (`gazet` or `nominatim`), `events`, `weather`, `passes`, `mosaic_scenes`, `snapshot`. An unknown fact name fails the parser, so a typo cannot silently drop a component from every panel
+- `when`: the rule that puts the component on screen, over the artifact's render facts. Bare fact names test truthiness (`terrain`), `fact=a,b` tests membership (`catalog=veda,planetary-computer`, `collection=naip`), `!` negates, `&` is and, `|` is or, `always` is always. Facts: `catalogs`, `collections`, `tiler_hosts`, `maplibre`, `terrain`, `geocoded` (`gazet` or `nominatim`), `events`, `weather`, `passes`, `mosaic_scenes`, `local_rasters`, `snapshot`. An unknown fact name fails the parser, so a typo cannot silently drop a component from every panel
 - `integration`: what it does in this system (the panel's line when it has nothing more specific to say)
 - `speaks-to`: edges of the web
 - `link`
@@ -296,10 +296,10 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - what: the Python raster engine that reads COGs and renders them — the core TiTiler is built on
 - ds-role: created
 - island: cng
-- integration: bakes mosaic postcards straight from the COGs, no tiler in the path
+- integration: bakes mosaic postcards and local raster files straight from the pixels, no tiler in the path
 - speaks-to: COG + HTTP range requests, TiTiler
 - link: https://github.com/cogeotiff/rio-tiler
-- when: mosaic_scenes
+- when: mosaic_scenes | local_rasters
 
 ## Cloud object storage
 - stage: pixels
