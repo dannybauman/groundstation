@@ -2773,7 +2773,15 @@ def _file_layer(l: dict[str, Any], view: list[float] | None) -> dict[str, Any]:
     if not view:
         raise ValueError("file layer needs the map's bbox")
     w, s, e, n = view
-    with Reader(l["path"]) as r:
+    path = str(l["path"])
+    scheme = path.split("://", 1)[0].lower() if "://" in path else ""
+    if scheme not in ("", "http", "https") or path.lower().startswith("/vsi"):
+        raise ValueError("file layer path must be a local file or an http(s) URL")
+    import rasterio
+
+    # the console's agent passes paths from user prompts: GeoTIFF only, so a VRT
+    # or XML file cannot point GDAL at other files or internal URLs
+    with rasterio.open(path, driver="GTiff") as ds, Reader(path, dataset=ds) as r:
         img = r.part(tuple(view), bounds_crs="epsg:4326", dst_crs="epsg:3857",
                      indexes=l.get("bands"), nodata=l.get("nodata"), max_size=l.get("max_size", 1024))
         fb = r.get_geographic_bounds("epsg:4326")
@@ -2789,7 +2797,7 @@ def _file_layer(l: dict[str, Any], view: list[float] | None) -> dict[str, Any]:
     png = base64.b64encode(img.render(img_format="PNG")).decode()
     return {
         "type": "raster",
-        "name": l.get("name") or Path(str(l["path"])).name,
+        "name": l.get("name") or Path(path).name,
         "image": "data:image/png;base64," + png,
         "coordinates": [[w, n], [e, n], [e, s], [w, s]],
         "bounds": [max(w, fb[0]), max(s, fb[1]), min(e, fb[2]), min(n, fb[3])],

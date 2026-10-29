@@ -437,6 +437,14 @@ def t_local_raster_file_goes_on_the_map():
         assert img[3, h // 4, wd // 4] == 0, "nodata (west half) should be transparent"
         north, south = img[:3, h // 4, 3 * wd // 4], img[:3, 3 * h // 4, 3 * wd // 4]
         assert list(north) == [0, 0, 255] and list(south) == [255, 0, 0], (north, south)
+        vrt = Path(d) / "x.vrt"
+        vrt.write_text(f"<VRTDataset><SimpleSource><SourceFilename>{tif}</SourceFilename></SimpleSource></VRTDataset>")
+        for bad in (str(vrt), "/vsicurl/http://127.0.0.1/x.tif", "file:///etc/hosts"):
+            try:
+                tools.render_map("t", [10, 0, 12, 2], [{"type": "file", "path": bad}], out_path=str(Path(d) / "b.html"))
+            except Exception:
+                continue
+            raise AssertionError(f"file layer opened {bad}")
 
 
 def t_state_never_changes_the_file():
