@@ -4417,6 +4417,7 @@ def classify_embeddings(
     method: str = "knn",
     store: str = "olmoearth-v1-3-embeddings",
     class_names: dict[str, str] | None = None,
+    min_change_ha: float = 0.25,
 ) -> dict[str, Any]:
     """Labels in, class maps out: train a small scikit-learn classifier on annual embeddings, map other years.
 
@@ -4428,6 +4429,8 @@ def classify_embeddings(
     bbox: [w, s, e, n], default the labels' extent; about 10 km a side at most.
     method: "knn" (5 nearest neighbours), "logistic", or "centroid" (nearest class mean).
     class_names: for GeoTIFF labels, value to name, e.g. {"10": "tree cover"}; a file carries no names.
+    min_change_ha: a class change counts only where it forms a patch at least this big
+    (default 0.25 ha, 25 pixels), so scattered single-pixel flips are not read as land change.
 
     Returns held_out_agreement_pct (agreement with the labels on a quarter of labelled
     pixels the model never saw), per_class labelled vs predicted shares, per year the
@@ -4436,6 +4439,7 @@ def classify_embeddings(
     """
     import numpy as np
     import rasterio
+    from rasterio.features import sieve
     from sklearn.linear_model import LogisticRegression
     from sklearn.model_selection import train_test_split
     from sklearn.neighbors import KNeighborsClassifier, NearestCentroid
@@ -4535,7 +4539,12 @@ def classify_embeddings(
     if len(want) > 1:
         a, b = sorted(want)[0], sorted(want)[-1]
         both = emb[a][1] & emb[b][1]
-        moved = both & (maps[a] != maps[b])
+        raw = both & (maps[a] != maps[b])
+        min_px = max(int(round(min_change_ha * 100)), 1)  # 10 m pixels, 100 per ha
+        shape = (r1 - r0, c1 - c0)
+        # sieve folds change patches smaller than min_px into the unchanged pixels around them
+        kept_patches = sieve(raw.reshape(shape).astype("uint8"), min_px, mask=both.reshape(shape), connectivity=8)
+        moved = raw & kept_patches.ravel().astype(bool)
         pairs: dict[tuple[int, int], int] = {}
         for f, t in zip(maps[a][moved], maps[b][moved]):
             pairs[(int(f), int(t))] = pairs.get((int(f), int(t)), 0) + 1
@@ -4543,9 +4552,11 @@ def classify_embeddings(
         result["changes"] = {
             "from": a, "to": b,
             "changed_pct": round(100 * float(moved.sum()) / max(int(both.sum()), 1), 1),
+            "min_patch_ha": min_change_ha,
+            "speckle_ha": round(float((raw & ~moved).sum()) * 0.01, 2),
             "top": [{"from": names[f - 1], "to": names[t - 1], "ha": round(n * 0.01, 1)} for (f, t), n in top],
         }
-        caveats.append("a class change between years includes classifier noise, which flips scattered single pixels; read a change as land change only where it forms patches")
+        caveats.append(f"changes count only patches of {min_change_ha} ha or more; {result['changes']['speckle_ha']} ha of smaller flips were set aside as classifier noise, and a patch that flips one way and back between years is still noise")
     caveats += [
         f"labels inherited: the model learns the labels' mistakes too, and {agreement}% held-out agreement is agreement with the labels, not with the ground",
         "embeddings from other years carry the classifier forward without new labels; a class that did not exist in the label year cannot appear",

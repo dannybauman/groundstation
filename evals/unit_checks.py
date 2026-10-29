@@ -2965,6 +2965,9 @@ def t_classifier_labels_in_map_out():
     q[:, 32:, :, 50:] += 90   # crops signature on the east half
     q[1, :32, 30:70, 50:] += 90  # by 2025 part of the east looks like forest
     q[1, 32:, 30:70, 50:] -= 90
+    for r_, c_ in ((5, 5), (90, 20), (50, 10)):  # lone 2025 flips: noise, not land change
+        q[1, :32, r_, c_] -= 90
+        q[1, 32:, r_, c_] += 90
     g.create_array("embeddings", data=q)
 
     def box(lo_x, hi_x):
@@ -2989,6 +2992,8 @@ def t_classifier_labels_in_map_out():
         assert any(c.startswith("labels inherited") for c in r["caveats"])
         top = r["changes"]["top"][0]
         assert (top["from"], top["to"]) == ("crops", "forest") and top["ha"] > 10, r["changes"]
+        assert all(t["from"] != "forest" for t in r["changes"]["top"]), r["changes"]
+        assert r["changes"]["speckle_ha"] >= 0.03 and r["changes"]["min_patch_ha"] == 0.25, r["changes"]
         with rasterio.open(r["years"]["2025"]["path"]) as ds:
             assert ds.nodata == 0 and ds.crs.to_epsg() == 32646
         assert r["layer"]["type"] == "file" and r["layer"]["classified"]
