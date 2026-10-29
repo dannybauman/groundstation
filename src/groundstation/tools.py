@@ -1064,7 +1064,7 @@ ZARR_STORES: dict[str, dict[str, Any]] = {
         "layout": "utm_zones",
         "variables": {"embeddings": {"description": "128-dimension annual embedding from Sentinel-1, Sentinel-2 and Landsat (the first 64 dimensions work alone); decoded from int8 with the store's own geoemb:quantization rule", "units": "none (model features)"}},
         "sel": "time (year, 2017 to 2025) and band (embedding dimension, 0 to 127, default 0)",
-        "coverage": "global land, 10 m, one group per UTM zone; 2021 to 2025 global, 2017 to 2020 still backfilling",
+        "coverage": "global land, 10 m, one group per UTM zone; 2021 to 2025 global, 2017 to 2020 filled in many zones and still empty in others (the index lists every year either way, so check coverage_pct)",
         "chunks": "1 year x 64 dims x 256 x 256 per chunk (about 4 MB): one dimension costs the 64 beside it",
         "stats": True,
         "time_dim": "time",
@@ -1357,7 +1357,9 @@ def _embedding_statistics(store_id: str, z: dict[str, Any], bbox: list[float], s
         ],
     }
     if v.size == 0:
-        return out | {"error": f"no embeddings here for {year}; 2017 to 2020 are still backfilling, try 2021 to 2025"}
+        why = ("2017 to 2020 are filled in many zones but still backfilling in this one, try 2021 to 2025" if year < 2021
+               else "the box may be water or outside the store's land coverage")
+        return out | {"error": f"no embeddings here for {year}; {why}"}
     out["embeddings"] = {"min": float(v.min()), "max": float(v.max()), "mean": float(v.mean()),
                          "median": float(np.median(v)), "std": float(v.std()), "count": int(v.size)}
     return out
@@ -4454,7 +4456,7 @@ def classify_embeddings(
     want = list(dict.fromkeys([int(label_year), *(int(y) for y in (years or [label_year]))]))
     missing = [y for y in want if y not in win["years"]]
     if missing:
-        return {"error": f"{missing} not in {z['title']} for {win['zone']}; it holds {win['years'][0]} to {win['years'][-1]}, and 2017 to 2020 are still backfilling in places"}
+        return {"error": f"{missing} not in {z['title']} for {win['zone']}; it holds {win['years'][0]} to {win['years'][-1]}"}
     if len(want) > CLASSIFIER_MAX_YEARS:
         return {"error": f"{len(want)} years asked; at most {CLASSIFIER_MAX_YEARS} per call, since each year reads about 64 MB at the 10 km cap"}
 
@@ -4475,7 +4477,8 @@ def classify_embeddings(
     if dropped:
         caveats.append(f"dropped {', '.join(dropped)}: fewer than {CLASSIFIER_MIN_PIXELS} labelled pixels with embeddings, so the maps never show them")
     if len(kept) < 2:
-        return {"error": f"need at least 2 classes with {CLASSIFIER_MIN_PIXELS}+ labelled pixels that have {label_year} embeddings; got {counts}", "classes": names}
+        hint = "; 2017 to 2020 are still backfilling in some zones, so labels from 2021 on may work" if int(label_year) < 2021 and not ok.any() else ""
+        return {"error": f"need at least 2 classes with {CLASSIFIER_MIN_PIXELS}+ labelled pixels that have {label_year} embeddings; got {counts}{hint}", "classes": names}
     idx = np.flatnonzero(ok & np.isin(y, kept))
     tr_i, te_i = train_test_split(idx, test_size=0.25, random_state=0, stratify=y[idx])
     # ponytail: 20k training pixels keeps knn fast on a laptop; more barely moves agreement on one 10 km box
