@@ -1599,7 +1599,7 @@ def t_empty_dataset_search_says_what_it_searched():
         assert "does not mean the data does not exist" in out[0]["note"], out
         one = tools.search_datasets("himawari", catalog="veda")
         assert one[0]["searched"] == ["veda"], one
-        hit = tools.search_datasets("sentinel")
+        hit = [h for h in tools.search_datasets("sentinel") if h["catalog"] != "zarr"]  # OlmoEarth is built from Sentinel
         assert hit == [{"catalog": c, "id": "sentinel-2-l2a", "title": "Sentinel-2", "summary": "", "gsd": None}
                        for c in tools.CATALOGS], hit
         assert not any("note" in h for h in hit)
@@ -2901,6 +2901,40 @@ def t_zarr_uncurated_variable_in_store_is_accepted():
     finally:
         tools._open_zarr = saved
     assert "total_precipitation_6hr" in tools.describe_collection("zarr", "weatherbench2-era5")["variables"]
+
+
+def t_embedding_store_decodes_and_picks_the_zone():
+    # OlmoEarth: one group per UTM zone, int8 with -128 nodata and a signed
+    # power rule in its attrs; the number is a feature, so it says so
+    import numpy as np
+    import zarr
+
+    from rasterio.warp import transform
+
+    xs, ys = transform("EPSG:4326", "EPSG:32646", [95.95], [4.31])
+    g = zarr.open_group(zarr.storage.MemoryStore(), mode="w")
+    g.attrs.update({"proj:code": "EPSG:32646", "spatial:transform": [10, 0, xs[0] - 500, 0, -10, ys[0] + 500],
+                    "geoemb:quantization": {"power": 2.0, "nodata": -128, "formula": "(abs(q) / 127.5) ** 2.0 * sign(q)"}})
+    g.create_array("time", data=np.array([2020, 2025]))
+    q = np.full((2, 2, 100, 100), -128, "int8")
+    q[1, 1, 20:80, 20:80] = -64  # the 2025 / dim 1 box around the point; 2020 is all nodata
+    g.create_array("embeddings", data=q)
+    opened = []
+    saved = tools._open_zone
+    tools._open_zone = lambda z, zone: opened.append(zone) or g
+    try:
+        z = tools.ZARR_STORES["olmoearth-v1-3-embeddings"]
+        bbox = [95.949, 4.309, 95.951, 4.311]
+        r = tools.compute_statistics("zarr", "olmoearth-v1-3-embeddings", "embeddings", bbox=bbox, sel={"time": "2025", "band": "1"})
+        assert opened == ["utm46"], opened
+        assert abs(r["embeddings"]["mean"] + (64 / 127.5) ** 2) < 1e-6 and r["coverage_pct"] == 100, r
+        assert "not a measurement" in r["caveats"][0]
+        assert "backfilling" in tools._embedding_statistics("o", z, bbox, {"time": "2020"})["error"]
+        assert "2020 to 2025" in tools._embedding_statistics("o", z, bbox, {"time": "2019"})["error"]
+        assert "10 km" in tools._embedding_statistics("o", z, [95.5, 4.0, 96.0, 4.5], {})["error"]
+    finally:
+        tools._open_zone = saved
+    assert "proj convention" in tools.tile_url_template("zarr", "olmoearth-v1-3-embeddings", "embeddings")
 
 
 def t_date_only_window_becomes_rfc3339():
