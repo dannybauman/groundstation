@@ -2508,6 +2508,9 @@ function addLayerTo(m, l, i) {
       paint: { "circle-radius": 7, "circle-color": l.color || "#d63b3b",
                "circle-opacity": .85, "circle-stroke-width": 1.5, "circle-stroke-color": "#fff" },
       filter: ["==", ["geometry-type"], "Point"] });
+    m.addLayer({ id: id + "-area", type: "fill", source: id,
+      paint: { "fill-color": l.color || "#d63b3b", "fill-opacity": l.fill_opacity ?? .35 },
+      filter: ["in", ["geometry-type"], ["literal", ["Polygon", "MultiPolygon"]]] });
     m.addLayer({ id: id + "-line", type: "line", source: id,
       paint: { "line-color": l.color || "#d63b3b", "line-width": 2 },
       filter: ["!=", ["geometry-type"], "Point"] });
@@ -2607,7 +2610,7 @@ if (COMPARE && rasters.length === 2) {
       cb.type = "checkbox"; cb.checked = true;
       cb.onchange = () => {
         const vis = cb.checked ? "visible" : "none";
-        [id, id + "-fill", id + "-line"].forEach(x => map.getLayer(x) && map.setLayoutProperty(x, "visibility", vis));
+        [id, id + "-fill", id + "-area", id + "-line"].forEach(x => map.getLayer(x) && map.setLayoutProperty(x, "visibility", vis));
       };
       const lab = document.createElement("span");
       lab.id = "lbl" + id; lab.textContent = " " + l.name;
@@ -3198,7 +3201,8 @@ def render_map(
        "bbox": [w, s, e, n]}  # pass the item's bbox when you have it (from
                               # search results) — it skips a STAC re-fetch
       {"type": "raster", "name": ..., "tiles": "https://..{z}/{x}/{y}.."}
-      {"type": "geojson", "name": ..., "data": <FeatureCollection>, "color": "#hex"}
+      {"type": "geojson", "name": ..., "data": <FeatureCollection>, "color": "#hex",
+       "fill_opacity": 0.35}  # polygons are filled, lines and points are not
       {"type": "coverage_set", "set": <full_coverage_set from search_imagery>,
        "name": "True colour",  # optional prefix, tiles get N/S/E/W-ish suffixes
        "assets"/"expression"/"colormap_name"/"rescale"/"opacity": ...}

@@ -395,6 +395,17 @@ def t_map_with_no_imagery_says_so():
         assert "coverage_note" not in r
 
 
+def t_geojson_polygons_are_filled():
+    # ForTy forest classes drawn as outlines only were unreadable over imagery;
+    # a polygon layer gets a fill, and the layer toggle has to hide it too
+    gj = {"type": "FeatureCollection", "features": []}
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "a.html"
+        tools.render_map("t", [0, 0, 10, 10], [{"type": "geojson", "name": "x", "data": gj}], out_path=str(p))
+        html = p.read_text()
+        assert '"-area", type: "fill"' in html and 'id + "-area", id + "-line"' in html
+
+
 def t_state_never_changes_the_file():
     # state is additive: the artifact a partner opens must be byte-identical
     # whether or not anything reads the structured half
