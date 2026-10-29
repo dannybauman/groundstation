@@ -84,6 +84,7 @@ skills/earth-data/SKILL.md   # the judgment layer for agents (cross-service)
 skills/stac-api/SKILL.md     # service-level: any STAC API instance
 skills/titiler/SKILL.md      # service-level: any TiTiler instance
 skills/groundstation/SKILL.md  # runs and demos it: doctor, console, briefs
+skills/new-data-explore/SKILL.md  # a new dataset or tool dropped: reach it, check it, map it, log traps
 selfdoc/llms.txt             # self-documenting-instance prototype (compose: selfdoc)
 briefing/brief.py            # brief + fleet + Slack delivery
 briefing/fleet.json          # example AOI watch list
