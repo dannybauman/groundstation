@@ -4353,7 +4353,8 @@ CLASSIFIER_MAX_YEARS = 4
 CLASS_COLORS = ("#1b7837", "#a6dba0", "#d9a03f", "#8c510a", "#e7298a", "#7570b3", "#66a61e", "#bdbdbd")
 
 
-def _labels_grid(labels: str | dict[str, Any], class_property: str, win: dict[str, Any], class_names: dict[str, str] | None = None):
+def _labels_grid(labels: str | dict[str, Any] | list[str | dict[str, Any]], class_property: str, win: dict[str, Any],
+                 class_names: dict[str, str | None] | None = None):
     """Labels burned onto the embedding window: an int grid (0 = unlabelled) and the class names, 1-based."""
     import numpy as np
     import rasterio
@@ -4363,6 +4364,16 @@ def _labels_grid(labels: str | dict[str, Any], class_property: str, win: dict[st
 
     shape = (win["rows"][1] - win["rows"][0], win["cols"][1] - win["cols"][0])
     tr = Affine(*win["transform"])
+    if isinstance(labels, list):
+        # sources stack in order: a later one labels only pixels the earlier ones left blank,
+        # and a class name shared across sources is one class
+        grid, names = np.zeros(shape, "int32"), []
+        for src in labels:
+            g, n = _labels_grid(src, class_property, win, class_names)
+            for i, name in enumerate(n, 1):
+                names += [name] if name not in names else []
+                grid[(g == i) & (grid == 0)] = names.index(name) + 1
+        return grid, names
     if isinstance(labels, str) and labels.lower().endswith((".geojson", ".json")):
         _require_local_file(labels, "labels path")
         labels = json.loads(Path(labels).read_text())
@@ -4380,17 +4391,23 @@ def _labels_grid(labels: str | dict[str, Any], class_property: str, win: dict[st
     with rasterio.open(labels, driver="GTiff") as ds:
         reproject(rasterio.band(ds, 1), dst, dst_transform=tr, dst_crs=win["crs"], dst_nodata=-1,
                   src_nodata=ds.nodata, resampling=Resampling.nearest)
-    values = sorted(int(v) for v in np.unique(dst) if v != -1)
-    grid = np.zeros(shape, "int32")
-    for i, v in enumerate(values):
-        grid[dst == v] = i + 1
-    return grid, [(class_names or {}).get(str(v), str(v)) for v in values]
+    grid, names = np.zeros(shape, "int32"), []
+    for v in sorted(int(v) for v in np.unique(dst) if v != -1):
+        name = (class_names or {}).get(str(v), str(v))
+        if name is None:  # named null: leave unlabelled
+            continue
+        names += [name] if name not in names else []
+        grid[dst == v] = names.index(name) + 1
+    return grid, names
 
 
-def _labels_bbox(labels: str | dict[str, Any]) -> list[float]:
+def _labels_bbox(labels: str | dict[str, Any] | list[str | dict[str, Any]]) -> list[float]:
     import rasterio
     from rasterio.warp import transform_bounds
 
+    if isinstance(labels, list):
+        boxes = [_labels_bbox(src) for src in labels]
+        return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
     if isinstance(labels, str) and not labels.lower().endswith((".geojson", ".json")):
         _require_local_file(labels, "labels path")
         with rasterio.open(labels, driver="GTiff") as ds:
@@ -4412,26 +4429,29 @@ def _labels_bbox(labels: str | dict[str, Any]) -> list[float]:
 
 
 def classify_embeddings(
-    labels: str | dict[str, Any],
+    labels: str | dict[str, Any] | list[str | dict[str, Any]],
     label_year: int,
     years: list[int] | None = None,
     bbox: list[float] | None = None,
     class_property: str = "class",
     method: str = "knn",
     store: str = "olmoearth-v1-3-embeddings",
-    class_names: dict[str, str] | None = None,
+    class_names: dict[str, str | None] | None = None,
     min_change_ha: float = 0.25,
 ) -> dict[str, Any]:
     """Labels in, class maps out: train a small scikit-learn classifier on annual embeddings, map other years.
 
     labels: a local GeoTIFF of class values (band 1, its nodata skipped), or GeoJSON
     points or polygons with a class property (a FeatureCollection, or a local .geojson path).
+    A list of sources stacks them: a later one labels only what the earlier ones left blank,
+    e.g. a land cover map plus a water mask so the sea gets its own class.
     label_year: the year the labels describe; the classifier trains on that year's embeddings.
     years: the years to map (default: label_year alone). Each becomes a local GeoTIFF that
     render_map draws with the returned `layer` ({"type": "file", ...}; swap `path` for another year).
     bbox: [w, s, e, n], default the labels' extent; about 10 km a side at most.
     method: "knn" (5 nearest neighbours), "logistic", or "centroid" (nearest class mean).
     class_names: for GeoTIFF labels, value to name, e.g. {"10": "tree cover"}; a file carries no names.
+    Two values with one name become one class; a value named null stays unlabelled.
     min_change_ha: a class change counts only where it forms a patch at least this big
     (default 0.25 ha, 25 pixels), so scattered single-pixel flips are not read as land change.
 
