@@ -64,7 +64,7 @@ REQUIRED_FIELDS = ("what", "ds-role", "integration", "speaks-to", "link", "when"
 # typo in stack.md cannot silently drop a component from every panel
 FACTS = (
     "catalogs", "collections", "tiler_hosts", "maplibre", "terrain",
-    "geocoded", "events", "weather", "passes", "mosaic_scenes", "snapshot",
+    "geocoded", "events", "weather", "passes", "mosaic_scenes", "snapshot", "local_rasters",
 )
 _ALIASES = {"catalog": "catalogs", "collection": "collections", "host": "tiler_hosts", "mosaic": "mosaic_scenes"}
 
@@ -186,6 +186,9 @@ def stack_instances(
     if facts.get("mosaic_scenes"):
         n = facts["mosaic_scenes"]
         instance_bits["rio-tiler"] = f"mosaicked {n} scenes into one frame, first valid pixel wins"
+    elif facts.get("local_rasters"):
+        n = facts["local_rasters"]
+        instance_bits["rio-tiler"] = f"read {n} raster file{'s' if n > 1 else ''} with no catalog or tiler and baked {'them' if n > 1 else 'it'} into the map"
     buckets: dict[str, list[str]] = {}
     for c in catalogs:
         if c in _CATALOG_BUCKET:
