@@ -483,6 +483,16 @@ def t_skill_tool_count_matches_server():
     assert int(m.group(1)) == len(TOOLS), f"SKILL.md says {m.group(1)} tools, server registers {len(TOOLS)}"
 
 
+def t_every_skill_names_its_folder():
+    # the plugin ships each skills/<dir>/SKILL.md; a frontmatter name that drifts
+    # from its folder, or a missing description, leaves the skill unfindable
+    root = Path(__file__).resolve().parents[1]
+    for p in sorted((root / "skills").glob("*/SKILL.md")):
+        head = p.read_text(encoding="utf-8").split("---")[1]
+        assert re.search(rf"^name: {re.escape(p.parent.name)}$", head, re.M), f"{p.parent.name}: name does not match folder"
+        assert re.search(r"^description: \S", head, re.M), f"{p.parent.name}: no description"
+
+
 def t_plugin_version_is_semver():
     # plugin installs are cached per version, so a bump is what actually
     # delivers new tools to anyone who installed via /plugin
