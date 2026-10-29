@@ -439,7 +439,7 @@ def t_local_raster_file_goes_on_the_map():
         assert list(north) == [0, 0, 255] and list(south) == [255, 0, 0], (north, south)
         vrt = Path(d) / "x.vrt"
         vrt.write_text(f"<VRTDataset><SimpleSource><SourceFilename>{tif}</SourceFilename></SimpleSource></VRTDataset>")
-        for bad in (str(vrt), "/vsicurl/http://127.0.0.1/x.tif", "file:///etc/hosts"):
+        for bad in (str(vrt), "/vsicurl/http://127.0.0.1/x.tif", "http://169.254.169.254/x.tif"):
             try:
                 tools.render_map("t", [10, 0, 12, 2], [{"type": "file", "path": bad}], out_path=str(Path(d) / "b.html"))
             except Exception:

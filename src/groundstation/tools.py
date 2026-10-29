@@ -2760,7 +2760,7 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
 
 
 def _file_layer(l: dict[str, Any], view: list[float] | None) -> dict[str, Any]:
-    """A {"type": "file"} layer (a local path or URL GDAL can open) baked into one PNG.
+    """A {"type": "file"} layer (a local GeoTIFF) baked into one PNG.
 
     rio-tiler reads the view's box in web mercator, honouring the file's nodata
     and any orientation GDAL understands (south-up included), so the image sits
@@ -2774,9 +2774,9 @@ def _file_layer(l: dict[str, Any], view: list[float] | None) -> dict[str, Any]:
         raise ValueError("file layer needs the map's bbox")
     w, s, e, n = view
     path = str(l["path"])
-    scheme = path.split("://", 1)[0].lower() if "://" in path else ""
-    if scheme not in ("", "http", "https") or path.lower().startswith("/vsi"):
-        raise ValueError("file layer path must be a local file or an http(s) URL")
+    # local only: a URL would let a prompt probe internal hosts; a public COG has its tiler route already
+    if "://" in path or path.lower().startswith("/vsi") or not Path(path).is_file():
+        raise ValueError("file layer path must be a local file; a public COG goes on as a raster layer through a TiTiler /cog tile URL")
     import rasterio
 
     # the console's agent passes paths from user prompts: GeoTIFF only, so a VRT
@@ -3256,7 +3256,7 @@ def render_map(
        "bbox": [w, s, e, n]}  # pass the item's bbox when you have it (from
                               # search results) — it skips a STAC re-fetch
       {"type": "raster", "name": ..., "tiles": "https://..{z}/{x}/{y}.."}
-      {"type": "file", "name": ..., "path": "/local/or/https/file.tif",
+      {"type": "file", "name": ..., "path": "/local/file.tif",
        "bands": [1], "nodata": 255,  # both optional; the file's own nodata is used
        "colormap": {"1": "#hex", ...} or "colormap_name": ..., "rescale": "lo,hi",
        "opacity": ...}  # a raster with no STAC item and no tiler: read over bbox
