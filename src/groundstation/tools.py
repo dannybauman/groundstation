@@ -4348,7 +4348,7 @@ CLASSIFIER_MAX_YEARS = 4
 CLASS_COLORS = ("#1b7837", "#a6dba0", "#d9a03f", "#8c510a", "#e7298a", "#7570b3", "#66a61e", "#bdbdbd")
 
 
-def _labels_grid(labels: str | dict[str, Any], class_property: str, win: dict[str, Any]):
+def _labels_grid(labels: str | dict[str, Any], class_property: str, win: dict[str, Any], class_names: dict[str, str] | None = None):
     """Labels burned onto the embedding window: an int grid (0 = unlabelled) and the class names, 1-based."""
     import numpy as np
     import rasterio
@@ -4379,7 +4379,7 @@ def _labels_grid(labels: str | dict[str, Any], class_property: str, win: dict[st
     grid = np.zeros(shape, "int32")
     for i, v in enumerate(values):
         grid[dst == v] = i + 1
-    return grid, [str(v) for v in values]
+    return grid, [(class_names or {}).get(str(v), str(v)) for v in values]
 
 
 def _labels_bbox(labels: str | dict[str, Any]) -> list[float]:
@@ -4414,6 +4414,7 @@ def classify_embeddings(
     class_property: str = "class",
     method: str = "knn",
     store: str = "olmoearth-v1-3-embeddings",
+    class_names: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Labels in, class maps out: train a small scikit-learn classifier on annual embeddings, map other years.
 
@@ -4424,6 +4425,7 @@ def classify_embeddings(
     render_map draws with the returned `layer` ({"type": "file", ...}; swap `path` for another year).
     bbox: [w, s, e, n], default the labels' extent; about 10 km a side at most.
     method: "knn" (5 nearest neighbours), "logistic", or "centroid" (nearest class mean).
+    class_names: for GeoTIFF labels, value to name, e.g. {"10": "tree cover"}; a file carries no names.
 
     Returns held_out_agreement_pct (agreement with the labels on a quarter of labelled
     pixels the model never saw), per_class labelled vs predicted shares, per year the
@@ -4456,7 +4458,7 @@ def classify_embeddings(
     if len(want) > CLASSIFIER_MAX_YEARS:
         return {"error": f"{len(want)} years asked; at most {CLASSIFIER_MAX_YEARS} per call, since each year reads about 64 MB at the 10 km cap"}
 
-    grid, names = _labels_grid(labels, class_property, win)
+    grid, names = _labels_grid(labels, class_property, win, class_names)
     g, (r0, r1), (c0, c1) = win["g"], win["rows"], win["cols"]
 
     def read(year):
