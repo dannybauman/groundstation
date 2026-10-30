@@ -3654,6 +3654,12 @@ def t_field_test_copies_artifacts_and_refuses_bad_out_dirs():
         assert "error" in tools.field_test(cases, "relative/dir")
         assert "error" in tools.field_test(cases, str(demo / "inside"))
         assert "error" in tools.field_test(cases, str(Path(tools.__file__).resolve().parents[2] / "x"))
+        # cases come from a model that may have read hostile text: escaped, links dropped
+        bad = dict(case, returned="<script>bad</script>", answer="<b>ok</b><img onerror=1>", artifact="javascript:alert(1)", image="../../x.png")
+        r = tools.field_test(dict(cases, title="<script>t</script>", rounds=[{"name": "r", "cases": [bad]}]), str(out))
+        page = Path(r["page"]).read_text(encoding="utf-8")
+        assert "<script>bad" not in page and "<script>t" not in page and "<img onerror" not in page
+        assert "<b>ok</b>" in page and "javascript:" not in page and "../../x.png" not in page
     finally:
         os.environ["GROUNDSTATION_OUT"] = saved
 

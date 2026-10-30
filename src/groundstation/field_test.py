@@ -262,7 +262,8 @@ def _autoshoot(case: dict, cases_path: Path) -> None:
     if not art or case.get("image") or art.startswith(("http://", "https://")):
         return
     src = (cases_path.parent / art).resolve()
-    if not src.exists() or src.suffix != ".html":
+    # never shoot (and write a .png beside) a file outside the page's own folder
+    if not src.is_relative_to(cases_path.parent) or not src.exists() or src.suffix != ".html":
         return
     png = src.with_suffix(".png")
     rel = os.path.relpath(png, cases_path.parent)
@@ -297,12 +298,13 @@ def _autoshoot_page(html_path: Path) -> Path | None:
         return None
 
 
-def build(cases_path: str | Path) -> Path:
+def build(cases_path: str | Path, maintainer: bool = True) -> Path:
     # _autoshoot resolves the artifact, so the cases folder must be resolved too:
     # on macOS /tmp is /private/tmp and the still's relpath climbs to / otherwise
     cases_path = Path(cases_path).resolve()
-    _preflight_server_freshness()
-    _preflight_version_bumped()
+    if maintainer:
+        _preflight_server_freshness()
+        _preflight_version_bumped()
     spec = json.loads(cases_path.read_text(encoding="utf-8"))
     n = 0
     rounds_html = []

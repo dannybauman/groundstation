@@ -5500,6 +5500,18 @@ def conditions_brief(
     return brief
 
 
+def _escape_strings(v: Any) -> Any:
+    import html
+
+    if isinstance(v, str):
+        return html.escape(v)
+    if isinstance(v, list):
+        return [_escape_strings(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _escape_strings(x) for k, x in v.items()}
+    return v
+
+
 def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
     """Build a field-test page from cases, entirely server-side.
 
@@ -5552,12 +5564,25 @@ def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
             src = Path(art)
             src = (src if src.is_absolute() else demo / src).resolve()
             if not src.is_file() or not src.is_relative_to(demo):
-                if not (out / art).is_file():
-                    warnings.append(f"artifact not found under the demo folder, left as is: {art}")
+                warnings.append(f"artifact not found under the demo folder, card has no link: {art}")
+                c["artifact"] = None
                 continue
             img.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, img / src.name)
             c["artifact"] = f"img/{src.name}"
+        for c in rnd.get("cases", []):
+            im = c.get("image")
+            if im and (Path(im).is_absolute() or ".." in Path(im).parts or ":" in str(im)):
+                c["image"] = None
+    # the cases come from a model that may have read untrusted text, so every field
+    # is escaped; only <b> and <em> survive, in answer and learning
+    spec = _escape_strings(spec)
+    for rnd in spec["rounds"]:
+        for c in rnd.get("cases", []):
+            for k in ("answer", "learning"):
+                if isinstance(c.get(k), str):
+                    for t in ("b", "em"):
+                        c[k] = c[k].replace(f"&lt;{t}&gt;", f"<{t}>").replace(f"&lt;/{t}&gt;", f"</{t}>")
     out.mkdir(parents=True, exist_ok=True)
     cases_path = out / f"field-test-{dt.date.today().isoformat()}.cases.json"
     cases_path.write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -5566,7 +5591,7 @@ def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
     err = io.StringIO()
     try:
         with contextlib.redirect_stdout(sys.stderr), contextlib.redirect_stderr(err):
-            page = ft.build(cases_path)
+            page = ft.build(cases_path, maintainer=False)
     except SystemExit as e:
         return {"error": str(e.code)}
     warnings += [ln.strip() for ln in err.getvalue().splitlines() if ln.strip()]
