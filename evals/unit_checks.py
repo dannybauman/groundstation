@@ -63,6 +63,43 @@ def t_expression_bindex_passthrough():
     assert expr == "(b1-b2)/(b1+b2)"
 
 
+_PACKED_ITEM = {"assets": {
+    "cog": {"eo:bands": [{"name": "B02", "eo:common_name": "blue"}, {"name": "B03", "eo:common_name": "green"},
+                         {"name": "B04", "eo:common_name": "red"}, {"name": "B08", "eo:common_name": "nir"},
+                         {"name": "B08a", "eo:common_name": "nir08"}]},
+    "thumbnail": {},
+}}
+
+
+def t_band_select_packed_asset():
+    # one 10-band file (UK EO DataHub S2 ARD): names resolve to band indexes, by common or band name
+    assert tools._band_select(_PACKED_ITEM, ["red", "green", "blue"]) == "cog|bidx=3,2,1"
+    assert tools._band_select(_PACKED_ITEM, ["B08", "red"]) == "cog|bidx=4,3"
+    assert tools._band_select(_PACKED_ITEM, ["swir16"]) is None
+    assert tools._band_select(None, ["red"]) is None
+
+
+def t_expression_packed_asset():
+    expr, assets = _expression_to_bands("(nir-red)/(nir+red)", None, _PACKED_ITEM)
+    assert expr == "(b1-b2)/(b1+b2)" and assets == ["cog|bidx=4,3"]
+    # names that are real assets keep the one-asset-per-band path, item or not
+    expr, assets = _expression_to_bands("(nir-red)/(nir+red)", None, {"assets": {"nir": {}, "red": {}}})
+    assert expr == "(b1-b2)/(b1+b2)" and assets == ["nir", "red"]
+
+
+def t_titiler_colormap_sends_legend_classes():
+    # titiler.xyz knows only built-in names, so a LEGENDS class map goes as an explicit colormap
+    k, v = tools._titiler_colormap("ukceh-landcover")
+    assert k == "colormap" and json.loads(v)["9"] == "#801A80" and "-1" not in json.loads(v)
+    assert tools._titiler_colormap("viridis") == ("colormap_name", "viridis")
+
+
+def t_catalog_fields_option_in_search_body():
+    # a catalog entry's `fields` asks its search for full properties (EODH returns only datetime otherwise)
+    assert tools.CATALOGS["eodh"]["fields"] == "properties"
+    assert not any("fields" in v for k, v in tools.CATALOGS.items() if k != "eodh")
+
+
 def t_coverage_full_partial_none():
     aoi = [-114.3, 50.8, -113.8, 51.2]  # roughly Calgary
     assert _bbox_coverage_pct(aoi, [-115.0, 50.0, -113.0, 52.0]) == 100.0

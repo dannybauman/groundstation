@@ -189,6 +189,16 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - link: https://planetarycomputer.microsoft.com
 - when: catalog=planetary-computer
 
+## UK EO DataHub
+- stage: catalog
+- what: the UK's national Earth observation hub; its open side is CEDA's STAC catalog of UK Sentinel ARD, EOCIS climate products and UKCP18
+- ds-role: uses
+- island: cng
+- integration: the catalog for UK analysis-ready Sentinel scenes and EOCIS products, read through the public tiler
+- speaks-to: STAC, Cloud object storage
+- link: https://eodatahub.org.uk
+- when: catalog=eodh
+
 ## Copernicus Sentinel
 - stage: data
 - what: ESA's Sentinel-1 radar and Sentinel-2 optical missions, free and open, revisiting every few days
@@ -196,7 +206,7 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - integration: the scenes behind every sentinel-2-l2a and sentinel-1-grd layer
 - speaks-to: Earth Search
 - link: https://dataspace.copernicus.eu
-- when: collection=sentinel-2-l2a,sentinel-2-l1c,sentinel-1-grd
+- when: collection=sentinel-2-l2a,sentinel-2-l1c,sentinel-1-grd,sentinel2_ard,sentinel1_ard
 
 ## Landsat
 - stage: data
