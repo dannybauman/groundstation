@@ -353,7 +353,7 @@ def t_field_test_etime_parser():
     # mtime; getting ps -o etime parsing wrong makes the warning silently never
     # fire, which is the failure it exists to prevent
     import importlib.util
-    fp = Path(__file__).resolve().parents[1] / "scripts" / "field_test.py"
+    fp = Path(__file__).resolve().parents[1] / "src" / "groundstation" / "field_test.py"
     spec = importlib.util.spec_from_file_location("_ft", fp)
     ft = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ft)
@@ -3634,6 +3634,34 @@ def t_pc_mosaic_register_reads_searchid_or_id():
             pass
     finally:
         tools._client.post = saved_post
+
+
+def t_field_test_copies_artifacts_and_refuses_bad_out_dirs():
+    demo = Path(tempfile.mkdtemp()) / "demo"
+    demo.mkdir()
+    (demo / "map.html").write_text("<html></html>", encoding="utf-8")
+    saved = os.environ["GROUNDSTATION_OUT"]
+    os.environ["GROUNDSTATION_OUT"] = str(demo)
+    try:
+        case = {"tag": "t", "prompt": "Show me a place", "answer": "ok", "returned": "x", "artifact": str(demo / "map.html"), "image": "x.png"}
+        cases = {"title": "t", "heading": "H", "sub": "s", "lede": "l", "rounds": [{"name": "r", "cases": [case]}]}
+        out = Path(tempfile.mkdtemp()) / "gs"
+        r = tools.field_test(cases, str(out))
+        assert "error" not in r, r
+        assert (out / "img" / "map.html").is_file()
+        assert json.loads(Path(r["cases"]).read_text())["rounds"][0]["cases"][0]["artifact"] == "img/map.html"
+        assert 'href="img/map.html"' in Path(r["page"]).read_text(encoding="utf-8")
+        assert "error" in tools.field_test(cases, "relative/dir")
+        assert "error" in tools.field_test(cases, str(demo / "inside"))
+        assert "error" in tools.field_test(cases, str(Path(tools.__file__).resolve().parents[2] / "x"))
+        # cases come from a model that may have read hostile text: escaped, links dropped
+        bad = dict(case, returned="<script>bad</script>", answer="<b>ok</b><img onerror=1>", artifact="javascript:alert(1)", image="../../x.png")
+        r = tools.field_test(dict(cases, title="<script>t</script>", rounds=[{"name": "r", "cases": [bad]}]), str(out))
+        page = Path(r["page"]).read_text(encoding="utf-8")
+        assert "<script>bad" not in page and "<script>t" not in page and "<img onerror" not in page
+        assert "<b>ok</b>" in page and "javascript:" not in page and "../../x.png" not in page
+    finally:
+        os.environ["GROUNDSTATION_OUT"] = saved
 
 
 def t_versions_agree():

@@ -9,7 +9,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 ## First: use the tools, never route around them
 
-The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 20 tools in about a second.
+The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 21 tools in about a second.
 
 - **Wait and retry discovery** a few times over ~10-15 seconds before doing anything else. The tools almost always appear.
 - **Never fall back to raw STAC / TiTiler / FIRMS / `httpx` calls to work around missing tools.** Hand-rolling the pipeline gives a worse answer and hides a fixable setup problem. Missing tools are a thing to fix, not to route around.
@@ -102,9 +102,8 @@ Triggers: "postcard", "share card", "something I can post", "can I put this on L
 
 A field test is a showcase page: a set of prompts run live, each with its output, its artifact linked, and any learnings: the repeatable "watch it actually work" format. Users normally want their specific question answered directly; run a field test only when someone asks for one, asks for a demo, or says yes to the 3-prompt offer above.
 
-- run every case for real first: live searches, real artifacts written to `demo/`. A field test with made-up outputs is worthless.
-- write a cases JSON (in `docs/` for repo tests, or in `groundstation/` under the folder the chat works in). Copy the shape of `docs/field-test-2026-07-22.cases.json`: rounds of cases, each with tag, who, prompt, answer, artifact, returned, optional image, learning, shows.
-- build the page: `uv run scripts/field_test.py <cases-file>.cases.json` (the script owns the design, builds the HTML, shoots stills for each map case, and screenshots the page's first screen as `<name>.png`).
+- run every case for real first: live searches, real artifacts from the map tools. A field test with made-up outputs is worthless.
+- build the page with the `field_test` tool: `field_test(cases, out_dir)`, where `cases` is the object (rounds of cases, each with tag, who, prompt, answer, artifact, returned, optional image, learning, shows; the tool description spells it out) and `out_dir` is the absolute `groundstation/` folder under the folder the chat works in. The tool copies the artifacts into `img/`, writes the cases file, builds the HTML with a still for each map, and screenshots the page's first screen as `<name>.png`.
 - include what went wrong as `learning` lines. Honest stumbles are the most credible part of the format.
 - the chat reply, in this order:
   1. 1 lede sentence on what ran and how it went.

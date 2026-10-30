@@ -5498,3 +5498,103 @@ def conditions_brief(
     brief["note"] = "current conditions from live sources — not a risk model, not a prediction; a source that did not answer is named in sources and an empty list is all-clear only when all_clear is true"
 
     return brief
+
+
+def _escape_strings(v: Any) -> Any:
+    import html
+
+    if isinstance(v, str):
+        return html.escape(v)
+    if isinstance(v, list):
+        return [_escape_strings(x) for x in v]
+    if isinstance(v, dict):
+        return {_escape_strings(k): _escape_strings(x) for k, x in v.items()}
+    return v
+
+
+def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
+    """Build a field-test page from cases, entirely server-side.
+
+    Use this instead of copying maps or running any script: it writes the cases
+    JSON into out_dir, copies every artifact your tools wrote (the .html paths
+    they returned) into out_dir/img/ and points the cards at img/<file>, builds
+    field-test-<date>.html plus a .png screenshot of its first screen beside
+    it, and returns the paths and any warnings. Run every case for real first;
+    `returned` is verbatim tool output, `answer` is your reading of it.
+
+    out_dir: an absolute folder you own. A relative path, or a folder inside
+    groundstation's own install, is refused.
+
+    cases shape:
+      {"title": "...", "heading": "THE FIELD TEST", "sub": "groundstation · 3 prompts · <date>",
+       "lede": "one or two sentences on what ran",
+       "rounds": [{"name": "Round name", "cases": [
+         {"tag": "short label", "who": "optional", "prompt": "what a person asked (plain words, never a command)",
+          "answer": "your reading; <b> and <em> allowed", "returned": "verbatim tool output",
+          "artifact": "path of the .html a tool returned", "image": "optional still",
+          "learning": "<b>Works|Partly|Not yet.</b> what came up", "shows": "optional"}]}],
+       "stats": [{"value": "3", "label": "prompts"}]  (optional)}
+    """
+    import contextlib
+    import io
+    import shutil
+    import sys
+
+    from groundstation import field_test as ft
+
+    out = Path(out_dir)
+    if not out.is_absolute():
+        return {"error": "out_dir must be an absolute path"}
+    out = out.resolve()
+    demo = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo")).resolve()
+    own = Path(__file__).resolve().parents[2]
+    if any(out == r or out.is_relative_to(r) for r in (own, demo)):
+        return {"error": "out_dir must be outside groundstation's own folder; pick a folder you own"}
+    if not isinstance(cases, dict) or not cases.get("rounds"):
+        return {"error": "cases needs title, heading, sub, lede and rounds (see the tool description)"}
+
+    warnings: list[str] = []
+    spec = json.loads(json.dumps(cases))
+    img = out / "img"
+    for rnd in spec["rounds"]:
+        for c in rnd.get("cases", []):
+            art = c.get("artifact")
+            if not art or str(art).startswith(("http://", "https://")):
+                continue
+            src = Path(art)
+            src = (src if src.is_absolute() else demo / src).resolve()
+            if not src.is_file() or not src.is_relative_to(demo):
+                warnings.append(f"artifact not found under the demo folder, card has no link: {art}")
+                c["artifact"] = None
+                continue
+            img.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, img / src.name)
+            c["artifact"] = f"img/{src.name}"
+        for c in rnd.get("cases", []):
+            im = c.get("image")
+            if im and not re.fullmatch(r"img/[A-Za-z0-9._-]+\.png", str(im)):
+                c["image"] = None
+    # the cases come from a model that may have read untrusted text, so every field
+    # is escaped; only <b> and <em> survive, in answer and learning
+    spec = _escape_strings(spec)
+    for rnd in spec["rounds"]:
+        for c in rnd.get("cases", []):
+            for k in ("answer", "learning"):
+                if isinstance(c.get(k), str):
+                    for t in ("b", "em"):
+                        c[k] = c[k].replace(f"&lt;{t}&gt;", f"<{t}>").replace(f"&lt;/{t}&gt;", f"</{t}>")
+    out.mkdir(parents=True, exist_ok=True)
+    cases_path = out / f"field-test-{dt.date.today().isoformat()}.cases.json"
+    cases_path.write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    # build() prints progress; on a stdio MCP server stdout is the protocol, so keep it off
+    err = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(sys.stderr), contextlib.redirect_stderr(err):
+            page = ft.build(cases_path, maintainer=False)
+    except SystemExit as e:
+        return {"error": str(e.code)}
+    warnings += [ln.strip() for ln in err.getvalue().splitlines() if ln.strip()]
+    png = page.with_suffix(".png")
+    return {"cases": str(cases_path), "page": str(page), "screenshot": str(png) if png.exists() else None,
+            "warnings": warnings}

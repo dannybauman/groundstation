@@ -53,6 +53,7 @@ TOOLS = (
     tools.smoke_forecast,
     tools.next_pass,
     tools.conditions_brief,
+    tools.field_test,
 )
 
 for fn in TOOLS:
