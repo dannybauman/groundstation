@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""The field-test factory: cases JSON in, the standard field-test page out.
+
+A field test is a repeatable ritual — check the running MCP server is not older
+than the code (this script warns), run real prompts against live data,
+show the outputs in one consistent format, link every result to its live
+interactive artifact. `returned` is verbatim machine output (numbers, ids,
+counts) and renders as a data block; `answer` is OUR reading of it and leads the card; the data follows the figure,
+one click away behind "show the data". Keeping
+them visually separate is the point — a reader must be able to tell what the
+tools said from what we concluded, or the honesty the cards claim is unearned. This script owns the format so each edition is just a
+cases file. Cases are curated by us (trusted); `answer`/`learning` allow the
+inline markup the cards use (<b>, <em>).
+
+    uv run scripts/field_test.py docs/field-test-2026-07-22.cases.json
+
+The MCP `field_test` tool calls build() too, so an agent in a confined chat never needs this script.
+"""
+
+from __future__ import annotations
+
+import html
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="only light">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
+  --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
+  --calm: #2e7d32; --blue: #1d4e8f;
+  color-scheme: only light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
+header { border-bottom: 2px solid var(--ink); padding: 42px 24px 30px; }
+.wrap { max-width: 1060px; margin: 0 auto; }
+header h1 { font: 700 34px/1.1 'Roboto Condensed', sans-serif; margin: 0 0 6px; letter-spacing: .02em; }
+header h1 .dot { display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); margin-right: 12px; }
+header .sub { font: 500 11.5px 'Roboto Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--mid); }
+header p.lede { max-width: 760px; font-size: 16px; margin: 16px 0 0; color: var(--mid); }
+.stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 26px auto 0; max-width: 1060px; padding: 0; }
+.stat { flex: 1; min-width: 160px; background: var(--white); border: 1px solid var(--rule); border-top: 3px solid var(--accent); padding: 12px 16px; }
+.stat b { display: block; font: 600 30px 'Roboto Condensed', sans-serif; color: var(--accent); }
+.stat span { font-size: 12px; color: var(--mid); }
+main { padding: 10px 24px 60px; }
+h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
+  display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
+h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; } }
+.card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.card .top { display: flex; align-items: center; gap: 10px; }
+.card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.card .tag { font: 500 10px 'Roboto Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); border: 1px solid var(--rule); padding: 3px 8px; }
+.card .who { margin-left: auto; font: 400 10.5px 'Roboto Mono', monospace; color: var(--muted); }
+.label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
+.returned { font: 400 12px/1.5 'Roboto Mono', monospace; background: #fbfaf7; border: 1px solid var(--rule); border-left: 3px solid var(--mid); padding: 8px 12px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+details.data summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; margin-bottom: 3px; }
+.answer { font-size: 13.5px; color: var(--mid); }
+.answer b { color: var(--ink); }
+.learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
+.learning b { color: var(--accent); font-style: normal; }
+.shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.headline { font-size: 12.5px; color: var(--mid); border-left: 3px solid var(--accent); padding-left: 10px; }
+.headline b { color: var(--accent); }
+details.more > summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+details.more[open] > summary { margin-bottom: 10px; }
+details.more > * + * { margin-top: 10px; }
+@media (max-width: 999px) {
+  .card { display: grid; grid-template-columns: 300px minmax(0, 1fr); grid-auto-rows: min-content; align-content: start; gap: 8px 20px; padding: 16px; }
+  .card > * { grid-column: 2; min-width: 0; }
+  .card > .fig { grid-column: 1; grid-row: 1 / span 5; align-self: start; }
+  .card.nofig { grid-template-columns: minmax(0, 1fr); }
+  .card.nofig > * { grid-column: 1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/10; object-fit: cover; }
+}
+@media (max-width: 700px) {
+  .card { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px; }
+  .card > *, .card > .fig { grid-column: 1; grid-row: auto; }
+  .card > .fig { order: -1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/7; }
+  .card .top { flex-wrap: wrap; }
+  .card .who { margin-left: 0; }
+}
+.repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fig { position: relative; display: block; min-height: 44px; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; aspect-ratio: 10/7; }
+.fig:not(:has(img)) { aspect-ratio: 16/10; background: var(--paper); }
+.fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
+  background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
+.fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 16px 40px; }
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <h1><span class="dot"></span>__HEADING__</h1>
+  <div class="sub">__SUB__</div>
+  <p class="lede">__LEDE__</p>
+</div></header>
+
+<div class="stats wrap" style="padding: 0 24px">
+__STATS__
+</div>
+
+<main class="wrap">
+__ROUNDS__
+__REPRO__
+</main>
+
+<footer>__FOOTER__</footer>
+
+</body>
+</html>
+"""
+
+
+def _etime_seconds(s: str) -> float | None:
+    """`ps -o etime` as seconds. Formats: MM:SS, HH:MM:SS, DD-HH:MM:SS."""
+    s = s.strip()
+    if not s:
+        return None
+    days, _, rest = s.rpartition("-")
+    try:
+        parts = [float(x) for x in rest.split(":")]
+    except ValueError:
+        return None
+    secs = 0.0
+    for x in parts:
+        secs = secs * 60 + x
+    return secs + (float(days) * 86400 if days else 0.0)
+
+
+def _preflight_version_bumped() -> None:
+    """Warn when shipped code changed after the last plugin version bump.
+
+    Installs cache per version, so a copy keeps serving whatever tool set it
+    was installed with. On Aug 5 2026 five commits of behaviour sat behind an
+    unchanged 0.6.1 — state on both renderers, the 3D coverage note, weather
+    elevation, the no-imagery warning — and nobody on that version had any of
+    it. A field test is the publish moment, so it is the right place to ask.
+    """
+    root = Path(__file__).resolve().parents[2]
+
+    def _last_commit(*paths: str) -> str:
+        try:
+            return subprocess.run(["git", "-C", str(root), "log", "-1", "--format=%ct", "--", *paths],
+                                  capture_output=True, text=True, timeout=5).stdout.strip()
+        except Exception:
+            return ""
+
+    ver = _last_commit(".claude-plugin/plugin.json")
+    code = _last_commit("src", "skills")
+    if ver and code and int(code) > int(ver):
+        print(
+            "  [!] src/ or skills/ changed after the last plugin version bump. Installs cache\n"
+            "      per version, so anyone on the current version will not see these changes.\n"
+            "      Bump .claude-plugin/plugin.json before publishing this page.",
+            file=sys.stderr,
+        )
+
+
+def _preflight_server_freshness() -> None:
+    """Warn when a running MCP server predates the code this page will describe.
+
+    A field test run through MCP tools reports whatever the SERVER booted with,
+    not the working tree. On Aug 5 2026 that gap was real and silent: the same
+    B22A query returned 0% through MCP and 83.2% in-process, because the server
+    had started before the antimeridian fix merged. A page built that way
+    documents a version of groundstation nobody has.
+    """
+    src = Path(__file__).resolve().parent
+    if not src.exists():
+        return
+    newest = max((f.stat().st_mtime for f in src.rglob("*.py")), default=0)
+    try:
+        pids = subprocess.run(["pgrep", "-f", "run groundstation"],
+                              capture_output=True, text=True, timeout=5).stdout.split()
+    except Exception:
+        return
+    stale = []
+    for pid in pids:
+        try:
+            et = subprocess.run(["ps", "-o", "etime=", "-p", pid],
+                                capture_output=True, text=True, timeout=5).stdout
+        except Exception:
+            continue
+        secs = _etime_seconds(et)
+        if secs is not None and (time.time() - secs) < newest:
+            stale.append(pid)
+    if stale:
+        mins = int((time.time() - newest) / 60)
+        print(
+            f"  [!] {len(stale)} groundstation MCP server(s) started BEFORE the newest source "
+            f"change ({mins} min ago): pid {', '.join(stale)}.\n"
+            "      Cases run through MCP tools will reflect the old code. Either reconnect the\n"
+            "      server (/mcp in Claude Code) or run the cases in-process before trusting this page.",
+            file=sys.stderr,
+        )
+
+
+def _card(n: int, c: dict) -> str:
+    def first(t: str) -> str:
+        t = re.sub(r"<[^>]+>", "", t or "")
+        m = re.match(r"(.+?[.!?])(\s|$)", t)
+        t = m.group(1) if m else t
+        return html.escape(t if len(t) <= 190 else t[:190].rsplit(" ", 1)[0] + "…")
+
+    cls = "card" if c.get("artifact") else "card nofig"
+    parts = [f'<div class="{cls}"><div class="top"><div class="num">{n}</div>'
+             f'<div class="tag">{c["tag"]}</div><div class="who">{c.get("who", "")}</div></div>']
+    parts.append(f'<div><div class="label">Input</div><div class="prompt">{c["prompt"]}</div></div>')
+    read_label = "Our read" if c.get("returned") else "Output"
+    parts.append(f'<div><div class="label">{read_label}</div><div class="answer">{first(c["answer"])}</div></div>')
+    if c.get("learning"):
+        m = re.match(r"\s*<b>(.*?)</b>", c["learning"], re.S)
+        head = html.escape(re.sub(r"<[^>]+>", "", m.group(1))) if m else first(c["learning"])
+        parts.append(f'<div class="headline"><b>Learning →</b> {head}</div>')
+    if c.get("artifact"):
+        img = f'<img src="{c["image"]}" alt="artifact produced by example {n}" loading="lazy">' if c.get("image") else ""
+        label = c.get("artifact_label", "live artifact ↗")
+        parts.append(f'<a class="fig" href="{c["artifact"]}" target="_blank" title="open the live artifact">{img}<span class="open">{label}</span></a>')
+    more = [f'<div class="answer"><div class="label">{read_label}</div>{c["answer"]}</div>']
+    if c.get("returned"):
+        more.append(f'<details class="data"><summary>show the data</summary>'
+                    f'<div class="returned">{c["returned"]}</div></details>')
+    if c.get("learning"):
+        more.append(f'<div class="learning"><b>Learning →</b> {c["learning"]}</div>')
+    if c.get("shows"):
+        more.append(f'<div class="shows">{c["shows"]}</div>')
+    parts.append('<details class="more"><summary>full read</summary>' + "\n".join(more) + "</details>")
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _autoshoot(case: dict, cases_path: Path) -> None:
+    """Fill in a card's still from its artifact, so `image` is never hand-authored.
+
+    A card with no image renders as a text-only block — the single most common
+    way a field-test page ships looking half-built. The artifact is already on
+    disk, so the still is derivable and nobody should have to remember it.
+    Shoots once and reuses: delete the .png to force a re-shoot.
+    """
+    art = case.get("artifact")
+    if not art or case.get("image") or art.startswith(("http://", "https://")):
+        return
+    src = (cases_path.parent / art).resolve()
+    if not src.exists() or src.suffix != ".html":
+        return
+    png = src.with_suffix(".png")
+    rel = os.path.relpath(png, cases_path.parent)
+    if png.exists():
+        case["image"] = rel
+        return
+    try:
+        from groundstation.tools import _snapshot_artifact
+
+        png.write_bytes(_snapshot_artifact(str(src), width=1000, height=700))
+        case["image"] = rel
+        print(f"  shot {rel} ({png.stat().st_size // 1024} KB)")
+    except Exception as e:
+        print(f"  no still for {src.name}: {e}", file=sys.stderr)
+
+
+def _autoshoot_page(html_path: Path) -> Path | None:
+    """Shoot the first screen of the compiled field test, so every run has visual proof.
+
+    Unlike a map still this reshoots every build: the page changes whenever the
+    cases do, and a same-day rerun reuses the name
+    """
+    png = html_path.with_suffix(".png")
+    try:
+        from groundstation.tools import _snapshot_artifact
+
+        png.write_bytes(_snapshot_artifact(str(html_path), width=1200, height=900))
+        print(f"  shot page {png.name} ({png.stat().st_size // 1024} KB)")
+        return png
+    except Exception as e:
+        print(f"  no page still for {html_path.name}: {e}", file=sys.stderr)
+        return None
+
+
+def build(cases_path: str | Path) -> Path:
+    # _autoshoot resolves the artifact, so the cases folder must be resolved too:
+    # on macOS /tmp is /private/tmp and the still's relpath climbs to / otherwise
+    cases_path = Path(cases_path).resolve()
+    _preflight_server_freshness()
+    _preflight_version_bumped()
+    spec = json.loads(cases_path.read_text(encoding="utf-8"))
+    n = 0
+    rounds_html = []
+    for rnd in spec["rounds"]:
+        cards = []
+        for c in rnd["cases"]:
+            n += 1
+            # the input is what a person asked; a command belongs in the data block (field tests 8, 18 and 19 slipped)
+            if re.match(r"^\S+\.(py|sh)\b|^(uv|python3?|node|npx)\s", c["prompt"]) or " --" in c["prompt"]:
+                sys.exit(f"case {n}: the input reads as a command, not an ask: {c['prompt'][:80]!r}")
+            _autoshoot(c, cases_path)
+            cards.append(_card(n, c))
+        rounds_html.append(f'<h2 class="round">{rnd["name"]}</h2>\n<div class="grid">\n' + "\n\n".join(cards) + "\n</div>")
+    stats = "\n".join(f'  <div class="stat"><b>{s["value"]}</b><span>{s["label"]}</span></div>' for s in spec.get("stats", []))
+    repro = ""
+    if spec.get("repro"):
+        repro = f'<div class="repro"><div class="label">Reproduce</div><code>{spec["repro"]}</code></div>'
+    html = (
+        PAGE.replace("__TITLE__", spec["title"])
+        .replace("__HEADING__", spec["heading"])
+        .replace("__SUB__", spec["sub"])
+        .replace("__LEDE__", spec["lede"])
+        .replace("__STATS__", stats)
+        .replace("__ROUNDS__", "\n\n".join(rounds_html))
+        .replace("__REPRO__", repro)
+        .replace("__FOOTER__", spec.get("footer", "groundstation · Development Seed labs"))
+    )
+    out = Path(cases_path).with_suffix("").with_suffix(".html")  # x.cases.json -> x.html
+    out.write_text(html, encoding="utf-8")
+    print(f"wrote {out} ({n} cases)")
+    _autoshoot_page(out)
+    return out
