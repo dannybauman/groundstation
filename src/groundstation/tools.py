@@ -5590,8 +5590,10 @@ def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
     # build() prints progress; on a stdio MCP server stdout is the protocol, so keep it off
     err = io.StringIO()
     try:
-        with contextlib.redirect_stdout(sys.stderr), contextlib.redirect_stderr(err):
-            page = ft.build(cases_path, maintainer=False)
+        # Playwright's sync API refuses to run on a thread with an asyncio loop,
+        # and the MCP server calls tools on its loop thread
+        with contextlib.redirect_stdout(sys.stderr), contextlib.redirect_stderr(err), ThreadPoolExecutor(1) as pool:
+            page = pool.submit(ft.build, cases_path, False).result()
     except SystemExit as e:
         return {"error": str(e.code)}
     warnings += [ln.strip() for ln in err.getvalue().splitlines() if ln.strip()]
