@@ -5508,7 +5508,7 @@ def _escape_strings(v: Any) -> Any:
     if isinstance(v, list):
         return [_escape_strings(x) for x in v]
     if isinstance(v, dict):
-        return {k: _escape_strings(x) for k, x in v.items()}
+        return {_escape_strings(k): _escape_strings(x) for k, x in v.items()}
     return v
 
 
@@ -5572,7 +5572,7 @@ def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
             c["artifact"] = f"img/{src.name}"
         for c in rnd.get("cases", []):
             im = c.get("image")
-            if im and (Path(im).is_absolute() or ".." in Path(im).parts or ":" in str(im)):
+            if im and not re.fullmatch(r"img/[A-Za-z0-9._-]+\.png", str(im)):
                 c["image"] = None
     # the cases come from a model that may have read untrusted text, so every field
     # is escaped; only <b> and <em> survive, in answer and learning
