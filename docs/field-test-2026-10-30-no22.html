@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="only light">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>groundstation field test №22: the UK EO DataHub, a fourth catalog</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='%23CF3F02'/></svg>">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;600;700&family=Roboto+Mono:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --muted: #9a9490;
+  --rule: #dedad4; --paper: #f7f4ef; --white: #fff;
+  --calm: #2e7d32; --blue: #1d4e8f;
+  color-scheme: only light;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 15px/1.6 Roboto, sans-serif; color: var(--ink); background: var(--paper); }
+header { border-bottom: 2px solid var(--ink); padding: 42px 24px 30px; }
+.wrap { max-width: 1060px; margin: 0 auto; }
+header h1 { font: 700 34px/1.1 'Roboto Condensed', sans-serif; margin: 0 0 6px; letter-spacing: .02em; }
+header h1 .dot { display: inline-block; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); margin-right: 12px; }
+header .sub { font: 500 11.5px 'Roboto Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--mid); }
+header p.lede { max-width: 760px; font-size: 16px; margin: 16px 0 0; color: var(--mid); }
+.stats { display: flex; gap: 14px; flex-wrap: wrap; margin: 26px auto 0; max-width: 1060px; padding: 0; }
+.stat { flex: 1; min-width: 160px; background: var(--white); border: 1px solid var(--rule); border-top: 3px solid var(--accent); padding: 12px 16px; }
+.stat b { display: block; font: 600 30px 'Roboto Condensed', sans-serif; color: var(--accent); }
+.stat span { font-size: 12px; color: var(--mid); }
+main { padding: 10px 24px 60px; }
+h2.round { font: 500 12px 'Roboto Mono', monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--mid);
+  display: flex; align-items: center; gap: 12px; margin: 44px 0 18px; }
+h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1000px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; } }
+.card { background: var(--white); border: 1px solid var(--rule); padding: 18px 20px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.card .top { display: flex; align-items: center; gap: 10px; }
+.card .num { font: 700 15px 'Roboto Condensed', sans-serif; background: var(--ink); color: var(--paper); width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none; }
+.card .tag { font: 500 10px 'Roboto Mono', monospace; letter-spacing: .1em; text-transform: uppercase; color: var(--mid); border: 1px solid var(--rule); padding: 3px 8px; }
+.card .who { margin-left: auto; font: 400 10.5px 'Roboto Mono', monospace; color: var(--muted); }
+.label { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.prompt { font: 400 12.5px/1.55 'Roboto Mono', monospace; background: var(--paper); border: 1px solid var(--rule); padding: 9px 12px; color: var(--ink); }
+.returned { font: 400 12px/1.5 'Roboto Mono', monospace; background: #fbfaf7; border: 1px solid var(--rule); border-left: 3px solid var(--mid); padding: 8px 12px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+details.data summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; margin-bottom: 3px; }
+.answer { font-size: 13.5px; color: var(--mid); }
+.answer b { color: var(--ink); }
+.learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
+.learning b { color: var(--accent); font-style: normal; }
+.shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
+.headline { font-size: 12.5px; color: var(--mid); border-left: 3px solid var(--accent); padding-left: 10px; }
+.headline b { color: var(--accent); }
+details.more > summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+details.more[open] > summary { margin-bottom: 10px; }
+details.more > * + * { margin-top: 10px; }
+@media (max-width: 999px) {
+  .card { display: grid; grid-template-columns: 300px minmax(0, 1fr); grid-auto-rows: min-content; align-content: start; gap: 8px 20px; padding: 16px; }
+  .card > * { grid-column: 2; min-width: 0; }
+  .card > .fig { grid-column: 1; grid-row: 1 / span 5; align-self: start; }
+  .card.nofig { grid-template-columns: minmax(0, 1fr); }
+  .card.nofig > * { grid-column: 1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/10; object-fit: cover; }
+}
+@media (max-width: 700px) {
+  .card { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 12px; }
+  .card > *, .card > .fig { grid-column: 1; grid-row: auto; }
+  .card > .fig { order: -1; }
+  .fig img, .fig:not(:has(img)) { aspect-ratio: 16/7; }
+  .card .top { flex-wrap: wrap; }
+  .card .who { margin-left: 0; }
+}
+.repro { background: var(--white); border: 1px solid var(--rule); padding: 16px 20px; margin-top: 40px; }
+.repro code { display: block; font: 400 12px/1.6 'Roboto Mono', monospace; background: var(--paper); padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fig { position: relative; display: block; min-height: 44px; border: 1px solid var(--rule); text-decoration: none; }
+.fig img { width: 100%; display: block; aspect-ratio: 10/7; }
+.fig:not(:has(img)) { aspect-ratio: 16/10; background: var(--paper); }
+.fig .open { position: absolute; right: 8px; bottom: 8px; font: 500 10px 'Roboto Mono', monospace;
+  background: var(--paper); border: 1px solid var(--ink); padding: 3px 8px; color: var(--ink); }
+.fig:hover .open { background: var(--accent); color: #fff; border-color: var(--accent); }
+footer { text-align: center; font: 400 11px 'Roboto Mono', monospace; color: var(--muted); padding: 26px 16px 40px; }
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <h1><span class="dot"></span>THE FIELD TEST №22</h1>
+  <div class="sub">groundstation · 5 prompts · 5 live artifacts · 3 works, 2 partly, 0 not yet · October 30, 2026 · Development Seed labs</div>
+  <p class="lede">UK EO DataHub's open catalog (CEDA's STAC of UK Sentinel ARD and EOCIS products) is now a fourth catalog, beside Earth Search, NASA VEDA and Planetary Computer. Its pixels are public COGs, so the shared tiler draws them with no account. These 5 asks cover what that opens: a UK optical swipe, band math inside a packed 10-band file, radar, a class map and a scaled vegetation product. Not here yet: EODH's commercial imagery (an account), its own tiler (an account) and its NetCDF products (UKCP18, CMIP6, land surface temperature, sea ice), which this render path cannot draw. Run on add-eodh-catalog at 0.69.0.</p>
+</div></header>
+
+<div class="stats wrap" style="padding: 0 24px">
+  <div class="stat"><b>5</b><span>prompts: a swipe, NDVI by name, radar, a class map, a scaled product</span></div>
+  <div class="stat"><b>3 · 2 · 0</b><span>works · partly · not yet, each verdict grounded in the raw output</span></div>
+  <div class="stat"><b>5</b><span>live artifacts, all read from UK EO DataHub through the public tiler</span></div>
+</div>
+
+<main class="wrap">
+<h2 class="round">Round 1: 5 UK asks against the new catalog</h2>
+<div class="grid">
+<div class="card"><div class="top"><div class="num">1</div><div class="tag">a UK catalog, swiped</div><div class="who">Danny</div></div>
+<div><div class="label">Input</div><div class="prompt">Show me the Somerset Levels this spring and this summer from the UK's own Sentinel-2 data. Is there still floodwater in March?</div></div>
+<div><div class="label">Our read</div><div class="answer">No widespread floodwater on 19 March 2026.</div></div>
+<div class="headline"><b>Learning →</b> Works.</div>
+<a class="fig" href="img/ft22-somerset-levels.html" target="_blank" title="open the live artifact"><img src="img/ft22-somerset-levels.png" alt="artifact produced by example 1" loading="lazy"><span class="open">swipe map: Somerset Levels, 19 March and 13 August 2026 ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>No widespread floodwater on 19 March 2026.</b> UK EO DataHub's Sentinel-2 ARD (Defra and JNCC) had a 0.0% cloud scene on 2026-03-19 and a 0.01% one on 2026-08-13, both covering the whole box. The water index (NDWI) stays below zero almost everywhere in March: its 98th percentile is -0.30, so open water is a small fraction of the box, not a flooded moor. The Levels were greener in March than in August: median NDVI 0.784 against 0.522, which reads as grass grown in spring, then cut or dried by late summer. The swipe map shows both dates in true colour.</div>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("eodh", ["sentinel2_ard"], bbox=[-2.95, 51.05, -2.75, 51.17], datetime_range="2026-01-01/2026-03-31", max_cloud_cover=30)
+  recommended: neodc.sentinel_ard.data.sentinel_2.2026.03.19.S2C_20260319_latn510lonw0022_T30UWB_ORB037_20260319145859_utm30n_osgb
+  cloud_cover 0.0  covers_aoi_pct 100.0
+  reason: clearest (0.0% cloud) and best-covering (100.0% of the area), not a tradeoff
+search_imagery("eodh", ["sentinel2_ard"], bbox=[-2.95, 51.05, -2.75, 51.17], datetime_range="2026-06-01/2026-08-31", max_cloud_cover=15)
+  recommended: neodc.sentinel_ard.data.sentinel_2.2026.08.13.S2C_20260813_latn510lonw0022_T30UWB_ORB137_20260813132151_utm30n_osgb
+  cloud_cover 0.01  covers_aoi_pct 100.0
+  reason: clearest (0.0% cloud) and best-covering (100.0% of the area), not a tradeoff; the newest, 2026-08-23, lost on coverage: 45.3% against the pick's 100.0%, outside the 5-point band
+compute_statistics(..., 2026-03-19, expression="(nir-red)/(nir+red)")
+  min -0.2871  max 0.9921  mean 0.7344  median 0.7837  p2 0.2787  p98 0.915  valid 100.0%  description "(cog_Red-cog_Red)/(cog_Red+cog_Red)"
+compute_statistics(..., 2026-08-13, expression="(nir-red)/(nir+red)")
+  min -0.1562  max 0.9242  mean 0.5226  median 0.5217  p2 0.1702  p98 0.8517  valid 100.0%  description "(cog_Red-cog_Red)/(cog_Red+cog_Red)"
+compute_statistics(..., 2026-03-19, expression="(green-nir)/(green+nir)")
+  min -0.9941  max 0.3898  mean -0.6512  median -0.6832  p2 -0.8034  p98 -0.3008  valid 100.0%  description "(cog_NIR_B8-cog_NIR_B8)/(cog_NIR_B8+cog_NIR_B8)"
+compute_statistics(..., 2026-08-13, expression="(green-nir)/(green+nir)")
+  min -0.8748  max 0.28  mean -0.5783  median -0.5873  p2 -0.7736  p98 -0.3251  valid 100.0%  description "(cog_NIR_B8-cog_NIR_B8)/(cog_NIR_B8+cog_NIR_B8)"
+render_map(..., layers=[2026-03-19, 2026-08-13], compare=True)  # no assets passed
+  tiles: ...&assets=cog|bidx=3,2,1  (true colour picked from the file's own band list)
+  rescale 41,164: 2nd to 98th percentile of the raw values over the box, widest of 2 scenes</div></details>
+<div class="learning"><b>Learning →</b> <b>Works.</b> Two things had to change for this card. EODH's search returns only <em>datetime</em> for each item, so groundstation now asks for the full properties (a <em>fields</em> setting on the catalog's entry) and gets cloud cover back. The cloud filter itself was always applied on EODH's side. And all 10 bands sit in one file, so true colour comes from that file's band list (<em>cog|bidx=3,2,1</em>) without the caller naming bands.</div>
+<div class="shows">a fourth catalog · cloud cover restored with a STAC fields request · true colour from a packed 10-band file · swipe</div></details>
+</div>
+
+<div class="card"><div class="top"><div class="num">2</div><div class="tag">band math by name</div><div class="who">Danny</div></div>
+<div><div class="label">Input</div><div class="prompt">How green is the New Forest in mid October?</div></div>
+<div><div class="label">Our read</div><div class="answer">Still green: median NDVI 0.723 over the box on 17 October 2026 (0.06% cloud, the whole box covered), with the middle 96% of pixels between 0.32 and 0.86.</div></div>
+<div class="headline"><b>Learning →</b> Works, with a label to ignore and clouds to look for.</div>
+<a class="fig" href="img/ft22-new-forest-ndvi.html" target="_blank" title="open the live artifact"><img src="img/ft22-new-forest-ndvi.png" alt="artifact produced by example 2" loading="lazy"><span class="open">map: New Forest true colour and NDVI, 17 October 2026 ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Still green: median NDVI 0.723 over the box on 17 October 2026</b> (0.06% cloud, the whole box covered), with the middle 96% of pixels between 0.32 and 0.86. The low end is the open heath and the villages, the high end the woodland. One thing to weigh: the scene's 0.06% cloud is a figure for the whole tile, and the map shows a scatter of small cumulus over the forest that come out as orange spots in the NDVI. They are a sliver of the box, so they pull the low tail, not the median. The map swipes true colour against NDVI.</div>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("eodh", ["sentinel2_ard"], bbox=[-1.75, 50.80, -1.50, 50.95], datetime_range="2026-08-01/2026-10-21", max_cloud_cover=15)
+  recommended: neodc.sentinel_ard.data.sentinel_2.2026.10.17.S2B_20261017_latn510lonw0022_T30UWB_ORB137_20261017131842_utm30n_osgb
+  cloud_cover 0.06  covers_aoi_pct 100.0
+  reason: clearest (0.1% cloud) and best-covering (100.0% of the area), not a tradeoff
+compute_statistics("eodh", "sentinel2_ard", <2026-10-17>, expression="(nir-red)/(nir+red)", bbox=[-1.75, 50.80, -1.50, 50.95])
+  min -0.2842  max 0.9184  mean 0.6906  median 0.723  p2 0.3226  p98 0.865  valid 100.0%  description "(cog_Red-cog_Red)/(cog_Red+cog_Red)"
+preview_item(..., expression="(nir-red)/(nir+red)", colormap_name="rdylgn")
+  ...&expression=(b1-b2)/(b1+b2)&assets=cog|bidx=7,3&rescale=-1,1&colormap_name=rdylgn</div></details>
+<div class="learning"><b>Learning →</b> <b>Works, with a label to ignore and clouds to look for.</b> The expression names <em>nir</em> and <em>red</em>, which are bands inside one file here, not assets. groundstation reads the item's <em>eo:bands</em> and turns them into band 7 and band 3 of that file. The tiler then labels the result <em>(cog_Red-cog_Red)/(cog_Red+cog_Red)</em>. That label is wrong and the number is right: the file names its bands Blue, Green, Red, RE_B5, RE_B6, RE_B7, NIR_B8, and a woodland pixel read directly gives red 49, NIR 320, an NDVI of 0.73.</div>
+<div class="shows">nir and red resolved inside one 10-band file · NDVI number with its spread · index map</div></details>
+</div>
+
+<div class="card"><div class="top"><div class="num">3</div><div class="tag">radar, and how fresh</div><div class="who">Danny</div></div>
+<div><div class="label">Input</div><div class="prompt">The Sound of Barra on radar, the most recent pass</div></div>
+<div><div class="label">Our read</div><div class="answer">The newest radar pass over Barra in this catalog is 13 July 2026, 3.5 months old, while its Sentinel-2 runs to 21 October.</div></div>
+<div class="headline"><b>Learning →</b> Partly.</div>
+<a class="fig" href="img/ft22-barra-radar.html" target="_blank" title="open the live artifact"><img src="img/ft22-barra-radar.png" alt="artifact produced by example 3" loading="lazy"><span class="open">map: Sound of Barra, Sentinel-1 VV backscatter, 13 July 2026 ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>The newest radar pass over Barra in this catalog is 13 July 2026</b>, 3.5 months old, while its Sentinel-2 runs to 21 October. Radar sees through the Hebridean cloud, and the VV backscatter shows it: median -27.4 dB over the box, water and sand flats dark (the 2nd percentile is -40.2 dB), land and rock brighter (98th percentile -9.7 dB). 80% of the box has data, and the rest falls outside the swath.</div>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("eodh", ["sentinel1_ard"], bbox=[-7.45, 57.0, -7.15, 57.15], limit=5)
+  2026-07-13  covers 100.0  neodc.sentinel_ard.data.sentinel_1.2026.07.13.S1C_20260713_125_desc_064542_064607_VVVH_G0_GB_OSGB_RTCK_SpkRL
+  2026-07-13  covers 100.0  neodc.sentinel_ard.data.sentinel_1.2026.07.13.S1C_20260713_125_desc_064542_064607_VVVH_G0_NI_TM65_RTCK_SpkRL
+  2026-07-13  covers 100.0  neodc.sentinel_ard.data.sentinel_1.2026.07.13.S1C_20260713_125_desc_064517_064542_VVVH_G0_GB_OSGB_RTCK_SpkRL
+  2026-07-11  covers 100.0  neodc.sentinel_ard.data.sentinel_1.2026.07.11.S1C_20260711_103_asc_181503_181528_VVVH_G0_GB_OSGB_RTCK_SpkRL
+compute_statistics(..., assets=["data|bidx=1"], bbox=...)
+  min -51.43  max 7.065  mean -26.32  median -27.39  p2 -40.21  p98 -9.739  valid 79.94%  description "data_b1"</div></details>
+<div class="learning"><b>Learning →</b> <b>Partly.</b> The scene renders and the numbers are in dB, but 3 things needed a person. Sentinel-1 ARD stops at 2026-07-15 here, so <em>most recent</em> means summer, not this week. Its single <em>data</em> asset lists no bands, so VV had to be picked by index (<em>data|bidx=1</em>), from the item's <em>sar:polarization</em> order. And each pass comes twice, on a GB grid and on an Irish grid, and the search returns both.</div>
+<div class="shows">Sentinel-1 ARD in dB · band picked by index when no band list exists · catalog freshness gap</div></details>
+</div>
+
+<div class="card"><div class="top"><div class="num">4</div><div class="tag">a class map with its legend</div><div class="who">Danny</div></div>
+<div><div class="label">Input</div><div class="prompt">What covers the Cairngorms around Glenmore and Aviemore?</div></div>
+<div><div class="label">Our read</div><div class="answer">Mostly heather: class 9 (Heather) is both the median and the most common value over the box, in EOCIS&#x27;s 100 m land cover for 2023.</div></div>
+<div class="headline"><b>Learning →</b> Works.</div>
+<a class="fig" href="img/ft22-cairngorms-landcover.html" target="_blank" title="open the live artifact"><img src="img/ft22-cairngorms-landcover.png" alt="artifact produced by example 4" loading="lazy"><span class="open">map: Cairngorms land cover 2023, UKCEH classes ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>Mostly heather: class 9 (Heather) is both the median and the most common value over the box</b>, in EOCIS's 100 m land cover for 2023. 10 classes are present, and the middle 96% of pixels run from class 2 (coniferous woodland, the Glenmore and Rothiemurchus forests) to class 12 (inland rock, the high plateau). The map draws each class in the colour the file itself declares, with the legend.</div>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("eodh", ["eocis-chuk-geospatial-landcover"], bbox=[-3.9, 57.0, -3.5, 57.15])
+  recommended: 852e5728-b78f-49dc-9fc1-8e65d8bd6b52
+  cloud_cover None  covers_aoi_pct 100.0
+  reason: best-covering scene at 100.0% of the area; this collection reports no cloud cover
+compute_statistics(..., assets=["data"], bbox=...)
+  min 1  max 21  mean 9.644  median 9  p2 2  p98 12  valid 100.0%  description "data_Land cover"
+  unique 10
+file tags: flag_values "[-1 1 2 ... 21]"  flag_meanings "No_data Deciduous_woodland Coniferous_woodland Arable ... Heather Heather_grassland Bog ..."
+render_map(..., colormap_name="ukceh-landcover")  -> legend "UKCEH Land Cover", 21 classes</div></details>
+<div class="learning"><b>Learning →</b> <b>Works.</b> The class names and colours ship in the GeoTIFF's tags, not in STAC, so they went into groundstation's legend list once. The public tiler only knows its own colormap names, so any legend in that list now goes to it as an explicit value-to-colour map. Class -1 is No_data and is left out, so it draws clear.</div>
+<div class="shows">categorical layer · file's own class colours as a legend · reused legend list</div></details>
+</div>
+
+<div class="card"><div class="top"><div class="num">5</div><div class="tag">a scaled product</div><div class="who">Danny</div></div>
+<div><div class="label">Input</div><div class="prompt">Leaf area index across Breckland and the Suffolk farms, late summer 2024</div></div>
+<div><div class="label">Our read</div><div class="answer">A median leaf area index of about 2.0 for the 15 days to 23 August 2024: the raw median is 39 and the collection says to divide by 20.</div></div>
+<div class="headline"><b>Learning →</b> Partly.</div>
+<a class="fig" href="img/ft22-east-anglia-lai.html" target="_blank" title="open the live artifact"><img src="img/ft22-east-anglia-lai.png" alt="artifact produced by example 5" loading="lazy"><span class="open">map: East Anglia leaf area index, August 2024 ↗</span></a>
+<details class="more"><summary>full read</summary><div class="answer"><div class="label">Our read</div><b>A median leaf area index of about 2.0 for the 15 days to 23 August 2024</b>: the raw median is 39 and the collection says to divide by 20. The middle 96% runs from 0.1 to 4.3, which is harvested fields at the low end and Thetford Forest's pines at the high end. The map draws the raw values, which keeps the pattern and needs no scaling.</div>
+<details class="data"><summary>show the data</summary><div class="returned">search_imagery("eodh", ["eocis-chuk-land-vegetation-lai"], bbox=[0.5, 52.3, 0.9, 52.5], datetime_range="2024-06-01/2024-08-31")
+  2024-08-23  ddc4d6be-7752-46c2-84b8-4029c6353859
+  2024-08-08  2e4b0ea2-49ac-4d84-bd29-22968e96021e
+  2024-07-23  d9ca525d-3307-4fbe-91b2-00009a900c1b
+  recommended: ddc4d6be-7752-46c2-84b8-4029c6353859
+  cloud_cover None  covers_aoi_pct 100.0
+  reason: best-covering scene at 100.0% of the area; this collection reports no cloud cover
+describe_collection("eodh", "eocis-chuk-land-vegetation-lai")
+  description: "... Gap-filled data are available for 100m spatial resolution at a 15-day temporal resolution.  The data must be divided by a scaling factor of 20."
+  extent.temporal: 2018-04-01 to 2024-12-31
+compute_statistics(..., assets=["data"], bbox=...)
+  min 0  max 129  mean 39.89  median 39  p2 2  p98 86  valid 100.0%  description "data_lai_leaf_index"</div></details>
+<div class="learning"><b>Learning →</b> <b>Partly.</b> The scale factor is only in the collection's prose, not in <em>raster:bands</em>, so the tool returns raw numbers and the division was done by reading the description. The product also ends in December 2024, so it describes past seasons, not this one.</div>
+<div class="shows">15-day 100 m vegetation product · scale factor found in prose · honest raw numbers</div></details>
+</div>
+</div>
+<div class="repro"><div class="label">Reproduce</div><code>git clone https://github.com/dannybauman/groundstation && cd groundstation
+git switch add-eodh-catalog
+bash scripts/doctor.sh                      # walks the setup chain, prints the fix
+uv run evals/unit_checks.py                 # offline checks
+uv run scripts/field_test.py docs/field-test-2026-10-30-no22.cases.json</code></div>
+</main>
+
+<footer>field test №22 · 5 prompts · 5 live artifacts · 3 works, 2 partly, 0 not yet · October 30, 2026 · run on add-eodh-catalog at 0.69.0 · groundstation · Development Seed labs</footer>
+
+</body>
+</html>
