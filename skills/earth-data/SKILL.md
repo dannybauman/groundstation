@@ -104,6 +104,7 @@ A field test is a showcase page: a set of prompts run live, each with its output
 
 - run every case for real first: live searches, real artifacts from the map tools. A field test with made-up outputs is worthless. Let the map tools write where they default to (pass no `out_path`) and hand `field_test` the paths they return; it moves them. Where a file was saved along the way is plumbing, never part of the reply.
 - build the page with the `field_test` tool: `field_test(cases, out_dir)`, where `cases` is the object (rounds of cases, each with tag, who, prompt, answer, artifact, returned, optional image, learning, shows; the tool description spells it out) and `out_dir` is the absolute `groundstation/` folder under the folder the chat works in. The tool copies the artifacts into `img/`, writes the cases file, builds the HTML with a still for each map, and screenshots the page's first screen as `<name>.png`.
+- a case's `learning` is about that case alone; a case that produced no artifact says so there (Partly or Not yet, never Works).
 - include what went wrong as `learning` lines. Honest stumbles are the most credible part of the format.
 - the chat reply, in this order:
   1. 1 lede sentence on what ran and how it went, ending with a link to the page itself (`[the field test page](groundstation/field-test-<date>.html)`).
