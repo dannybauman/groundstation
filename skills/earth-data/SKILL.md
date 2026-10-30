@@ -106,7 +106,7 @@ A field test is a showcase page: a set of prompts run live, each with its output
 - build the page with the `field_test` tool: `field_test(cases, out_dir)`, where `cases` is the object (rounds of cases, each with tag, who, prompt, answer, artifact, returned, optional image, learning, shows; the tool description spells it out) and `out_dir` is the absolute `groundstation/` folder under the folder the chat works in. The tool copies the artifacts into `img/`, writes the cases file, builds the HTML with a still for each map, and screenshots the page's first screen as `<name>.png`.
 - include what went wrong as `learning` lines. Honest stumbles are the most credible part of the format.
 - the chat reply, in this order:
-  1. 1 lede sentence on what ran and how it went.
+  1. 1 lede sentence on what ran and how it went, ending with a link to the page itself (`[the field test page](groundstation/field-test-<date>.html)`).
   2. a short table, `# | Prompt | Result | Scene date | Artifact`, with descriptive link labels and paths relative to the folder the chat works in (`[Mount Hood 3D](groundstation/img/...)`), never absolute machine paths.
   3. caveats and learnings grouped under short bold heads that name what actually came up.
   4. the page screenshot the build already took, as a markdown image (`![Field test](groundstation/field-test-<date>.png)`). A host with its own way to show images uses that instead.
