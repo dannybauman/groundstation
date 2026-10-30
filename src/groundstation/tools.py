@@ -5573,7 +5573,7 @@ def _escape_strings(v: Any) -> Any:
     import html
 
     if isinstance(v, str):
-        return html.escape(v)
+        return html.escape(html.unescape(v))
     if isinstance(v, list):
         return [_escape_strings(x) for x in v]
     if isinstance(v, dict):
@@ -5625,9 +5625,16 @@ def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
     warnings: list[str] = []
     spec = json.loads(json.dumps(cases))
     img = out / "img"
+    copied = n = 0
     for rnd in spec["rounds"]:
         for c in rnd.get("cases", []):
+            n += 1
+            named = re.search(r"[^\s,;'\"<>]+\.html\b", str(c.get("returned") or ""))
             art = c.get("artifact")
+            if not art and named:
+                art = c["artifact"] = named.group(0)
+            elif art and named and Path(named.group(0)).name != Path(str(art)).name:
+                warnings.append(f"case {n}: artifact {art} differs from the file returned, {named.group(0)}")
             if not art or str(art).startswith(("http://", "https://")):
                 continue
             src = Path(art)
@@ -5639,10 +5646,15 @@ def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
             img.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, img / src.name)
             c["artifact"] = f"img/{src.name}"
+            copied += 1
         for c in rnd.get("cases", []):
             im = c.get("image")
             if im and not re.fullmatch(r"img/[A-Za-z0-9._-]+\.png", str(im)):
                 c["image"] = None
+    for st in spec.get("stats") or []:
+        if "artifact" in str(st.get("label", "")).lower() and str(st.get("value")) != str(copied):
+            warnings.append(f"stat {st.get('label')} said {st.get('value')}, {copied} artifacts were copied")
+            st["value"] = str(copied)
     # the cases come from a model that may have read untrusted text, so every field
     # is escaped; only <b> and <em> survive, in answer and learning
     spec = _escape_strings(spec)

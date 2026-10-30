@@ -73,6 +73,7 @@ h2.round::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
 details.data summary { font: 500 9.5px 'Roboto Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); cursor: pointer; margin-bottom: 3px; }
 .answer { font-size: 13.5px; color: var(--mid); }
 .answer b { color: var(--ink); }
+.noart { font: 400 11px 'Roboto Mono', monospace; color: var(--muted); }
 .learning { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 5%, white); padding: 8px 12px; font-size: 12.5px; color: var(--mid); }
 .learning b { color: var(--accent); font-style: normal; }
 .shows { border-left: 3px solid var(--rule); padding: 6px 12px; font-size: 12.5px; color: var(--muted); font-style: italic; }
@@ -237,6 +238,8 @@ def _card(n: int, c: dict) -> str:
         img = f'<img src="{c["image"]}" alt="artifact produced by example {n}" loading="lazy">' if c.get("image") else ""
         label = c.get("artifact_label", "live artifact ↗")
         parts.append(f'<a class="fig" href="{c["artifact"]}" target="_blank" title="open the live artifact">{img}<span class="open">{label}</span></a>')
+    else:
+        parts.append('<div class="noart">no artifact for this case</div>')
     more = [f'<div class="answer"><div class="label">{read_label}</div>{c["answer"]}</div>']
     if c.get("returned"):
         more.append(f'<details class="data"><summary>show the data</summary>'

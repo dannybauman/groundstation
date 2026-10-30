@@ -3701,6 +3701,52 @@ def t_field_test_copies_artifacts_and_refuses_bad_out_dirs():
         os.environ["GROUNDSTATION_OUT"] = saved
 
 
+def _ft_run(cases_list, name="r", **extra):
+    demo = Path(tempfile.mkdtemp()) / "demo"
+    demo.mkdir()
+    (demo / "x.html").write_text("<html></html>", encoding="utf-8")
+    saved = os.environ["GROUNDSTATION_OUT"]
+    os.environ["GROUNDSTATION_OUT"] = str(demo)
+    try:
+        spec = dict({"title": "t", "heading": "H", "sub": "s", "lede": "l", "rounds": [{"name": name, "cases": cases_list}]}, **extra)
+        spec = json.loads(json.dumps(spec).replace("DEMO", str(demo)))
+        out = Path(tempfile.mkdtemp()) / "gs"
+        r = tools.field_test(spec, str(out))
+        assert "error" not in r, r
+        return out, r, json.loads(Path(r["cases"]).read_text())
+    finally:
+        os.environ["GROUNDSTATION_OUT"] = saved
+
+
+def t_field_test_finds_artifact_in_returned():
+    case = {"tag": "t", "prompt": "Show me", "answer": "ok", "returned": "map_path: DEMO/x.html, coverage_pct: 100"}
+    out, r, data = _ft_run([case])
+    assert data["rounds"][0]["cases"][0]["artifact"] == "img/x.html"
+    assert (out / "img" / "x.html").is_file()
+
+
+def t_field_test_counts_artifacts_it_copied():
+    base = {"tag": "t", "prompt": "Show me", "answer": "ok", "returned": "r"}
+    out, r, data = _ft_run([dict(base, artifact="DEMO/x.html"), dict(base)], stats=[{"label": "artifacts", "value": "3"}])
+    assert data["stats"][0]["value"] == "1"
+    assert r["warnings"]
+
+
+def t_field_test_escapes_once():
+    case = {"tag": "t", "prompt": "Show me", "answer": "ok", "returned": "<script>x</script>"}
+    out, r, data = _ft_run([case], name="Portland &amp; Mount Hood")
+    assert data["rounds"][0]["name"] == "Portland &amp; Mount Hood"
+    assert "<script>" not in data["rounds"][0]["cases"][0]["returned"]
+
+
+def t_field_test_marks_cards_without_artifact():
+    base = {"tag": "t", "prompt": "Show me", "answer": "ok", "returned": "r"}
+    out, r, data = _ft_run([dict(base)])
+    assert 'class="noart"' in Path(r["page"]).read_text(encoding="utf-8")
+    out, r, data = _ft_run([dict(base, artifact="DEMO/x.html")])
+    assert '<div class="noart">' not in Path(r["page"]).read_text(encoding="utf-8")
+
+
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files
