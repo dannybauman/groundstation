@@ -52,6 +52,15 @@ CATALOGS: dict[str, dict[str, str]] = {
         "raster": "pc",
         "notes": "Microsoft Planetary Computer: broad archive incl. MODIS, Sentinel, Landsat, land cover, DEMs.",
     },
+    # ponytail: the open CEDA sub-catalog only. EODH's commercial catalogs and
+    # its own tiler need an account, so they stay out of a keyless tool
+    "eodh": {
+        "stac": "https://eodatahub.org.uk/api/catalogue/stac/catalogs/public/catalogs/ceda-stac-catalogue",
+        "raster": "titiler-xyz",
+        # its search returns only datetime unless asked; the cloud filter still runs
+        "fields": "properties",
+        "notes": "UK EO DataHub (open data via CEDA): UK Sentinel-2 and Sentinel-1 ARD, UKCP18 and CMIP6 climate projections, EOCIS land surface temperature, vegetation, land cover, sea ice and SST. CEDA calls this catalog experimental, with no uptime guarantee.",
+    },
 }
 
 _client = httpx.Client(timeout=30, headers=UA, follow_redirects=True)
@@ -890,7 +899,7 @@ def search_datasets(
         except Exception as e:
             return cat, e
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, len(cats))) as pool:
         fetched = list(pool.map(fetch, cats))
     hits = zarr_hits
     for cat, cols in fetched:
@@ -1649,6 +1658,8 @@ def write_archive(
         body["datetime"] = _rfc3339_window(datetime_range)
     if max_cloud_cover is not None:
         body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
+    if CATALOGS.get(catalog, {}).get("fields"):
+        body["fields"] = {"include": [CATALOGS[catalog]["fields"]]}
     url = f"{CATALOGS[catalog]['stac']}/search"
     feats: list[dict[str, Any]] = []
     method = "POST"
@@ -1721,6 +1732,8 @@ def search_imagery(
         body["datetime"] = _rfc3339_window(datetime_range)
     if max_cloud_cover is not None:
         body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
+    if CATALOGS.get(catalog, {}).get("fields"):
+        body["fields"] = {"include": [CATALOGS[catalog]["fields"]]}
     archive = None
     if _is_archive(catalog):
         feats, archive = _search_archive(catalog, body, max_cloud_cover)
@@ -1797,15 +1810,52 @@ def _expression_idents(expression: str) -> list[str]:
     return list(dict.fromkeys(idents))  # order of first appearance
 
 
-def _expression_to_bands(expression: str, assets: list[str] | None) -> tuple[str, list[str]]:
+def _band_select(item: dict[str, Any] | None, names: list[str]) -> str | None:
+    """`asset|bidx=i,j` when every name is a band of one multi-band asset, else None.
+
+    Some catalogs ship one asset per band (earth-search's nir, red), others pack
+    the bands into one file and list them in the asset's eo:bands (STAC 1.1:
+    bands). A name matches a band's common_name or its name, so "nir" and "B08"
+    both work. UK EO DataHub's Sentinel-2 ARD is the packed kind
+    """
+    for key, a in ((item or {}).get("assets") or {}).items():
+        bands = a.get("eo:bands") or a.get("bands") or []
+        if len(bands) < 2:
+            continue
+        # EODH writes eo:common_name inside eo:bands; the spec says common_name
+        labels = [{str(b.get(k) or "").lower() for k in ("common_name", "eo:common_name", "name")} for b in bands]
+        idx = [next((i for i, l in enumerate(labels, start=1) if n.lower() in l), None) for n in names]
+        if None not in idx:
+            return f"{key}|bidx={','.join(map(str, idx))}"
+    return None
+
+
+def _expression_to_bands(
+    expression: str, assets: list[str] | None, item: dict[str, Any] | None = None
+) -> tuple[str, list[str]]:
     # titiler.xyz /stac merges the assets list into bands b1..bN, so a friendly
     # expression like (nir-red)/(nir+red) must become (b1-b2)/(b1+b2) with
-    # assets=[nir, red] in matching order.
+    # assets=[nir, red] in matching order. When the names are bands inside one
+    # packed asset rather than assets, the same b1..bN come from asset|bidx=...
     if not assets:
         assets = _expression_idents(expression)
+    packed = item and not all(a in item.get("assets", {}) for a in assets) and _band_select(item, assets)
     for i, a in enumerate(assets, start=1):
         expression = re.sub(rf"\b{re.escape(a)}\b", f"b{i}", expression)
-    return expression, assets
+    return expression, [packed] if packed else assets
+
+
+def _layer_assets(catalog: str, collection_id: str, item_id: str, assets: list[str] | None = None) -> list[str]:
+    """The assets a layer draws: the caller's, else the collection's default, else true colour from a packed file"""
+    return list(assets or _default_assets(collection_id) or _rgb_default(catalog, collection_id, item_id))
+
+
+def _rgb_default(catalog: str, collection_id: str, item_id: str) -> list[str]:
+    """True colour from a packed multi-band asset on titiler.xyz catalogs, else []"""
+    if CATALOGS.get(catalog, {}).get("raster") != "titiler-xyz":
+        return []
+    sel = _band_select(_item(catalog, collection_id, item_id), ["red", "green", "blue"])
+    return [sel] if sel else []
 
 
 def _default_assets(collection: str) -> list[str]:
@@ -1855,7 +1905,7 @@ def preview_item(
     asked = [k for k, v in (("assets", assets), ("expression", expression), ("rescale", rescale),
                             ("colormap_name", colormap_name), ("bbox", bbox)) if v]
     part = ",".join(str(round(v, 6)) for v in bbox) if bbox else ""
-    assets = assets or ([] if expression else _default_assets(collection_id))
+    assets = assets or ([] if expression else _layer_assets(catalog, collection_id, item_id))
     if expression and not rescale:
         rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
     backend = CATALOGS[catalog]["raster"]
@@ -1916,13 +1966,13 @@ def preview_item(
     self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
     params = [("url", self_url)]
     if expression:
-        expression, assets = _expression_to_bands(expression, assets or None)
+        expression, assets = _expression_to_bands(expression, assets or None, _item(catalog, collection_id, item_id))
         params.append(("expression", expression))
     params += [("assets", a) for a in assets]
     if rescale:
         params.append(("rescale", rescale))
     if colormap_name:
-        params.append(("colormap_name", colormap_name))
+        params.append(_titiler_colormap(colormap_name))
     params.append(("max_size", str(max_size)))
     if part:
         # web mercator like every map view — a 4326 crop looks E-W stretched
@@ -2039,7 +2089,7 @@ def compute_statistics(
             params += [("expression", expression), ("asset_as_band", "true")]
             assets = assets or _expression_idents(expression)
         else:
-            expression, assets = _expression_to_bands(expression, assets)
+            expression, assets = _expression_to_bands(expression, assets, item)
             params.append(("expression", expression))
     used = assets or _default_assets(collection_id) or ["visual"]
     for a in used:
@@ -2243,7 +2293,7 @@ def _shared_stretch(layers: list[dict[str, Any]], view: list[float] | None) -> l
     def key(l):
         if l.get("type") != "item" or l.get("rescale") or l.get("expression"):
             return None
-        return (l["catalog"], l["collection_id"], tuple(l.get("assets") or _default_assets(l["collection_id"])), l.get("colormap_name"))
+        return (l["catalog"], l["collection_id"], tuple(_layer_assets(l["catalog"], l["collection_id"], l["item_id"], l.get("assets"))), l.get("colormap_name"))
 
     ranges: dict[tuple, list[tuple[float, float]]] = {}
     for l in layers:
@@ -2314,7 +2364,7 @@ def tile_url_template(
             params.append(("colormap_name", colormap_name or v["colormap_name"]))
         return f"{TITILER}/zarr/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?" + str(httpx.QueryParams(params))
     # with an expression, assets must be the expression's bands, never defaults
-    assets = assets or ([] if expression else _default_assets(collection_id))
+    assets = assets or ([] if expression else _layer_assets(catalog, collection_id, item_id))
     if expression and not rescale:
         rescale = "-1,1"  # normalized-difference indices are unreadable unscaled
     elif not rescale and not expression and (st := _auto_stretch(catalog, collection_id, item_id, assets, colormap_name, bbox)):
@@ -2361,13 +2411,13 @@ def tile_url_template(
     self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
     params = [("url", self_url)]
     if expression:
-        expression, assets = _expression_to_bands(expression, assets or None)
+        expression, assets = _expression_to_bands(expression, assets or None, _item(catalog, collection_id, item_id))
         params.append(("expression", expression))
     params += [("assets", a) for a in assets]
     if rescale:
         params.append(("rescale", rescale))
     if colormap_name:
-        params.append(("colormap_name", colormap_name))
+        params.append(_titiler_colormap(colormap_name))
     if nodata:
         params.append(("nodata", nodata))
     q = str(httpx.QueryParams(params))
@@ -2388,6 +2438,17 @@ _BRAND_CSS = """  :root { --accent: #CF3F02; --ink: #443F3F; --mid: #4a4440; --r
 # WorldCover colours are the tiler's own classmap
 # (planetarycomputer.microsoft.com/api/data/v1/legend/classmap/esa-worldcover)
 LEGENDS: dict[str, dict] = {
+    # UKCEH Land Cover classes and colours, as the EOCIS CHUK file's own
+    # flag_values / flag_colors tags give them (-1 is No_data, left out)
+    "ukceh-landcover": {"title": "UKCEH Land Cover", "classes": [
+        (1, "Deciduous woodland", "#FF0000"), (2, "Coniferous woodland", "#006600"), (3, "Arable", "#732600"),
+        (4, "Improved grassland", "#00FF00"), (5, "Neutral grassland", "#7FE57F"), (6, "Calcareous grassland", "#70A800"),
+        (7, "Acid grassland", "#998100"), (8, "Fen", "#FFFF00"), (9, "Heather", "#801A80"),
+        (10, "Heather grassland", "#E68CA6"), (11, "Bog", "#008073"), (12, "Inland rock", "#D2D2FF"),
+        (13, "Saltwater", "#000080"), (14, "Freshwater", "#0000FF"), (15, "Supralittoral rock", "#CCB300"),
+        (16, "Supralittoral sediment", "#CCB300"), (17, "Littoral rock", "#FFFF80"), (18, "Littoral sediment", "#FFFF80"),
+        (19, "Saltmarsh", "#8080FF"), (20, "Urban", "#000000"), (21, "Suburban", "#808080"),
+    ]},
     "esa-worldcover": {"title": "ESA WorldCover 2021", "classes": [
         (10, "Tree cover", "#006400"), (20, "Shrubland", "#ffbb22"), (30, "Grassland", "#ffff4c"),
         (40, "Cropland", "#f096ff"), (50, "Built-up", "#fa0000"), (60, "Bare / sparse vegetation", "#b4b4b4"),
@@ -2395,6 +2456,14 @@ LEGENDS: dict[str, dict] = {
         (90, "Herbaceous wetland", "#0096a0"), (95, "Mangroves", "#00cf75"), (100, "Moss and lichen", "#fae6a0"),
     ]},
 }
+
+
+def _titiler_colormap(name: str) -> tuple[str, str]:
+    """titiler.xyz knows only its built-in colormap names, so a LEGENDS class
+    map goes as an explicit value-to-colour colormap; values left out draw clear"""
+    if name not in LEGENDS:
+        return ("colormap_name", name)
+    return ("colormap", json.dumps({str(v): c for v, _, c in LEGENDS[name]["classes"]}))
 
 
 def _legends_for(layers: list[dict[str, Any]], colormap_name: str | None = None) -> list[dict[str, Any]]:

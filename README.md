@@ -11,7 +11,7 @@ flowchart LR
     A["🗣 AI Agent (Claude, GPT, Gemini, local) <br/>(MCP server + skill)"] --> T
     B["🖥 Web"] --> T
     C["⏰ Scheduled briefings"] --> T
-    T["groundstation tools"] --> D["STAC catalogs<br/>Earth Search · NASA VEDA<br/>Planetary Computer"]
+    T["groundstation tools"] --> D["STAC catalogs<br/>Earth Search · NASA VEDA<br/>Planetary Computer · UK EO DataHub"]
     T --> E["TiTiler<br/>tiles · previews · band math"]
     T --> F["EONET · GDACS · Open-Meteo<br/>events & weather"]
     T --> G["🗺 shareable map artifacts<br/>📄 draft briefs"]
@@ -139,7 +139,7 @@ The first `search_datasets` call takes a few seconds while collection lists cach
 | Tool | What it does | Backed by |
 |---|---|---|
 | `geocode` | place name to coordinates and a bbox | the fuzzy index in Gazet, Development Seed's geocoder (Overture divisions, urban centres, Natural Earth), with Nominatim as the fallback |
-| `list_catalogs` / `search_datasets` / `describe_collection` | find the right data across catalogs, filtered by place and resolution (`bbox`/`place`, `max_gsd`) | Earth Search, NASA VEDA, Planetary Computer, plus a curated `zarr` list (HRRR forecast, ERA5, GFS and MUR SST as metadata) |
+| `list_catalogs` / `search_datasets` / `describe_collection` | find the right data across catalogs, filtered by place and resolution (`bbox`/`place`, `max_gsd`) | Earth Search, NASA VEDA, Planetary Computer, UK EO DataHub (open data), plus a curated `zarr` list (HRRR forecast, ERA5, GFS and MUR SST as metadata) |
 | `search_imagery` | recent scenes with cloud filtering, plus the scene to start from and why | STAC APIs, or a stac-geoparquet archive via rustac (offline) |
 | `write_archive` | cache a live search as a stac-geoparquet file that `search_imagery` takes as its catalog | rustac |
 | `preview_item` / `tile_url_template` | browser-openable previews and XYZ tiles | titiler.xyz, VEDA raster API, PC data API |

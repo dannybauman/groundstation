@@ -47,6 +47,7 @@ _CATALOG_COMPONENT = {
     "earth-search": "Earth Search",
     "veda": "NASA VEDA",
     "planetary-computer": "Planetary Computer",
+    "eodh": "UK EO DataHub",
 }
 
 # which bucket actually serves each catalog's pixels — the storage entry names
@@ -55,6 +56,7 @@ _CATALOG_BUCKET = {
     "earth-search": ("AWS S3", "sentinel-cogs"),
     "veda": ("Azure Blob", "VEDA"),
     "planetary-computer": ("Azure Blob", "Planetary Computer"),
+    "eodh": ("CEDA archive", "dap.ceda.ac.uk"),
 }
 
 REQUIRED_FIELDS = ("what", "ds-role", "integration", "speaks-to", "link", "when")
