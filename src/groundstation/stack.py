@@ -67,6 +67,7 @@ REQUIRED_FIELDS = ("what", "ds-role", "integration", "speaks-to", "link", "when"
 FACTS = (
     "catalogs", "collections", "tiler_hosts", "maplibre", "terrain",
     "geocoded", "events", "weather", "passes", "mosaic_scenes", "snapshot", "local_rasters", "classified",
+    "world",  # a living world (render_world): lidar, the scene library, the place labels
 )
 _ALIASES = {"catalog": "catalogs", "collection": "collections", "host": "tiler_hosts", "mosaic": "mosaic_scenes"}
 

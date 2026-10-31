@@ -2845,8 +2845,9 @@ def t_timelapse_page_controls_and_cap():
         for needle in ('id="tl-prev"', 'id="tl-play"', 'id="tl-next"', 'id="tl-name"', "ArrowLeft", "window.gsPending",
                        "2026-01", "2026-02", "2026-03", ".clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack, .clean #tl"):
             assert needle in html, needle
-        # frames are shown one at a time: show() hides every layer but the current, and starts at 0
-        assert '"visibility", i === cur ? "visible" : "none"' in html and "show(0)" in html
+        # frames crossfade: show() eases opacity over FADE, keeps only the current and the coming
+        # frame visible (the one leaving drops out once faded), and starts at 0
+        assert '"raster-opacity-transition"' in html and "i === cur || i === nx" in html and "show(0)" in html
         assert "__" not in html.replace("__proto__", ""), "unfilled template marker"
         over = tools.render_timelapse("tl", [0, 0, 1, 1], _stub_frames(9), out_path=str(Path(d) / "u.html"))
         assert "error" in over and "cap of 8" in over["error"] and not (Path(d) / "u.html").exists(), over
@@ -3745,6 +3746,41 @@ def t_field_test_marks_cards_without_artifact():
     assert 'class="noart"' in Path(r["page"]).read_text(encoding="utf-8")
     out, r, data = _ft_run([dict(base, artifact="DEMO/x.html")])
     assert '<div class="noart">' not in Path(r["page"]).read_text(encoding="utf-8")
+
+
+def t_world_template_loads_embedded_or_beside():
+    # the one page every living world uses: titled and pointed at its data by the
+    # builder, and able to read that data from inside itself (one shareable file)
+    page = (Path(tools.__file__).parent / "static" / "world.html").read_text(encoding="utf-8")
+    assert "__TITLE__" in page and "__WORLD__" in page
+    assert "inside('meta')" in page and "data:image/jpeg;base64," in page
+    assert "pickSpecies" in page and "meta.profile" in page and "meta.buildings" in page   # a studied place grows its own forest, buildings and birds
+    assert "meta.features" in page and "carvedAt" in page   # waterfalls are carved and fall
+    assert "meta.birds" in page and "createPanner" in page   # the birds recorded here, heard from where they are
+    for place in ("Bridge of the Gods", "Hood River", "Mount Hood"):
+        assert place not in page, place   # every place-specific word comes from the world's data
+
+
+def t_world_utm_and_treetops_and_despike():
+    import numpy as np
+    from groundstation import world
+    assert world.utm_crs(-121.9, 45.6) == "EPSG:32610" and world.utm_crs(151.2, -33.9) == "EPSG:32756"
+    h = np.zeros((9, 9), np.float32); h[2, 2] = 30; h[6, 6] = 20
+    tops = world.local_maxima(h, 1) & (h > 5)
+    assert set(zip(*np.nonzero(tops))) == {(2, 2), (6, 6)}
+    g = np.full((40, 40), 21.0, np.float32); g[10:16, 10:16] = 928.0   # a 6-cell patch off something in the air
+    fixed = world.despike(g)
+    assert float(fixed.max()) < 30, fixed.max()
+
+
+def t_world_html_embeds_every_block():
+    import tempfile
+    from groundstation import world
+    w = {"meta": {"name": "Test <Place>", "landmarks": []}, "blocks": {"trees": "AAAA", "core_heights": "AAAA"}}
+    out = Path(tempfile.mkdtemp()) / "world-test.html"
+    page = world.write_world_html(w, out).read_text(encoding="utf-8")
+    assert 'id="w-meta"' in page and 'id="w-trees"' in page and 'id="w-core_heights"' in page
+    assert "__TITLE__" not in page and page.index('id="w-meta"') < page.index('<script type="module">')
 
 
 def t_versions_agree():

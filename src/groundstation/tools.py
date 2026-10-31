@@ -2739,10 +2739,23 @@ if (COMPARE && rasters.length === 2) {
   map.addControl(new maplibregl.NavigationControl());
   let cur = 0, timer = null;
   const name = document.getElementById("tl-name"), play = document.getElementById("tl-play");
-  // MapLibre fetches no tiles for a layer whose visibility is none, so hidden frames cost no bandwidth
+  // Frames crossfade, the next season rising through the last: each frame's opacity
+  // eases over FADE, the one leaving drops out of sight once it has faded. MapLibre
+  // fetches no tiles for a layer whose visibility is none, so only the frame showing,
+  // the one leaving and the one coming next (loaded unseen, so its fade is whole) cost bandwidth.
+  const FADE = Math.min(1800, Math.max(500, __INTERVAL__ * 0.75)), hideAt = {};
+  const op = i => LAYERS[i].opacity ?? 1;
   const show = k => {
+    const prev = cur;
     cur = (k + LAYERS.length) % LAYERS.length;
-    LAYERS.forEach((_, i) => map.setLayoutProperty("layer" + i, "visibility", i === cur ? "visible" : "none"));
+    const nx = (cur + 1) % LAYERS.length;
+    LAYERS.forEach((_, i) => {
+      const id = "layer" + i;
+      if (i === cur || i === nx) { clearTimeout(hideAt[i]); map.setLayoutProperty(id, "visibility", "visible"); }
+      map.setPaintProperty(id, "raster-opacity", i === cur ? op(i) : 0);
+      if (i !== cur && i !== nx && i !== prev) map.setLayoutProperty(id, "visibility", "none");
+    });
+    if (prev >= 0 && prev !== cur && prev !== nx) hideAt[prev] = setTimeout(() => cur !== prev && map.setLayoutProperty("layer" + prev, "visibility", "none"), FADE + 80);
     name.textContent = LAYERS[cur].name + "  (" + (cur + 1) + "/" + LAYERS.length + ")";
   };
   const stop = () => { clearInterval(timer); timer = null; play.textContent = "\u25b6"; };
@@ -2759,6 +2772,12 @@ if (COMPARE && rasters.length === 2) {
   });
   map.on("load", () => {
     LAYERS.forEach((l, i) => addLayerTo(map, l, i));
+    LAYERS.forEach((_, i) => {
+      map.setPaintProperty("layer" + i, "raster-opacity-transition", { duration: FADE, delay: 0 });
+      map.setPaintProperty("layer" + i, "raster-opacity", 0);
+      map.setLayoutProperty("layer" + i, "visibility", "none");
+    });
+    cur = -1;
     show(0);
     window.gsPending--;
   });
@@ -3732,6 +3751,10 @@ window.gsMaps = [map];  // exposed for scripted screenshots and checks
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
 map.on("load", () => {
   map.setTerrain({ source: "dem", exaggeration });
+  // a sky over the horizon, and haze that thickens with distance, so the far edge
+  // fades into air instead of ending on a flat basemap
+  if (map.setSky) map.setSky({ "sky-color": "#7fa8d4", "horizon-color": "#e8dccd", "fog-color": "#ddd3c6",
+    "sky-horizon-blend": 0.6, "horizon-fog-blend": 0.7, "fog-ground-blend": 0.35, "atmosphere-blend": 0.8 });
   // MapLibre 4.7 easeTo freezes the camera's ground height and unfreezes it only with freezeElevation,
   // so without it the height stays at the 0 m read before any DEM tile and a tight box sits under the relief
   map.easeTo({ center: CENTER, pitch: 60, duration: 0, freezeElevation: true });
@@ -5681,3 +5704,74 @@ def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
     png = page.with_suffix(".png")
     return {"cases": str(cases_path), "page": str(page), "screenshot": str(png) if png.exists() else None,
             "warnings": warnings}
+
+
+def render_world(
+    place: str,
+    title: str | None = None,
+    radius_km: float = 25.0,
+    core_km: float = 4.0,
+    out_path: str | None = None,
+    profile: dict[str, Any] | None = None,
+    at: list[float] | None = None,
+) -> dict[str, Any]:
+    """Build a living world: an open-world 3D scene of a place, as one HTML file.
+
+    place is a name ("Bridge of the Gods, Oregon"); geocoded with Nominatim.
+    The core (core_km across, default 4) carries USGS 3DEP lidar ground and every
+    treetop the lidar saw where the US has flown it, with a NAIP aerial photo;
+    anywhere else Copernicus 30 m terrain, the clearest Sentinel-2 summer pass,
+    and trees placed from the photo's vegetation with estimated heights. The far
+    ring (radius_km, default 25) is Copernicus terrain under that Sentinel-2
+    pass, so the camera can pull back to the mountains around. Towns and peaks
+    are labelled from OpenStreetMap.
+
+    The page grows the forest in the browser the way open-world engines do:
+    species recipes instanced at every tree, wind, per-tree variation, impostors
+    at mid distance, trees streamed round the camera to the horizon, a physical
+    sky with sun shadows and a time-of-day slider, cloud shadows, a rippling
+    river where the data shows one. Every byte is embedded, so it opens with no
+    server and shares as-is; expect 15 to 30 MB and a few minutes to build.
+
+    profile: a study of the place, so the world grows its own forest rather than
+    a default one. Study first (its trees and where each grows, what grows under
+    them, the birds overhead, the colour of its buildings), then pass
+      {"summary": str,
+       "species": [{"name", "form": "conifer"|"broad", "needle"|"leaf": "#hex",
+                    "tip": "#hex", "share": 0-1, "water": "near"|"avoid"|"any",
+                    "elev": [lo, hi] m, "maxHeight": m, "width", "droop", "tiers",
+                    "clear", "tint": [r, g, b]}, ... up to 6],
+       "understory": {"name", "color": "#hex", "density": 0-1},
+       "fauna": [{"name", "kind": "bird", "count", "color", "size_m", "altitude_m",
+                  "over": "water"|"forest"|"any"}],
+       "structures": {"wall": "#hex", "roof": "#hex"}}
+    Buildings come from OpenStreetMap in the core, raised to their recorded heights.
+    Every OpenStreetMap waterfall in the core is modelled: a carved cliff from its lip
+    to its pool (tiers chain), falling water, foam, mist and spray, and the arch
+    footbridges beside it; steep ground everywhere turns to rock. Birds are the ones
+    GBIF has records of here, at their wingspans (Wikidata, else their family), with
+    their own voices from xeno-canto: songs from birds on the ground, calls from birds
+    in flight, heard from where they are once the viewer turns sound on; every
+    waterfall roars.
+    at: [lon, lat] to build there instead of geocoding the name.
+
+    Returns {path, title, place, core, trees, sources, landmarks, caveats}. Read
+    the caveats: where there is no lidar, tree heights are estimates, and tree
+    shapes are always generated (their positions and heights are the data).
+    """
+    from groundstation import world as _world
+
+    w = _world.build_world(place, radius_km=radius_km, core_km=core_km, name=title, profile=profile, at=tuple(at) if at else None)
+    path = _artifact_path(out_path, "world", w["meta"]["name"])
+    _world.write_world_html(w, path)
+    m = w["meta"]
+    return {
+        "path": path, "title": m["name"], "place": w["found"],
+        "core": {"km": core_km, "lidar_share": m["core"]["lidar_share"], "photo": m["sources"]["core_photo"]},
+        "trees": m["trees"], "sources": m["sources"], "sentinel": w["sentinel"],
+        "landmarks": [l["name"] for l in m["landmarks"]], "buildings": len(m["buildings"]),
+        "set_pieces": [f"{f['name']} ({f['kind']})" for f in m["features"]],
+        "birds": [f"{b['name']} ({b['kind']}, {b['wingspan']} m{', ' + b['sound']['type'] if b.get('sound') else ''})" for b in m["birds"]],
+        "species": [s["name"] for s in (profile or {}).get("species", [])] or "default", "caveats": w["caveats"],
+        "size_mb": round(Path(path).stat().st_size / 1e6, 1),
+    }
