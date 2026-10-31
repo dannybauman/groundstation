@@ -230,7 +230,14 @@ for (const fl of FALLS) {
 }
 FALLS.sort((a, b) => b.lipY - a.lipY);
 for (const fl of FALLS) {
-  fl.poolY = fl.lipY - fl.h;
+  // the lowest natural ground 60 to 200 m out in front: the valley the fall drops into
+  let base = Infinity;
+  for (let s = 60; s <= 200; s += 10) for (let t = -40; t <= 40; t += 20) {
+    const x = fl.xy[0] + fl.d.x * s + fl.side.x * t, y = fl.xy[1] + fl.d.y * s + fl.side.y * t, [i, j] = cellAt(x, y);
+    if (i >= 0 && j >= 0 && i < cgw && j < cgh) base = Math.min(base, coreH[j * cgw + i]);
+  }
+  if (Number.isFinite(base) && fl.lipY - fl.h < base) fl.lipY = Math.max(fl.lipY, base + fl.h);   // the lip sits a fall's height over the valley
+  fl.poolY = Math.max(fl.lipY - fl.h, Number.isFinite(base) ? base - 2 : -Infinity);
   if (fl.next) fl.next.lipY = Math.min(fl.next.lipY, fl.poolY + 0.5);   // the next tier starts at this one's pool
 }
 for (const fl of FALLS) {
@@ -741,7 +748,7 @@ const mistMat = new THREE.ShaderMaterial({ uniforms: { ...FU, uScale: { value: i
     vec4 mv = modelViewMatrix * vec4(p, 1.0); vDepth = -mv.z;
     gl_Position = projectionMatrix * mv;
     gl_PointSize = (4.0 + t * (10.0 + big * 0.12)) * uScale / max(1.0, -mv.z);
-    vA = sin(t * 3.14159) * 0.42;
+    vA = sin(t * 3.14159) * 0.55;
     #include <logdepthbuf_vertex>
   }`,
   fragmentShader: `#include <common>
@@ -757,7 +764,7 @@ const fallGround = (x, y) => { const [i, j] = cellAt(x, y); return hAt(i, j); };
 const mistSeeds = [], mistSpots = [];
 for (const fl of FALLS) {
   const lip = new THREE.Vector3(fl.xy[0], fl.lipY, -fl.xy[1]), d3 = new THREE.Vector3(fl.d.x, 0, -fl.d.y), s3 = new THREE.Vector3(fl.side.x, 0, -fl.side.y);
-  const out = Math.min(22, 2 + fl.h * 0.09), W = fl.w, X = 8, Y = Math.min(120, 30 + Math.round(fl.h * 0.4));
+  const out = Math.min(22, 2 + fl.h * 0.09), W = Math.max(fl.w, 3 + fl.h * 0.05), X = 8, Y = Math.min(120, 30 + Math.round(fl.h * 0.4));
   // the ribbon: leaves the lip level, curves out as it falls, widens toward the pool
   const g = new THREE.PlaneGeometry(1, 1, X, Y), pos = g.attributes.position, uv = g.attributes.uv;
   for (let k = 0; k < pos.count; k++) {
@@ -782,7 +789,7 @@ for (const fl of FALLS) {
     const runMesh = new THREE.Mesh(run, fallMat); runMesh.renderOrder = 2; scene.add(runMesh);
   }
   // mist from the pool, and spray shedding off the fall's face
-  const n = Math.min(700, 160 + Math.round(fl.h * 3));
+  const n = Math.min(1400, 240 + Math.round(fl.h * 6));
   for (let k = 0; k < n; k++) {
     const onFace = k % 3 === 0, v = Math.random();
     const at = onFace ? lip.clone().addScaledVector(d3, out * Math.sqrt(v) + 1.5).setY(fl.lipY - fl.h * v) : land;
@@ -1115,7 +1122,9 @@ const views = {
     const big = FALLS.slice().sort((a, b) => b.h - a.h)[0];
     if (!big) return { pos: at(focus).add(new THREE.Vector3(-1500, 520, 1300)), target: at(focus, 40) };
     const mid = new THREE.Vector3(big.xy[0], big.lipY - big.h * 0.5, -big.xy[1]), d3 = new THREE.Vector3(big.d.x, 0, -big.d.y);
-    return { pos: mid.clone().addScaledVector(d3, Math.max(160, big.h * 1.4)).add(new THREE.Vector3(0, big.h * 0.15, 0)).addScaledVector(new THREE.Vector3(-d3.z, 0, d3.x), big.h * 0.35), target: mid };
+    const stand = mid.clone().addScaledVector(d3, Math.max(140, big.h * 1.25)).addScaledVector(new THREE.Vector3(-d3.z, 0, d3.x), big.h * 0.25);
+    stand.y = Math.max(sampleHeight(stand.x, -stand.z) + 30, big.poolY + 25);
+    return { pos: stand, target: mid.clone().add(new THREE.Vector3(0, big.h * 0.1, 0)) };
   },
   gorge: () => ({ pos: away(at(focus), at(across), 2600, 900), target: at(across, 200) }),
   hood: () => ({ pos: away(at(focus), peakAt, 9000, 9000), target: peakAt.clone().lerp(at(focus), 0.45) }),
