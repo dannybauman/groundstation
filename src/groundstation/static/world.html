@@ -330,12 +330,36 @@ function cone(color, broad) {   // the far version of every species: one shape, 
   const g = broad ? new THREE.IcosahedronGeometry(0.3, 1).scale(1, 0.85, 1).translate(0, 0.68, 0) : new THREE.ConeGeometry(0.17, 0.82, 7, 1, true).translate(0, 0.55, 0);
   return mergeGeometries([finish(new THREE.CylinderGeometry(0.008, 0.016, 0.3, 5, 1, true).translate(0, 0.15, 0), 0x6b5a4a, 0, 0), finish(g, pale(color), 1, 0.3)]);
 }
-const SPECIES = [
-  { name: 'Douglas fir', needle: 0x29452c, tip: 0x3b6038, trunk: 0.016, clear: 0.22, tiers: 11, whorl: 4, width: 0.2, taper: 0.9, droop: 0.28 },
-  { name: 'western redcedar', needle: 0x3b5a2c, tip: 0x56763a, trunk: 0.02, clear: 0.14, tiers: 12, whorl: 4, width: 0.24, taper: 0.8, droop: 0.62 },
-  { name: 'western hemlock', needle: 0x24402e, tip: 0x335a3c, trunk: 0.014, clear: 0.18, tiers: 12, whorl: 4, width: 0.15, taper: 1.0, droop: 0.45 },
-  { name: 'red alder and bigleaf maple', broad: true, leaf: 0x4f7a34, clear: 0.42, trunk: 0.02, clumps: 11, clump: 0.11, width: 0.22 },
+// A STUDIED PLACE (2026-10-31): a world may carry a profile, written after
+// studying the place (its trees, what grows under them, its wildlife, its
+// structures). Each species there is a recipe and a rule: its form, colours,
+// share of the forest, whether it keeps to the water, its elevation band.
+const PROFILE = meta.profile || {};
+const hex = (v, d) => (typeof v === 'string' && /^#?[0-9a-f]{6}$/i.test(v) ? parseInt(v.replace('#', ''), 16) : d);
+const DEFAULT_SPECIES = [
+  { name: 'Douglas fir', form: 'conifer', needle: '#29452c', tip: '#3b6038', clear: 0.22, tiers: 11, width: 0.2, droop: 0.28, share: 0.5 },
+  { name: 'western redcedar', form: 'conifer', needle: '#3b5a2c', tip: '#56763a', clear: 0.14, tiers: 12, width: 0.24, droop: 0.62, share: 0.2, tint: [1.1, 1.08, 0.82] },
+  { name: 'western hemlock', form: 'conifer', needle: '#24402e', tip: '#335a3c', clear: 0.18, tiers: 12, width: 0.15, droop: 0.45, share: 0.18, tint: [0.88, 0.95, 1.0] },
+  { name: 'red alder and bigleaf maple', form: 'broad', leaf: '#4f7a34', clear: 0.42, width: 0.22, share: 0.12, water: 'near', maxHeight: 28, tint: [1.2, 1.25, 0.85] },
 ];
+const SPECIES = (Array.isArray(PROFILE.species) && PROFILE.species.length ? PROFILE.species : DEFAULT_SPECIES).slice(0, 6).map((s) => s.form === 'broad'
+  ? { name: s.name, broad: true, leaf: hex(s.leaf, 0x4f7a34), clear: s.clear ?? 0.42, trunk: 0.02, clumps: s.clumps ?? 11, clump: s.clump ?? 0.11, width: s.width ?? 0.22,
+      share: s.share ?? 0.2, water: s.water || 'any', elev: s.elev, maxHeight: s.maxHeight, tint: s.tint }
+  : { name: s.name, needle: hex(s.needle, 0x29452c), tip: hex(s.tip, 0x3b6038), trunk: 0.016, clear: s.clear ?? 0.2, tiers: s.tiers ?? 11, whorl: 4,
+      width: s.width ?? 0.2, taper: s.taper ?? 0.9, droop: s.droop ?? 0.35, share: s.share ?? 0.3, water: s.water || 'any', elev: s.elev, maxHeight: s.maxHeight, tint: s.tint });
+// which species stands here: each one's share, weighted by its rules
+function pickSpecies(ground, height, nearWater, r) {
+  let total = 0; const w = SPECIES.map((s) => {
+    let v = s.share;
+    if (s.water === 'near') v *= nearWater ? 4 : 0.15;
+    if (s.water === 'avoid' && nearWater) v *= 0.1;
+    if (s.elev && (ground < s.elev[0] || ground > s.elev[1])) v *= 0.04;
+    if (s.maxHeight && height > s.maxHeight) v *= 0.1;
+    total += v; return v;
+  });
+  let acc = 0; for (let k = 0; k < w.length; k++) { acc += w[k] / total; if (r < acc) return k; }
+  return w.length - 1;
+}
 // IMPOSTORS (how games draw the middle distance, 2026-10-31: "the trees in
 // midground look too much like cones"): a painted silhouette of a whole tree,
 // a ragged-tiered conifer or a round broadleaf crown, on three crossed cards.
@@ -407,17 +431,17 @@ for (let i = 0; i < nT; i++) {
   const x = treeData[i * 5], y = treeData[i * 5 + 1], g = treeData[i * 5 + 2], h = treeData[i * 5 + 3];
   if (h < 5 || h > 80 || g < waterY + 0.5) continue;
   const nearWater = g < waterY + 14, r = rand();
-  const sp = nearWater && h < 28 && r < 0.75 ? 3 : (r < 0.62 ? 0 : r < 0.82 ? 1 : 2);
+  const sp = pickSpecies(g, h, nearWater, r);
   plan.push({ x, y, g, h, sp, rot: rand() * Math.PI * 2, wide: 0.85 + rand() * 0.35, tint: rand() });
 }
 // understory, clumped round the trees: sword fern and salal at the roots
 const fernGeo = mergeGeometries(Array.from({ length: 6 }, (_, k) => {
   const g = card(1, 0.34, NEEDLE); g.rotateX(-1.05 - (k % 2) * 0.2); g.rotateY(k * Math.PI / 3);
-  return finish(g, pale(0x4a7a30), 2, (k * 0.21) % 1, [0.8, 1.15], 'keep');
+  return finish(g, pale(hex((PROFILE.understory || {}).color, 0x4a7a30)), 2, (k * 0.21) % 1, [0.8, 1.15], 'keep');
 }));
 const ferns = [];
 for (const t of plan) {
-  if (t.sp === 3 || rand() > 0.55) continue;
+  if (SPECIES[t.sp].broad || rand() > ((PROFILE.understory || {}).density ?? 0.55)) continue;
   const k = 1 + Math.floor(rand() * 3);
   for (let q = 0; q < k; q++) {
     const a = rand() * Math.PI * 2, d = 1.5 + rand() * (0.12 * t.h + 2);
@@ -469,7 +493,7 @@ const groundColour = (rgb, out) => {
   if (l < 0.03) out.multiplyScalar(0.03 / Math.max(l, 0.004));
   return out;
 };
-const TINT = [new THREE.Color(1, 1, 1), new THREE.Color(1.1, 1.08, 0.82), new THREE.Color(0.88, 0.95, 1.0), new THREE.Color(1.2, 1.25, 0.85)];
+const TINT = SPECIES.map((s) => Array.isArray(s.tint) ? new THREE.Color(s.tint[0], s.tint[1], s.tint[2]) : new THREE.Color(1, 1, 1));
 
 // ── distance detail (Nanite's job, done the browser's way): within reach of the
 // camera a tree is its full branch structure; past it, its simple shape ──
@@ -516,6 +540,75 @@ function relod(force) {
   fernMesh.count = nfn; fernMesh.instanceMatrix.needsUpdate = true;
 }
 const keep = plan;   // for the facts line
+// STRUCTURES: every building OpenStreetMap knows in the core, its footprint
+// raised to its recorded height (or its storeys), walls and roofs coloured apart
+const buildingCount = (() => {
+  const list = Array.isArray(meta.buildings) ? meta.buildings : [];
+  if (!list.length) return 0;
+  const wall = new THREE.Color(hex((PROFILE.structures || {}).wall, 0xc9c1b4)), roof = new THREE.Color(hex((PROFILE.structures || {}).roof, 0x6e6a66));
+  const geos = [];
+  for (const b of list) {
+    if (!Array.isArray(b.p) || b.p.length < 3) continue;
+    const shape = new THREE.Shape(b.p.map(([x, y]) => new THREE.Vector2(x, y)));
+    const g = new THREE.ExtrudeGeometry(shape, { depth: b.h || 6, bevelEnabled: false });
+    g.rotateX(-Math.PI / 2);   // footprint on the ground, height upward; shape y (north) becomes -z
+    let base = Infinity; for (const [x, y] of b.p) { const [ci, cj] = cellAt(x, y); base = Math.min(base, hAt(ci, cj)); }
+    g.translate(0, base - 0.5, 0);
+    const n = g.attributes.normal, col = new Float32Array(g.attributes.position.count * 3);
+    for (let i = 0; i < n.count; i++) { const c = n.getY(i) > 0.9 ? roof : wall; col.set([c.r, c.g, c.b], i * 3); }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.deleteAttribute('uv');
+    geos.push(g.index ? g.toNonIndexed() : g);
+  }
+  if (!geos.length) return 0;
+  const mesh = new THREE.Mesh(mergeGeometries(geos), living(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }), false));
+  mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+  return geos.length;
+})();
+// WILDLIFE: the birds the study found, in flocks wheeling over water or forest,
+// wings beating in the shader; each bird a handful of triangles
+const flocks = (() => {
+  const kinds = (Array.isArray(PROFILE.fauna) ? PROFILE.fauna : []).filter((a) => (a.kind || 'bird') === 'bird').slice(0, 4);
+  if (!kinds.length) kinds.push({ name: 'birds', count: 24, color: '#2b2622', size_m: 1.2, altitude_m: 60, over: 'any' });
+  const wing = new THREE.BufferGeometry();
+  const v = new Float32Array([0, 0, 0.35, -1, 0.05, -0.1, 0, 0, -0.35,   0, 0, 0.35, 0, 0, -0.35, 1, 0.05, -0.1,   0, -0.06, 0.5, 0, 0.04, 0, 0, -0.05, -0.55]);
+  wing.setAttribute('position', new THREE.BufferAttribute(v, 3)); wing.computeVertexNormals();
+  const out = [];
+  for (const k of kinds) {
+    const n = Math.min(200, k.count || 20);
+    const mat = new THREE.MeshStandardMaterial({ color: hex(k.color, 0x2b2622), roughness: 0.8, side: THREE.DoubleSide });
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = U.uTime;
+      sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+        float ph = instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.21;
+        transformed.y += sin(uTime * 7.0 + ph) * abs(transformed.x) * 0.55;`);
+    };
+    const im = new THREE.InstancedMesh(wing, mat, n); im.frustumCulled = false; scene.add(im);
+    // a few wheeling centres over the kind of ground this bird keeps to
+    const centres = [];
+    for (let tries = 0; centres.length < Math.max(1, Math.round(n / 12)) && tries < 400; tries++) {
+      const x = core.extent[0] + rand() * (core.extent[2] - core.extent[0]), y = core.extent[1] + rand() * (core.extent[3] - core.extent[1]);
+      const [ci, cj] = cellAt(x, y), g = hAt(ci, cj), wet = hasWater && g < waterY + 1;
+      if ((k.over === 'water' && !wet) || (k.over === 'forest' && wet)) continue;
+      centres.push([x, y, Math.max(g, hasWater ? waterY : g) + (k.altitude_m || 60)]);
+    }
+    if (!centres.length) centres.push([0, 0, (hasWater ? waterY : 0) + 80]);
+    const birds = Array.from({ length: n }, (_, i) => ({ c: centres[i % centres.length], r: 25 + rand() * 90, sp: (0.25 + rand() * 0.35) * (rand() < 0.5 ? 1 : -1), a: rand() * 6.283, dz: (rand() - 0.5) * 20, s: (k.size_m || 1.2) * (0.85 + rand() * 0.3) }));
+    out.push({ im, birds, name: k.name });
+  }
+  return out;
+})();
+const birdM = new THREE.Matrix4(), birdQ = new THREE.Quaternion(), birdS = new THREE.Vector3(), birdP = new THREE.Vector3(), birdUp = new THREE.Vector3(0, 1, 0);
+function flyBirds(dt) {
+  for (const f of flocks) {
+    f.birds.forEach((b, i) => {
+      b.a += b.sp * dt * 0.5;
+      const x = b.c[0] + Math.cos(b.a) * b.r, y = b.c[1] + Math.sin(b.a) * b.r, z = b.c[2] + b.dz + Math.sin(b.a * 2) * 4;
+      birdQ.setFromAxisAngle(birdUp, -b.a + (b.sp > 0 ? 0 : Math.PI));
+      birdM.compose(birdP.set(x, z, -y), birdQ, birdS.set(b.s, b.s, b.s)); f.im.setMatrixAt(i, birdM);
+    });
+    f.im.instanceMatrix.needsUpdate = true;
+  }
+}
 // FOREST TO THE HORIZON, two ways, as open worlds do it (2026-10-31: canopy
 // clumps read as splotches up close and strayed onto water and town).
 // Forest by the satellite's colour: green clearly over both red and blue, not
@@ -580,7 +673,7 @@ const stream = (() => {
       if (g > 1900) continue;
       const slope = Math.abs(farGround(X + FCW, Y) - farGround(X - FCW, Y)) / (2 * FCW);
       if (slope > 1.1) continue;
-      const hh = 24 + hash(i, j, 4) * 30, r = hash(i, j, 5), sp = g < 60 && r < 0.5 ? 3 : r < 0.62 ? 0 : r < 0.82 ? 1 : 2;
+      const hh = 24 + hash(i, j, 4) * 30, r = hash(i, j, 5), sp = pickSpecies(g, hh, g < waterY + 14, r);
       const im = meshes[sp], k = counts[sp]; if (k >= CAP) continue;
       qq.setFromAxisAngle(up, hash(i, j, 6) * 6.283); const wd = hh * (sp === 3 ? 0.9 : 0.75);
       // standing in the raised canopy where it is, its crown poking out of it
@@ -736,7 +829,10 @@ document.getElementById('facts').innerHTML =
 document.getElementById('about').textContent = (meta.core.lidar_share > 0.02
   ? 'Where the US laser survey has flown, every tree stands where it found one, at its measured height; elsewhere trees grow from the photo\'s green, with estimated heights.'
   : 'Trees grow from the photo\'s green, with heights estimated from how green it is.')
-  + ' Each is grown from a species recipe and chosen by rule: broadleaves by the water, conifers up the slopes, ferns at their roots.';
+  + ' ' + (PROFILE.summary || 'Each tree is grown from a species recipe and chosen by rule: broadleaves by the water, conifers up the slopes, ferns at their roots.');
+document.getElementById('facts').innerHTML += '<br>' + SPECIES.map((s) => s.name).join(' · ')
+  + (buildingCount ? ' · ' + buildingCount.toLocaleString() + ' buildings' : '')
+  + (flocks.length ? ' · ' + flocks.map((f) => f.name).join(', ') + ' overhead' : '');
 
 // no glow pass: a physical sky is far brighter than any glow threshold before exposure,
 // so a bloom pass washed the whole view white (2026-10-31)
@@ -755,6 +851,7 @@ renderer.setAnimationLoop(() => {
   controls.update();
   relod();
   stream.fill();
+  flyBirds(dt);
   // shadows follow what you are looking at, within the forest
   sun.target.position.copy(controls.target); sun.position.copy(sky.material.uniforms.sunPosition.value).multiplyScalar(8000).add(controls.target);
   if (waterNormals) { waterNormals.offset.x += dt * 0.0035; waterNormals.offset.y += dt * 0.0016; }

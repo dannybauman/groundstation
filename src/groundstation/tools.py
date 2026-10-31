@@ -5689,6 +5689,8 @@ def render_world(
     radius_km: float = 25.0,
     core_km: float = 4.0,
     out_path: str | None = None,
+    profile: dict[str, Any] | None = None,
+    at: list[float] | None = None,
 ) -> dict[str, Any]:
     """Build a living world: an open-world 3D scene of a place, as one HTML file.
 
@@ -5708,13 +5710,28 @@ def render_world(
     river where the data shows one. Every byte is embedded, so it opens with no
     server and shares as-is; expect 15 to 30 MB and a few minutes to build.
 
+    profile: a study of the place, so the world grows its own forest rather than
+    a default one. Study first (its trees and where each grows, what grows under
+    them, the birds overhead, the colour of its buildings), then pass
+      {"summary": str,
+       "species": [{"name", "form": "conifer"|"broad", "needle"|"leaf": "#hex",
+                    "tip": "#hex", "share": 0-1, "water": "near"|"avoid"|"any",
+                    "elev": [lo, hi] m, "maxHeight": m, "width", "droop", "tiers",
+                    "clear", "tint": [r, g, b]}, ... up to 6],
+       "understory": {"name", "color": "#hex", "density": 0-1},
+       "fauna": [{"name", "kind": "bird", "count", "color", "size_m", "altitude_m",
+                  "over": "water"|"forest"|"any"}],
+       "structures": {"wall": "#hex", "roof": "#hex"}}
+    Buildings come from OpenStreetMap in the core, raised to their recorded heights.
+    at: [lon, lat] to build there instead of geocoding the name.
+
     Returns {path, title, place, core, trees, sources, landmarks, caveats}. Read
     the caveats: where there is no lidar, tree heights are estimates, and tree
     shapes are always generated (their positions and heights are the data).
     """
     from groundstation import world as _world
 
-    w = _world.build_world(place, radius_km=radius_km, core_km=core_km, name=title)
+    w = _world.build_world(place, radius_km=radius_km, core_km=core_km, name=title, profile=profile, at=tuple(at) if at else None)
     path = _artifact_path(out_path, "world", w["meta"]["name"])
     _world.write_world_html(w, path)
     m = w["meta"]
@@ -5722,6 +5739,7 @@ def render_world(
         "path": path, "title": m["name"], "place": w["found"],
         "core": {"km": core_km, "lidar_share": m["core"]["lidar_share"], "photo": m["sources"]["core_photo"]},
         "trees": m["trees"], "sources": m["sources"], "sentinel": w["sentinel"],
-        "landmarks": [l["name"] for l in m["landmarks"]], "caveats": w["caveats"],
+        "landmarks": [l["name"] for l in m["landmarks"]], "buildings": len(m["buildings"]),
+        "species": [s["name"] for s in (profile or {}).get("species", [])] or "default", "caveats": w["caveats"],
         "size_mb": round(Path(path).stat().st_size / 1e6, 1),
     }

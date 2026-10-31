@@ -145,6 +145,32 @@ def _landmarks(bbox: list[float], name: str, lon: float, lat: float) -> list[dic
     return out
 
 
+def _buildings(core: list[float], crs: str, cx: float, cy: float, cap: int = 4000) -> list[dict]:
+    """Every building OpenStreetMap has in the core: footprint in local metres, height from
+    its height tag, else its storeys at 3.2 m, else 6 m."""
+    from rasterio.warp import transform as warp_xy
+
+    s, w, n, e = core[1], core[0], core[3], core[2]
+    q = f'[out:json][timeout:60];way["building"]({s},{w},{n},{e});out geom;'
+    try:
+        els = _json("https://overpass-api.de/api/interpreter?" + urllib.parse.urlencode({"data": q}), timeout=90).get("elements", [])
+    except Exception:
+        return []
+    out = []
+    for el in els[:cap]:
+        g = el.get("geometry") or []
+        if len(g) < 4:
+            continue
+        t = el.get("tags", {})
+        try:
+            hgt = float(re.sub(r"[^0-9.]", "", t.get("height", "")) or 0) or float(t.get("building:levels", 0) or 0) * 3.2 or 6.0
+        except ValueError:
+            hgt = 6.0
+        xs, ys = warp_xy("EPSG:4326", crs, [q_["lon"] for q_ in g], [q_["lat"] for q_ in g])
+        out.append({"p": [[round(x - cx, 1), round(y - cy, 1)] for x, y in zip(xs, ys)][:-1], "h": round(min(hgt, 200), 1), "k": t.get("building", "yes")})
+    return out
+
+
 def _best_sentinel(far: list[float]) -> tuple[str, list[dict], float, bool]:
     """The clearest summer day whose scenes together cover the far box."""
     year, best = dt.date.today().year, None
@@ -167,11 +193,12 @@ def _best_sentinel(far: list[float]) -> tuple[str, list[dict], float, bool]:
     return best
 
 
-def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str | None = None) -> dict[str, Any]:
+def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str | None = None,
+                profile: dict | None = None, at: tuple[float, float] | None = None) -> dict[str, Any]:
     """Gather and shape every layer of a world; returns the page's embedded blocks and its record."""
     from rasterio.warp import transform as warp_xy, transform_bounds
 
-    lon, lat, found = _geocode(place)
+    lon, lat, found = (at[0], at[1], place) if at else _geocode(place)
     name = name or place.split(",")[0].strip()
     crs = utm_crs(lon, lat)
     kx, ky = 111.32 * math.cos(math.radians(lat)), 110.57
@@ -245,6 +272,7 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
     trees = np.concatenate([measured, estimated]).astype(np.float32)
     blocks["trees"] = base64.b64encode(trees.tobytes()).decode()
 
+    buildings = _buildings(core, crs, cx, cy)
     marks = _landmarks(far, name, lon, lat)
     for m in marks:
         x, y = warp_xy("EPSG:4326", crs, [m["lon"]], [m["lat"]])
@@ -256,7 +284,7 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
         "trees": {"measured": int(len(measured)), "estimated": int(len(estimated)), "tallest_m": round(float(trees[:, 3].max()), 1) if len(trees) else 0},
         "sources": {"ground": "USGS 3DEP lidar" if lidar.any() else "Copernicus DEM 30 m", "core_photo": photo,
                     "far_photo": f"Sentinel-2 {s2_day}", "terrain": "Copernicus DEM GLO-30"},
-        "landmarks": marks,
+        "landmarks": marks, "buildings": buildings, "profile": profile or None,
     }
     caveats = []
     if not lidar.any():
@@ -267,6 +295,8 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
         caveats.append(f"the core photo is Sentinel-2 at 10 m, not an aerial photo; up close the ground is soft")
     if not s2_covers:
         caveats.append(f"no single clear summer day covered the whole distance; edges may be blank")
+    if not profile:
+        caveats.append("no study of the place was given: the forest uses the default Pacific Northwest species; pass profile= to grow the place's own")
     caveats.append("trees are generated from recipes and rules (species by distance to water, wind, variety); their positions and heights are data, their shapes are not")
     return {"meta": meta, "blocks": blocks, "caveats": caveats, "found": found, "sentinel": {"day": s2_day, "cloud_pct": round(s2_cloud, 2)}}
 
