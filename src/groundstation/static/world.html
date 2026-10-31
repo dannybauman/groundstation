@@ -40,6 +40,7 @@
   <div class="row"><label for="tod">Time of day</label><input id="tod" type="range" min="6" max="20" step="0.05" value="16.5"><output id="todv"></output></div>
   <div class="row"><label for="wind">Wind</label><input id="wind" type="range" min="0" max="1" step="0.01" value="0.35"><output id="windv"></output></div>
   <div class="row"><label for="cloud">Cloud shadows</label><input id="cloud" type="range" min="0" max="0.6" step="0.01" value="0.3"><output id="cloudv"></output></div>
+  <div class="row"><label for="sound">Sound</label><button id="sound" type="button" style="flex:1;font:inherit;font-size:12.5px;padding:6px 10px;border-radius:9px;cursor:pointer;color:#f3ede4;background:rgba(232,74,47,.14);border:1px solid rgba(232,74,47,.45)">Hear the birds and the water</button></div>
   <div class="row"><label for="haze">Haze</label><input id="haze" type="range" min="0" max="1" step="0.01" value="0.4"><output id="hazev"></output></div>
   <div class="btns">
     <button id="goClose">Close in</button>
@@ -625,39 +626,65 @@ const buildingCount = (() => {
   mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
   return geos.length;
 })();
-// WILDLIFE: the birds the study found, in flocks wheeling over water or forest,
-// wings beating in the shader; each bird a handful of triangles
-const flocks = (() => {
-  const kinds = (Array.isArray(PROFILE.fauna) ? PROFILE.fauna : []).filter((a) => (a.kind || 'bird') === 'bird').slice(0, 4);
-  if (!kinds.length) kinds.push({ name: 'birds', count: 24, color: '#2b2622', size_m: 1.2, altitude_m: 60, over: 'any' });
-  const wing = new THREE.BufferGeometry();
-  const v = new Float32Array([0, 0, 0.35, -1, 0.05, -0.1, 0, 0, -0.35,   0, 0, 0.35, 0, 0, -0.35, 1, 0.05, -0.1,   0, -0.06, 0.5, 0, 0.04, 0, 0, -0.05, -0.55]);
-  wing.setAttribute('position', new THREE.BufferAttribute(v, 3)); wing.computeVertexNormals();
-  const out = [];
-  for (const k of kinds) {
-    const n = Math.min(200, k.count || 20);
-    const mat = new THREE.MeshStandardMaterial({ color: hex(k.color, 0x2b2622), roughness: 0.8, side: THREE.DoubleSide });
+// WILDLIFE (2026-10-31: "any birds that show up ... should only be those from
+// that region ... at the right proportional size and we can hear them"): the
+// birds recorded here (GBIF), each at its wingspan in metres. Those that fly
+// (raptors, vultures, crows, ravens) wheel over the ground they keep to; the
+// rest hop about on the ground, small as they are.
+const BIRDS = Array.isArray(meta.birds) && meta.birds.length ? meta.birds
+  : (Array.isArray(PROFILE.fauna) ? PROFILE.fauna : []).map((f) => ({ name: f.name, kind: 'flyer', wingspan: f.size_m || 1.2, colour: f.color, over: f.over, count: f.count }));
+const wingGeo = (() => {   // wings tip to tip span x from -1 to 1, so a bird's scale is half its wingspan
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0.35, -1, 0.05, -0.1, 0, 0, -0.35,   0, 0, 0.35, 0, 0, -0.35, 1, 0.05, -0.1,   0, -0.06, 0.5, 0, 0.04, 0, 0, -0.05, -0.55]), 3));
+  g.computeVertexNormals(); return g;
+})();
+const perchGeo = (() => {   // a small bird at rest, one unit long: body, head, tail
+  const body = new THREE.IcosahedronGeometry(0.5, 1).scale(0.55, 0.5, 1).translate(0, 0.32, 0);
+  const head = new THREE.IcosahedronGeometry(0.22, 1).translate(0, 0.52, 0.42);
+  const tail = new THREE.BoxGeometry(0.16, 0.05, 0.45).translate(0, 0.3, -0.62);
+  return mergeGeometries([body, head, tail].map((g) => { g.deleteAttribute('uv'); return g.index ? g.toNonIndexed() : g; }));
+})();
+const isRaptor = (b) => /Accipitr|Pandion|Cathart|Falcon/.test((b.family || '') + (b.order || '')) || b.wingspan >= 1.4;
+const flocks = [], perched = [];
+for (const b of BIRDS) {
+  const colour = hex(b.colour, 0x2b2622);
+  if (b.kind === 'flyer') {
+    const raptor = isRaptor(b), n = Math.min(60, b.count || (raptor ? 3 : 9));
+    const over = b.over || (/Pandion|Haliaeetus|Ardeid|Larid/.test((b.family || '') + (b.sci || '')) ? 'water' : 'forest');
+    const altitude = b.altitude_m || (/Cathart/.test(b.family || '') ? 180 : raptor ? 95 : 45);
+    const mat = new THREE.MeshStandardMaterial({ color: colour, roughness: 0.8, side: THREE.DoubleSide });
     mat.onBeforeCompile = (sh) => {
-      sh.uniforms.uTime = U.uTime;
-      sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+      sh.uniforms.uTime = U.uTime; sh.uniforms.uFlap = { value: raptor ? 2.4 : 7.0 };
+      sh.vertexShader = 'uniform float uTime; uniform float uFlap;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
         float ph = instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.21;
-        transformed.y += sin(uTime * 7.0 + ph) * abs(transformed.x) * 0.55;`);
+        transformed.y += sin(uTime * uFlap + ph) * abs(transformed.x) * (uFlap < 3.0 ? 0.18 : 0.5);`);   // big birds soar, small ones beat
     };
-    const im = new THREE.InstancedMesh(wing, mat, n); im.frustumCulled = false; scene.add(im);
-    // a few wheeling centres over the kind of ground this bird keeps to
+    const im = new THREE.InstancedMesh(wingGeo, mat, n); im.frustumCulled = false; scene.add(im);
     const centres = [];
-    for (let tries = 0; centres.length < Math.max(1, Math.round(n / 12)) && tries < 400; tries++) {
+    for (let tries = 0; centres.length < Math.max(1, Math.ceil(n / (raptor ? 2 : 8))) && tries < 500; tries++) {
       const x = core.extent[0] + rand() * (core.extent[2] - core.extent[0]), y = core.extent[1] + rand() * (core.extent[3] - core.extent[1]);
       const [ci, cj] = cellAt(x, y), g = hAt(ci, cj), wet = hasWater && g < waterY + 1;
-      if ((k.over === 'water' && !wet) || (k.over === 'forest' && wet)) continue;
-      centres.push([x, y, Math.max(g, hasWater ? waterY : g) + (k.altitude_m || 60)]);
+      if ((over === 'water' && hasWater && !wet) || (over === 'forest' && wet)) continue;
+      centres.push([x, y, Math.max(g, hasWater ? waterY : g) + altitude]);
     }
-    if (!centres.length) centres.push([0, 0, (hasWater ? waterY : 0) + 80]);
-    const birds = Array.from({ length: n }, (_, i) => ({ c: centres[i % centres.length], r: 25 + rand() * 90, sp: (0.25 + rand() * 0.35) * (rand() < 0.5 ? 1 : -1), a: rand() * 6.283, dz: (rand() - 0.5) * 20, s: (k.size_m || 1.2) * (0.85 + rand() * 0.3) }));
-    out.push({ im, birds, name: k.name });
+    if (!centres.length) centres.push([0, 0, (hasWater ? waterY : 0) + altitude]);
+    const birds = Array.from({ length: n }, (_, i) => ({ c: centres[i % centres.length], r: (raptor ? 60 : 25) + rand() * (raptor ? 140 : 70),
+      sp: (raptor ? 0.12 : 0.3) * (0.7 + rand() * 0.6) * (rand() < 0.5 ? 1 : -1), a: rand() * 6.283, dz: (rand() - 0.5) * 18, s: b.wingspan / 2 * (0.92 + rand() * 0.16) }));
+    flocks.push({ im, birds, name: b.name, info: b });
+  } else {
+    // on the ground, where there is ground: never in water or a carved fall
+    const n = Math.min(60, b.count || 36), mat = living(new THREE.MeshStandardMaterial({ color: colour, roughness: 0.75 }), false);
+    const im = new THREE.InstancedMesh(perchGeo, mat, n); im.frustumCulled = false; im.castShadow = true; scene.add(im);
+    const birds = [];
+    for (let tries = 0; birds.length < n && tries < n * 30; tries++) {
+      const x = core.extent[0] + rand() * (core.extent[2] - core.extent[0]), y = core.extent[1] + rand() * (core.extent[3] - core.extent[1]);
+      const [ci, cj] = cellAt(x, y), g = hAt(ci, cj);
+      if ((hasWater && g < waterY + 0.8) || carvedAt(x, y)) continue;
+      birds.push({ x, y, g, rot: rand() * 6.283, hop: rand() * 6.283, s: b.wingspan * 0.42 });
+    }
+    perched.push({ im, birds, name: b.name, info: b });
   }
-  return out;
-})();
+}
 // THE FALLING WATER: per fall, a ribbon that leaves the lip, arcs out and widens
 // as it drops, streaks racing down it and its edges fraying; a foaming pool where
 // it lands; a mist that billows from the pool and spray shedding off the fall.
@@ -791,10 +818,87 @@ for (const ab of (Array.isArray(meta.features) ? meta.features : []).filter((x) 
   }
   const bridgeMesh = new THREE.Mesh(mergeGeometries(parts.map((g) => g.toNonIndexed())), stone); bridgeMesh.castShadow = bridgeMesh.receiveShadow = true; scene.add(bridgeMesh);
 }
+// SOUND (2026-10-31): each bird's own voice from xeno-canto, a song from those on
+// the ground and a call from those in the air, heard from where the bird is (a
+// panner per voice, the listener riding the camera); and every waterfall's roar,
+// louder the taller it is. Off until asked: browsers start no sound unbidden.
+const SOUND = { ctx: null, on: false, buf: {}, next: {}, roar: [] };
+window.gsWorld = { SOUND };   // for scripted checks
+async function soundOn() {
+  if (SOUND.ctx) { SOUND.on = true; SOUND.ctx.resume(); return; }
+  const ctx = SOUND.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  SOUND.on = true;
+  SOUND.master = ctx.createGain(); SOUND.master.gain.value = 0.9; SOUND.master.connect(ctx.destination);
+  for (const b of BIRDS) {
+    if (!b.sound) continue;
+    try {
+      const e = inside('snd-' + b.key);
+      const ab = e ? Uint8Array.from(atob(e), (c) => c.charCodeAt(0)).buffer : await (await fetch(DATA + b.sound.file)).arrayBuffer();
+      SOUND.buf[b.name] = await ctx.decodeAudioData(ab);
+    } catch (_) { /* a recording that will not decode stays quiet */ }
+  }
+  // a falling roar: shaped noise, low and broad for a big fall
+  const noise = ctx.createBuffer(1, ctx.sampleRate * 3, ctx.sampleRate), ch = noise.getChannelData(0);
+  let last = 0; for (let i = 0; i < ch.length; i++) { last = 0.97 * last + 0.03 * (Math.random() * 2 - 1); ch[i] = last * 6 + (Math.random() * 2 - 1) * 0.15; }
+  for (const fl of FALLS) {
+    const src = ctx.createBufferSource(); src.buffer = noise; src.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500 + 2500 / Math.sqrt(fl.h);
+    const g = ctx.createGain(); g.gain.value = Math.min(1.4, 0.25 + fl.h / 120);
+    const pn = ctx.createPanner(); Object.assign(pn, { distanceModel: 'inverse', refDistance: 15 + fl.h * 0.4, rolloffFactor: 1.1, maxDistance: 3000 });
+    const at = fl.pool || new THREE.Vector3(fl.xy[0], fl.lipY - fl.h, -fl.xy[1]);
+    pn.positionX.value = at.x; pn.positionY.value = at.y + fl.h * 0.3; pn.positionZ.value = at.z;
+    src.connect(lp).connect(g).connect(pn).connect(SOUND.master); src.start();
+    SOUND.roar.push(src);
+  }
+}
+function soundOff() { SOUND.on = false; if (SOUND.ctx) SOUND.ctx.suspend(); }
+function voice(name, at, near) {
+  const buf = SOUND.buf[name]; if (!buf) return;
+  const ctx = SOUND.ctx, src = ctx.createBufferSource(); src.buffer = buf;
+  const g = ctx.createGain(), len = 2.5 + Math.random() * 3.5, off = Math.random() * Math.max(0, buf.duration - len);
+  g.gain.setValueAtTime(0, ctx.currentTime); g.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.08);
+  g.gain.setValueAtTime(1, ctx.currentTime + len - 0.3); g.gain.linearRampToValueAtTime(0, ctx.currentTime + len);
+  const pn = ctx.createPanner(); Object.assign(pn, { distanceModel: 'inverse', refDistance: near, rolloffFactor: 1.3, maxDistance: near * 40 });
+  pn.positionX.value = at.x; pn.positionY.value = at.y; pn.positionZ.value = at.z;
+  src.connect(g).connect(pn).connect(SOUND.master); src.start(ctx.currentTime, off, len);
+}
+const earDir = new THREE.Vector3(), earAt = new THREE.Vector3();
+function listen(dt) {
+  if (!SOUND.on || !SOUND.ctx) return;
+  const L = SOUND.ctx.listener, c = camera.position; camera.getWorldDirection(earDir);
+  if (L.positionX) { L.positionX.value = c.x; L.positionY.value = c.y; L.positionZ.value = c.z; L.forwardX.value = earDir.x; L.forwardY.value = earDir.y; L.forwardZ.value = earDir.z; L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0; }
+  else { L.setPosition(c.x, c.y, c.z); L.setOrientation(earDir.x, earDir.y, earDir.z, 0, 1, 0); }
+  const now = SOUND.ctx.currentTime;
+  // songbirds sing from the ground near you; fliers call from the air
+  for (const p of perched) {
+    if ((SOUND.next[p.name] ?? 0) > now) continue;
+    SOUND.next[p.name] = now + 4 + Math.random() * 10;
+    let best = null, bd = 160 * 160;
+    for (const b of p.birds) { const d = (b.x - c.x) ** 2 + (b.g - c.y) ** 2 + (-b.y - c.z) ** 2; if (d < bd) { bd = d; best = b; } }
+    if (best) voice(p.name, earAt.set(best.x, best.g + 0.3, -best.y), 6);
+  }
+  for (const f of flocks) {
+    if ((SOUND.next[f.name] ?? 0) > now) continue;
+    SOUND.next[f.name] = now + 7 + Math.random() * 18;
+    const i = Math.floor(Math.random() * f.birds.length), m = new THREE.Matrix4(); f.im.getMatrixAt(i, m); earAt.setFromMatrixPosition(m);
+    if (earAt.distanceTo(c) < 900) voice(f.name, earAt, 40);
+  }
+}
 function updateFalls() { FU.uFog.value.copy(scene.fog.color); FU.uFogD.value = scene.fog.density; FU.uLight.value = 0.55 + 0.45 * Math.min(1, sun.intensity / 3.6); }
 
 const birdM = new THREE.Matrix4(), birdQ = new THREE.Quaternion(), birdS = new THREE.Vector3(), birdP = new THREE.Vector3(), birdUp = new THREE.Vector3(0, 1, 0);
 function flyBirds(dt) {
+  const t = U.uTime.value;
+  for (const p of perched) {
+    p.birds.forEach((b, i) => {
+      const hopping = Math.max(0, Math.sin(t * 0.7 + b.hop * 5)) ** 8;   // now and then a little run of hops
+      b.rot += hopping * dt * (Math.sin(b.hop) > 0 ? 1.2 : -1.2);
+      birdQ.setFromAxisAngle(birdUp, b.rot);
+      birdM.compose(birdP.set(b.x, b.g + Math.abs(Math.sin(t * 9 + b.hop)) * hopping * b.s * 0.8, -b.y), birdQ, birdS.set(b.s, b.s, b.s));
+      p.im.setMatrixAt(i, birdM);
+    });
+    p.im.instanceMatrix.needsUpdate = true;
+  }
   for (const f of flocks) {
     f.birds.forEach((b, i) => {
       b.a += b.sp * dt * 0.5;
@@ -971,6 +1075,10 @@ function setSun(hour) {
 const tod = document.getElementById('tod'), wind = document.getElementById('wind'), haze = document.getElementById('haze');
 const setHaze = () => { scene.fog.density = 0.000004 + Number(haze.value) * 0.00004; document.getElementById('hazev').textContent = Math.round(haze.value * 100) + '%'; };
 const setWind = () => { uniforms.uWind.value = Number(wind.value); document.getElementById('windv').textContent = Math.round(wind.value * 100) + '%'; };
+document.getElementById('sound').onclick = async (e) => {
+  if (SOUND.on) { soundOff(); e.target.textContent = 'Hear the birds and the water'; }
+  else { e.target.textContent = 'Listening… (press to quiet)'; await soundOn(); }
+};
 const cloud = document.getElementById('cloud'); const setCloud = () => { U.uCloud.value = Number(cloud.value); document.getElementById('cloudv').textContent = Math.round(cloud.value / 0.6 * 100) + '%'; };
 cloud.oninput = setCloud; setCloud();
 tod.oninput = () => setSun(Number(tod.value)); wind.oninput = setWind; haze.oninput = setHaze;
@@ -1035,7 +1143,10 @@ document.getElementById('about').textContent = (meta.core.lidar_share > 0.02
 document.getElementById('facts').innerHTML += '<br>' + SPECIES.map((s) => s.name).join(' · ')
   + (FALLS.length ? ' · ' + FALLS.length + ' waterfall' + (FALLS.length > 1 ? 's' : '') : '')
   + (buildingCount ? ' · ' + buildingCount.toLocaleString() + ' buildings' : '')
-  + (flocks.length ? ' · ' + flocks.map((f) => f.name).join(', ') + ' overhead' : '');
+  + (flocks.length ? ' · overhead: ' + flocks.map((f) => f.name).join(', ') : '')
+  + (perched.length ? ' · on the ground: ' + perched.map((p) => p.name).join(', ') : '');
+{ const by = [...new Set(BIRDS.filter((b) => b.sound).map((b) => b.sound.credit.by))];
+  if (by.length) document.getElementById('facts').innerHTML += '<br>bird voices: xeno-canto, recorded by ' + by.join(', ') + ' (Creative Commons)'; }
 
 // no glow pass: a physical sky is far brighter than any glow threshold before exposure,
 // so a bloom pass washed the whole view white (2026-10-31)
@@ -1056,6 +1167,7 @@ renderer.setAnimationLoop(() => {
   stream.fill();
   flyBirds(dt);
   updateFalls();
+  listen(dt);
   // shadows follow what you are looking at, within the forest
   sun.target.position.copy(controls.target); sun.position.copy(sky.material.uniforms.sunPosition.value).multiplyScalar(8000).add(controls.target);
   if (waterNormals) { waterNormals.offset.x += dt * 0.0035; waterNormals.offset.y += dt * 0.0016; }

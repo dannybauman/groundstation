@@ -222,6 +222,101 @@ def _features(core, crs, cx, cy):
     return out
 
 
+# ── BIRDS: the ones recorded here, at their own size, with their own voices ──
+GBIF = 'https://api.gbif.org/v1'
+XENO_CANTO = 'b1047888-ae52-4179-9dd5-5448ea342a24'   # xeno-canto's recordings, as a GBIF dataset
+FLYING_ORDERS = {'Accipitriformes', 'Falconiformes', 'Cathartiformes', 'Pelecaniformes', 'Suliformes', 'Charadriiformes', 'Anseriformes', 'Gaviiformes', 'Podicipediformes'}
+FAMILY_SPAN = {'Accipitridae': 1.8, 'Pandionidae': 1.6, 'Cathartidae': 1.75, 'Falconidae': 0.9, 'Ardeidae': 1.8, 'Laridae': 1.1, 'Anatidae': 0.9,
+               'Corvidae': 0.75, 'Turdidae': 0.38, 'Cinclidae': 0.28, 'Passerellidae': 0.24, 'Picidae': 0.4, 'Trochilidae': 0.11, 'Strigidae': 1.0,
+               'Columbidae': 0.55, 'Paridae': 0.2, 'Fringillidae': 0.23, 'Parulidae': 0.2, 'Troglodytidae': 0.16, 'Sittidae': 0.2, 'Regulidae': 0.16}
+FAMILY_COLOUR = {'Corvidae': '#1d1b1a', 'Turdidae': '#7a4a2e', 'Cinclidae': '#5d6066', 'Passerellidae': '#4b4f55', 'Picidae': '#3b3530',
+                 'Paridae': '#5b5d58', 'Fringillidae': '#7d6a40', 'Parulidae': '#8a8a3a', 'Accipitridae': '#3a2e26', 'Pandionidae': '#4a4038',
+                 'Cathartidae': '#2a2420', 'Laridae': '#c9c9c4', 'Ardeidae': '#6e7880', 'Anatidae': '#5a4a38'}
+LICENCE_RANK = ['publicdomain', '/by/', '/by-sa/', '/by-nc/', '/by-nc-sa/', '/by-nd/', '/by-nc-nd/']
+
+
+def _wingspans(keys):
+    """Wingspans in metres from Wikidata (P2050), found by GBIF taxon id (P846)."""
+    vals = ' '.join(f'"{k}"' for k in keys)
+    q = ('SELECT ?gbif ?amount ?unit WHERE { VALUES ?gbif { ' + vals + ' } ?item wdt:P846 ?gbif. '
+         '?item p:P2050/psv:P2050 [wikibase:quantityAmount ?amount; wikibase:quantityUnit ?unit]. }')
+    try:
+        rows = _json('https://query.wikidata.org/sparql?' + urllib.parse.urlencode({'query': q, 'format': 'json'}), timeout=60)['results']['bindings']
+    except Exception:
+        return {}
+    unit = {'Q174728': 0.01, 'Q11573': 1.0, 'Q174789': 0.001, 'Q218593': 0.0254}
+    out = {}
+    for r in rows:
+        f = unit.get(r['unit']['value'].rsplit('/', 1)[-1])
+        if f:
+            out.setdefault(int(r['gbif']['value']), float(r['amount']['value']) * f)
+    return out
+
+
+def _voice(key, want):
+    """A recording of this bird from xeno-canto: a song or a call, mp3, the most open licence
+    first; only its first ~200 KB (about ten seconds) is fetched."""
+    try:
+        recs = _json(f'{GBIF}/occurrence/search?speciesKey={key}&mediaType=Sound&datasetKey={XENO_CANTO}&limit=60', timeout=60).get('results', [])
+    except Exception:
+        return None
+    best = None
+    for r in recs:
+        kind = (r.get('behavior') or '').lower()
+        for m in r.get('media') or []:
+            if m.get('type') != 'Sound' or m.get('format') != 'audio/mpeg':
+                continue
+            lic = m.get('license', '')
+            rank = next((i for i, t in enumerate(LICENCE_RANK) if t in lic), 9) + (0 if want in kind else 20)
+            if best is None or rank < best[0]:
+                best = (rank, m, kind)
+    if not best:
+        return None
+    m = best[1]
+    try:
+        req = urllib.request.Request(m['identifier'], headers={**UA, 'Range': 'bytes=0-204799'})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = r.read()
+    except Exception:
+        return None
+    return {'bytes': data, 'type': 'song' if 'song' in best[2] else 'call',
+            'credit': {'by': m.get('creator') or m.get('rightsHolder') or 'xeno-canto', 'license': m.get('license', ''), 'url': m.get('references') or m['identifier']}}
+
+
+def bird_life(core, profile=None, cap_fly=4, cap_sing=4):
+    """The birds recorded here (GBIF), split into those you see flying and those you meet on
+    the ground, each at its wingspan, with a song for the ground and a call for the air."""
+    w, s_, e, n = core[0], core[1], core[2], core[3]
+    pad_x, pad_y = (e - w), (n - s_)
+    q = f'{GBIF}/occurrence/search?classKey=212&decimalLatitude={s_ - pad_y},{n + pad_y}&decimalLongitude={w - pad_x},{e + pad_x}&facet=speciesKey&facetLimit=40&limit=0'
+    try:
+        counts = _json(q, timeout=60)['facets'][0]['counts']
+    except Exception:
+        return []
+    wanted = [str(f.get('name', '')).lower() for f in (profile or {}).get('fauna', []) if (f.get('kind') or 'bird') == 'bird']
+    pool = []
+    for c in counts:
+        try:
+            sp = _json(f"{GBIF}/species/{c['name']}", timeout=30)
+        except Exception:
+            continue
+        name = sp.get('vernacularName') or sp.get('canonicalName')
+        if not name or sp.get('rank') != 'SPECIES':
+            continue
+        named = any(x and (x.rstrip('s') in name.lower() or name.lower() in x) for x in wanted)
+        fly = sp.get('order') in FLYING_ORDERS or (sp.get('family') == 'Corvidae' and (sp.get('canonicalName') or '').startswith('Corvus'))
+        pool.append({'key': int(c['name']), 'records': c['count'], 'name': name, 'sci': sp.get('canonicalName'), 'family': sp.get('family'),
+                     'order': sp.get('order'), 'kind': 'flyer' if fly else 'song', 'named': named})
+    pool.sort(key=lambda b: (not b['named'], -b['records']))
+    picked = [b for b in pool if b['kind'] == 'flyer'][:cap_fly] + [b for b in pool if b['kind'] == 'song'][:cap_sing]
+    spans = _wingspans([b['key'] for b in picked])
+    for b in picked:
+        b['wingspan'] = round(spans.get(b['key']) or FAMILY_SPAN.get(b['family'], 0.3), 2)
+        b['colour'] = FAMILY_COLOUR.get(b['family'], '#3b3632')
+        b['voice'] = _voice(b['key'], 'call' if b['kind'] == 'flyer' else 'song')
+    return picked
+
+
 def _best_sentinel(far: list[float]) -> tuple[str, list[dict], float, bool]:
     """The clearest summer day whose scenes together cover the far box."""
     year, best = dt.date.today().year, None
@@ -325,6 +420,12 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
 
     buildings = _buildings(core, crs, cx, cy)
     features = _features(core, crs, cx, cy)
+    birds = bird_life(core, profile)
+    for b in birds:
+        v = b.pop("voice")
+        if v:
+            blocks[f"snd-{b['key']}"] = base64.b64encode(v["bytes"]).decode()
+            b["sound"] = {"file": f"sounds/{b['key']}-{v['type']}.mp3", "type": v["type"], "credit": v["credit"]}
     marks = _landmarks(far, name, lon, lat)
     for m in marks:
         x, y = warp_xy("EPSG:4326", crs, [m["lon"]], [m["lat"]])
@@ -336,7 +437,7 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
         "trees": {"measured": int(len(measured)), "estimated": int(len(estimated)), "tallest_m": round(float(trees[:, 3].max()), 1) if len(trees) else 0},
         "sources": {"ground": "USGS 3DEP lidar" if lidar.any() else "Copernicus DEM 30 m", "core_photo": photo,
                     "far_photo": f"Sentinel-2 {s2_day}", "terrain": "Copernicus DEM GLO-30"},
-        "landmarks": marks, "buildings": buildings, "features": features, "profile": profile or None,
+        "landmarks": marks, "buildings": buildings, "features": features, "birds": birds, "profile": profile or None,
     }
     caveats = []
     if not lidar.any():
@@ -349,6 +450,9 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
         caveats.append(f"no single clear summer day covered the whole distance; edges may be blank")
     if not profile:
         caveats.append("no study of the place was given: the forest uses the default Pacific Northwest species; pass profile= to grow the place's own")
+    voiced = [b for b in birds if b.get("sound")]
+    if any("-nc" in b["sound"]["credit"]["license"] for b in voiced):
+        caveats.append("some bird recordings are licensed non-commercial (xeno-canto, CC BY-NC); they are credited in the page and fine to share, not to sell")
     caveats.append("trees are generated from recipes and rules (species by distance to water, wind, variety); their positions and heights are data, their shapes are not")
     return {"meta": meta, "blocks": blocks, "caveats": caveats, "found": found, "sentinel": {"day": s2_day, "cloud_pct": round(s2_cloud, 2)}}
 

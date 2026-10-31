@@ -5748,7 +5748,11 @@ def render_world(
     Buildings come from OpenStreetMap in the core, raised to their recorded heights.
     Every OpenStreetMap waterfall in the core is modelled: a carved cliff from its lip
     to its pool (tiers chain), falling water, foam, mist and spray, and the arch
-    footbridges beside it; steep ground everywhere turns to rock.
+    footbridges beside it; steep ground everywhere turns to rock. Birds are the ones
+    GBIF has records of here, at their wingspans (Wikidata, else their family), with
+    their own voices from xeno-canto: songs from birds on the ground, calls from birds
+    in flight, heard from where they are once the viewer turns sound on; every
+    waterfall roars.
     at: [lon, lat] to build there instead of geocoding the name.
 
     Returns {path, title, place, core, trees, sources, landmarks, caveats}. Read
@@ -5767,6 +5771,7 @@ def render_world(
         "trees": m["trees"], "sources": m["sources"], "sentinel": w["sentinel"],
         "landmarks": [l["name"] for l in m["landmarks"]], "buildings": len(m["buildings"]),
         "set_pieces": [f"{f['name']} ({f['kind']})" for f in m["features"]],
+        "birds": [f"{b['name']} ({b['kind']}, {b['wingspan']} m{', ' + b['sound']['type'] if b.get('sound') else ''})" for b in m["birds"]],
         "species": [s["name"] for s in (profile or {}).get("species", [])] or "default", "caveats": w["caveats"],
         "size_mb": round(Path(path).stat().st_size / 1e6, 1),
     }

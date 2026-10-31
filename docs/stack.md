@@ -271,6 +271,33 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - link: https://overpass-api.de
 - when: world
 
+## GBIF
+- stage: data
+- what: the Global Biodiversity Information Facility, the open index of species records worldwide
+- ds-role: uses
+- integration: which birds a living world shows: the species recorded at the place, most recorded first
+- speaks-to: xeno-canto, Wikidata
+- link: https://www.gbif.org
+- when: world
+
+## xeno-canto
+- stage: data
+- what: the open, community archive of bird sound recordings, each credited to its recordist under Creative Commons
+- ds-role: uses
+- integration: each bird's song (on the ground) or call (in flight) in a living world
+- speaks-to: GBIF
+- link: https://xeno-canto.org
+- when: world
+
+## Wikidata
+- stage: data
+- what: the open knowledge base behind Wikipedia
+- ds-role: uses
+- integration: a bird's wingspan, so it flies at its own size
+- speaks-to: GBIF
+- link: https://www.wikidata.org
+- when: world
+
 ## NASA EONET
 - stage: data
 - what: NASA's open feed of natural events — wildfires, storms, volcanoes, floods
