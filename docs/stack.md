@@ -244,6 +244,33 @@ Adding a tool is one entry here with a `when` rule. `src/groundstation/stack.py`
 - link: https://registry.opendata.aws/terrain-tiles
 - when: terrain
 
+## USGS 3DEP lidar
+- stage: data
+- what: the US Geological Survey's 3D Elevation Program, airborne laser surveys of the ground and of everything standing on it, as 2 m ground and height-above-ground grids
+- ds-role: uses
+- integration: the ground of a living world's core, and every treetop in it (local maxima of height above ground)
+- speaks-to: Planetary Computer, COG + HTTP range requests
+- link: https://www.usgs.gov/3d-elevation-program
+- when: world
+
+## three.js
+- stage: draw
+- what: the open WebGL scene library: meshes, instancing, shadows, a physically based sky
+- ds-role: uses
+- integration: draws a living world: terrain, the instanced forest with its wind, water, sky and sun
+- speaks-to: WebGL
+- link: https://threejs.org
+- when: world
+
+## OpenStreetMap Overpass
+- stage: place
+- what: the query API over OpenStreetMap, here for the towns and peaks round a place
+- ds-role: uses
+- integration: the labels in a living world
+- speaks-to: OpenStreetMap
+- link: https://overpass-api.de
+- when: world
+
 ## NASA EONET
 - stage: data
 - what: NASA's open feed of natural events — wildfires, storms, volcanoes, floods

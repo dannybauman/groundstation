@@ -5681,3 +5681,47 @@ def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
     png = page.with_suffix(".png")
     return {"cases": str(cases_path), "page": str(page), "screenshot": str(png) if png.exists() else None,
             "warnings": warnings}
+
+
+def render_world(
+    place: str,
+    title: str | None = None,
+    radius_km: float = 25.0,
+    core_km: float = 4.0,
+    out_path: str | None = None,
+) -> dict[str, Any]:
+    """Build a living world: an open-world 3D scene of a place, as one HTML file.
+
+    place is a name ("Bridge of the Gods, Oregon"); geocoded with Nominatim.
+    The core (core_km across, default 4) carries USGS 3DEP lidar ground and every
+    treetop the lidar saw where the US has flown it, with a NAIP aerial photo;
+    anywhere else Copernicus 30 m terrain, the clearest Sentinel-2 summer pass,
+    and trees placed from the photo's vegetation with estimated heights. The far
+    ring (radius_km, default 25) is Copernicus terrain under that Sentinel-2
+    pass, so the camera can pull back to the mountains around. Towns and peaks
+    are labelled from OpenStreetMap.
+
+    The page grows the forest in the browser the way open-world engines do:
+    species recipes instanced at every tree, wind, per-tree variation, impostors
+    at mid distance, trees streamed round the camera to the horizon, a physical
+    sky with sun shadows and a time-of-day slider, cloud shadows, a rippling
+    river where the data shows one. Every byte is embedded, so it opens with no
+    server and shares as-is; expect 15 to 30 MB and a few minutes to build.
+
+    Returns {path, title, place, core, trees, sources, landmarks, caveats}. Read
+    the caveats: where there is no lidar, tree heights are estimates, and tree
+    shapes are always generated (their positions and heights are the data).
+    """
+    from groundstation import world as _world
+
+    w = _world.build_world(place, radius_km=radius_km, core_km=core_km, name=title)
+    path = _artifact_path(out_path, "world", w["meta"]["name"])
+    _world.write_world_html(w, path)
+    m = w["meta"]
+    return {
+        "path": path, "title": m["name"], "place": w["found"],
+        "core": {"km": core_km, "lidar_share": m["core"]["lidar_share"], "photo": m["sources"]["core_photo"]},
+        "trees": m["trees"], "sources": m["sources"], "sentinel": w["sentinel"],
+        "landmarks": [l["name"] for l in m["landmarks"]], "caveats": w["caveats"],
+        "size_mb": round(Path(path).stat().st_size / 1e6, 1),
+    }
