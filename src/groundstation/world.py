@@ -171,6 +171,57 @@ def _buildings(core: list[float], crs: str, cx: float, cy: float, cap: int = 400
     return out
 
 
+def _features(core, crs, cx, cy):
+    from rasterio.warp import transform as warp_xy
+    """The place's set pieces from OpenStreetMap: every waterfall with its height and width,
+    facing the way its stream flows (waterways are drawn in the direction of flow), and the
+    arch footbridges near them."""
+    s, w, n, e = core[1], core[0], core[3], core[2]
+    q = (f'[out:json][timeout:60];(node["waterway"="waterfall"]({s},{w},{n},{e});way["waterway"~"stream|river"]({s},{w},{n},{e});'
+         f'way["man_made"="bridge"]({s},{w},{n},{e}););out geom;')
+    try:
+        els = _json('https://overpass-api.de/api/interpreter?' + urllib.parse.urlencode({'data': q}), timeout=90).get('elements', [])
+    except Exception:
+        return []
+    def local(lons, lats):
+        xs, ys = warp_xy('EPSG:4326', crs, lons, lats)
+        return [[x - cx, y - cy] for x, y in zip(xs, ys)]
+    streams = [local([g['lon'] for g in el['geometry']], [g['lat'] for g in el['geometry']]) for el in els if el['type'] == 'way' and el.get('tags', {}).get('waterway')]
+    num = lambda v, d: (float(re.sub(r'[^0-9.]', '', str(v)) or d) if v is not None else d)
+    out = []
+    for el in els:
+        t = el.get('tags', {})
+        if el['type'] == 'node' and t.get('waterway') == 'waterfall':
+            h = num(t.get('height'), 0)
+            if h < 4:
+                continue
+            [x, y] = local([el['lon']], [el['lat']])[0]
+            best, d = None, 1e9   # the stream vertex nearest the fall gives the way the water runs
+            for line in streams:
+                for k in range(len(line)):
+                    dd = (line[k][0] - x) ** 2 + (line[k][1] - y) ** 2
+                    if dd < d:
+                        a, b = line[max(0, k - 1)], line[min(len(line) - 1, k + 1)]
+                        if a != b:
+                            best, d = [b[0] - a[0], b[1] - a[1]], dd
+            if best is None or d > 60 ** 2:
+                continue
+            m = math.hypot(*best)
+            out.append({'kind': 'waterfall', 'name': t.get('name', 'waterfall'), 'xy': [round(x, 1), round(y, 1)], 'h': round(min(h, 400), 1),
+                        'w': round(max(num(t.get('width'), 4) * 1.6, 4), 1), 'dir': [round(best[0] / m, 3), round(best[1] / m, 3)]})
+    falls = [f for f in out if f['kind'] == 'waterfall']
+    for el in els:
+        t = el.get('tags', {})
+        if el['type'] == 'way' and t.get('man_made') == 'bridge' and el.get('geometry'):
+            pts = local([g['lon'] for g in el['geometry']], [g['lat'] for g in el['geometry']])
+            a, b = max(((p1, p2) for p1 in pts for p2 in pts), key=lambda q_: (q_[0][0] - q_[1][0]) ** 2 + (q_[0][1] - q_[1][1]) ** 2)
+            mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+            near = min(falls, key=lambda f: (f['xy'][0] - mid[0]) ** 2 + (f['xy'][1] - mid[1]) ** 2, default=None)
+            if near and math.hypot(near['xy'][0] - mid[0], near['xy'][1] - mid[1]) < 80:
+                out.append({'kind': 'arch', 'name': t.get('name', 'bridge'), 'a': [round(a[0], 1), round(a[1], 1)], 'b': [round(b[0], 1), round(b[1], 1)], 'near': near['name']})
+    return out
+
+
 def _best_sentinel(far: list[float]) -> tuple[str, list[dict], float, bool]:
     """The clearest summer day whose scenes together cover the far box."""
     year, best = dt.date.today().year, None
@@ -273,6 +324,7 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
     blocks["trees"] = base64.b64encode(trees.tobytes()).decode()
 
     buildings = _buildings(core, crs, cx, cy)
+    features = _features(core, crs, cx, cy)
     marks = _landmarks(far, name, lon, lat)
     for m in marks:
         x, y = warp_xy("EPSG:4326", crs, [m["lon"]], [m["lat"]])
@@ -284,7 +336,7 @@ def build_world(place: str, radius_km: float = 25, core_km: float = 4, name: str
         "trees": {"measured": int(len(measured)), "estimated": int(len(estimated)), "tallest_m": round(float(trees[:, 3].max()), 1) if len(trees) else 0},
         "sources": {"ground": "USGS 3DEP lidar" if lidar.any() else "Copernicus DEM 30 m", "core_photo": photo,
                     "far_photo": f"Sentinel-2 {s2_day}", "terrain": "Copernicus DEM GLO-30"},
-        "landmarks": marks, "buildings": buildings, "profile": profile or None,
+        "landmarks": marks, "buildings": buildings, "features": features, "profile": profile or None,
     }
     caveats = []
     if not lidar.any():

@@ -96,7 +96,7 @@ const NOISE = `
     return mix(mix(h2(i), h2(i + vec2(1.0, 0.0)), f.x), mix(h2(i + vec2(0.0, 1.0)), h2(i + 1.0), f.x), f.y); }
   float clouds(vec2 p) { p = p / 2600.0 + uTime * vec2(0.011, 0.004);
     float n = vn(p) * 0.55 + vn(p * 2.1 + 7.3) * 0.3 + vn(p * 4.7 + 1.7) * 0.15; return smoothstep(0.48, 0.78, n); }`;
-function living(mat, wind) {
+function living(mat, wind, rock) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { uTime: U.uTime, uWind: U.uWind, uCloud: U.uCloud });
     sh.vertexShader = 'uniform float uTime; uniform float uWind; varying vec3 vWP;\n' + (wind ? 'attribute float aLevel; attribute float aPhase; varying float vRnd; varying float vLvl;\n' : '') + sh.vertexShader;
@@ -131,7 +131,20 @@ function living(mat, wind) {
       gl_FragColor.rgb += vec3(0.05, 0.07, 0.015) * max(0.0, 1.0 - gl_FragColor.g * 3.0);
       gl_FragColor.rgb *= (0.86 + 0.28 * vRnd) * (vLvl > 1.5 ? vec3(1.08, 1.14, 1.0) : vec3(1.0));   // its own shade; lighter new growth at the tips` : ''));
   };
-  mat.customProgramCacheKey = () => 'living-' + (wind ? 'w' : 's');
+  if (rock) {
+    const before = mat.onBeforeCompile;
+    mat.onBeforeCompile = (sh) => {
+      before(sh);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+        vec3 nW = normalize(cross(dFdx(vWP), dFdy(vWP)));
+        float steep = 1.0 - abs(nW.y);
+        float rk = vn(vWP.xz / 3.5 + vWP.y / 5.0) * 0.55 + vn(vec2(vWP.x + vWP.z, vWP.y) / 1.8) * 0.45;
+        vec3 basalt = mix(vec3(0.13, 0.125, 0.12), vec3(0.34, 0.32, 0.29), rk);
+        basalt = mix(basalt, vec3(0.22, 0.27, 0.16), smoothstep(0.55, 0.85, vn(vWP.xz / 9.0)) * 0.5);   // moss on the ledges
+        diffuseColor.rgb = mix(diffuseColor.rgb, basalt, smoothstep(0.5, 0.78, steep) * 0.9);`);
+    };
+  }
+  mat.customProgramCacheKey = () => 'living-' + (wind ? 'w' : 's') + (rock ? 'r' : '');
   return mat;
 }
 
@@ -150,7 +163,7 @@ function terrain(heights, gw, gh, ext, stride, photo, dropInside) {
     pos.setY(k, y);
   }
   geo.computeVertexNormals();
-  return new THREE.Mesh(geo, living(new THREE.MeshStandardMaterial({ map: photo, roughness: 0.96, metalness: 0 }), false));
+  return new THREE.Mesh(geo, living(new THREE.MeshStandardMaterial({ map: photo, roughness: 0.96, metalness: 0 }), false, true));
 }
 const core = meta.core, far = meta.far;
 const [cgw, cgh] = core.grid, cell = (core.extent[2] - core.extent[0]) / cgw;
@@ -189,6 +202,54 @@ const bridge = (() => {
   const toWorld = (i, j) => new THREE.Vector3(core.extent[0] + (i + 0.5) * cell, 0, -(core.extent[3] - (j + 0.5) * cell));
   return { a: toWorld(mx + ux * (t0 - 8), my + uy * (t0 - 8)), b: toWorld(mx + ux * (t1 + 8), my + uy * (t1 + 8)), deck: hs[Math.floor(hs.length * 0.5)] };
 })();
+
+// WATERFALLS, carved first (2026-10-31: "the main distinguishing feature ... would
+// be the waterfall. and it should be realistic and awesome"). Every fall
+// OpenStreetMap knows in the core: its lip where the map puts it, facing the way
+// its stream runs. The 30 m terrain blurs a cliff into a slope, so each fall cuts
+// its own amphitheatre: a sheer wall from the lip to its pool, the floor running
+// on to the next fall downstream (Multnomah's two tiers) or easing back out.
+const FALLS = (Array.isArray(meta.features) ? meta.features : []).filter((x) => x.kind === 'waterfall' && x.h >= 4);
+const carved = new Uint8Array(cgw * cgh);
+for (const fl of FALLS) {
+  const [lx, ly] = fl.xy, [ci, cj] = cellAt(lx, ly);
+  let top = -Infinity; const rr = Math.round(15 / cell);
+  for (let dj = -rr; dj <= rr; dj++) for (let di = -rr; di <= rr; di++) top = Math.max(top, hAt(ci + di, cj + dj));
+  fl.lipY = top; fl.d = new THREE.Vector2(fl.dir[0], fl.dir[1]).normalize(); fl.side = new THREE.Vector2(-fl.d.y, fl.d.x);
+}
+// a fall whose lip lies just downstream of another, in line with it, is its next tier
+for (const fl of FALLS) {
+  let next = null, best = 160;
+  for (const o of FALLS) {
+    if (o === fl) continue;
+    const vx = o.xy[0] - fl.xy[0], vy = o.xy[1] - fl.xy[1], dist = Math.hypot(vx, vy);
+    if (dist < best && (vx * fl.d.x + vy * fl.d.y) / dist > 0.6) { next = o; best = dist; }
+  }
+  fl.next = next; fl.len = next ? best : Math.max(28, fl.h * 0.3);
+}
+FALLS.sort((a, b) => b.lipY - a.lipY);
+for (const fl of FALLS) {
+  fl.poolY = fl.lipY - fl.h;
+  if (fl.next) fl.next.lipY = Math.min(fl.next.lipY, fl.poolY + 0.5);   // the next tier starts at this one's pool
+}
+for (const fl of FALLS) {
+  const reach = fl.len + (fl.next ? 0 : 60), half = (s) => 14 + fl.w + s * 0.35;
+  const i0 = cellAt(fl.xy[0] - reach - 60, 0)[0], i1 = cellAt(fl.xy[0] + reach + 60, 0)[0];
+  const j0 = cellAt(0, fl.xy[1] + reach + 60)[1], j1 = cellAt(0, fl.xy[1] - reach - 60)[1];
+  for (let j = Math.max(0, j0); j <= Math.min(cgh - 1, j1); j++) for (let i = Math.max(0, i0); i <= Math.min(cgw - 1, i1); i++) {
+    const x = core.extent[0] + (i + 0.5) * cell - fl.xy[0], y = core.extent[3] - (j + 0.5) * cell - fl.xy[1];
+    const s = x * fl.d.x + y * fl.d.y, t = Math.abs(x * fl.side.x + y * fl.side.y);
+    if (s < 0 || s > reach) continue;
+    const edge = THREE.MathUtils.clamp((t - half(s)) / 12, 0, 1);
+    if (edge >= 1) continue;
+    const tail = fl.next ? 0 : THREE.MathUtils.clamp((s - fl.len) / 60, 0, 1);
+    const floor = fl.poolY + (fl.next ? 0 : Math.max(0, s - fl.len) * 0.12);
+    const k = j * cgw + i, cut = floor + (coreH[k] - floor) * Math.max(edge * edge, tail * tail);
+    if (cut < coreH[k] - 2) carved[k] = 1;
+    coreH[k] = Math.min(coreH[k], cut);
+  }
+}
+const carvedAt = (x, y) => { const [i, j] = cellAt(x, y); return i >= 0 && j >= 0 && i < cgw && j < cgh && carved[j * cgw + i] === 1; };
 
 const farMesh = terrain(farH, far.grid[0], far.grid[1], far.extent, 1, farPhoto, core.extent);
 const coreMesh = terrain(coreH, cgw, cgh, core.extent, 2, corePhoto, null);
@@ -429,7 +490,7 @@ let rnd = 12345; const rand = () => ((rnd = (rnd * 16807) % 2147483647) / 214748
 const nT = treeData.length / 5, plan = [];
 for (let i = 0; i < nT; i++) {
   const x = treeData[i * 5], y = treeData[i * 5 + 1], g = treeData[i * 5 + 2], h = treeData[i * 5 + 3];
-  if (h < 5 || h > 80 || g < waterY + 0.5) continue;
+  if (h < 5 || h > 80 || g < waterY + 0.5 || carvedAt(x, y)) continue;
   const nearWater = g < waterY + 14, r = rand();
   const sp = pickSpecies(g, h, nearWater, r);
   plan.push({ x, y, g, h, sp, rot: rand() * Math.PI * 2, wide: 0.85 + rand() * 0.35, tint: rand() });
@@ -597,6 +658,141 @@ const flocks = (() => {
   }
   return out;
 })();
+// THE FALLING WATER: per fall, a ribbon that leaves the lip, arcs out and widens
+// as it drops, streaks racing down it and its edges fraying; a foaming pool where
+// it lands; a mist that billows from the pool and spray shedding off the fall.
+// The run between tiers is a flowing strip on the carved floor.
+const FALL_NOISE = `
+  float fh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float fn(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(fh(i), fh(i + vec2(1.0, 0.0)), f.x), mix(fh(i + vec2(0.0, 1.0)), fh(i + 1.0), f.x), f.y); }`;
+const FU = { uTime: U.uTime, uFog: { value: new THREE.Color() }, uFogD: { value: 0.00002 }, uLight: { value: 1 } };
+const vsFlow = `#include <common>
+  #include <logdepthbuf_pars_vertex>
+  varying vec2 vUv; varying float vDepth;
+  void main() { vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vDepth = -mv.z; gl_Position = projectionMatrix * mv;
+    #include <logdepthbuf_vertex>
+  }`;
+const fallMat = new THREE.ShaderMaterial({ uniforms: FU, transparent: true, depthWrite: false, side: THREE.DoubleSide, vertexShader: vsFlow,
+  fragmentShader: `#include <common>
+  #include <logdepthbuf_pars_fragment>
+  uniform float uTime; uniform vec3 uFog; uniform float uFogD; uniform float uLight; varying vec2 vUv; varying float vDepth;` + FALL_NOISE + `
+  void main() {
+    #include <logdepthbuf_fragment>
+    float x = vUv.x, y = vUv.y;
+    float flow = fn(vec2(x * 13.0, y * 5.0 - uTime * 2.4)) * 0.55 + fn(vec2(x * 33.0, y * 15.0 - uTime * 4.6)) * 0.45;
+    float streak = smoothstep(0.28, 0.85, flow);
+    float fray = fn(vec2(y * 18.0 - uTime * 3.2, 3.0)) * 0.22;
+    float edge = smoothstep(0.0, 0.14 + fray, x) * smoothstep(1.0, 0.86 - fray, x);
+    vec3 col = mix(vec3(0.66, 0.75, 0.8), vec3(1.0), streak) * uLight;
+    float a = edge * smoothstep(0.0, 0.015, y) * (0.5 + 0.5 * streak) * (1.0 - smoothstep(0.93, 1.0, y) * 0.6);
+    gl_FragColor = vec4(mix(col, uFog, 1.0 - exp(-uFogD * uFogD * vDepth * vDepth)), a);
+  }` });
+const foamMat = new THREE.ShaderMaterial({ uniforms: FU, transparent: true, depthWrite: false, vertexShader: vsFlow,
+  fragmentShader: `#include <common>
+  #include <logdepthbuf_pars_fragment>
+  uniform float uTime; uniform vec3 uFog; uniform float uFogD; uniform float uLight; varying vec2 vUv; varying float vDepth;` + FALL_NOISE + `
+  void main() {
+    #include <logdepthbuf_fragment>
+    vec2 c = vUv - 0.5; float r = length(c) * 2.0, ang = atan(c.y, c.x);
+    float churn = fn(vec2(ang * 4.0 + uTime * 0.6, r * 7.0 - uTime * 1.8)) * 0.6 + fn(vec2(ang * 9.0 - uTime, r * 15.0 - uTime * 3.0)) * 0.4;
+    float foam = smoothstep(0.35, 0.8, churn) * (1.0 - smoothstep(0.55, 1.0, r));
+    vec3 col = mix(vec3(0.42, 0.55, 0.58), vec3(1.0), foam) * uLight;
+    float a = (1.0 - smoothstep(0.75, 1.0, r)) * (0.55 + 0.45 * foam);
+    gl_FragColor = vec4(mix(col, uFog, 1.0 - exp(-uFogD * uFogD * vDepth * vDepth)), a);
+  }` });
+const mistMat = new THREE.ShaderMaterial({ uniforms: { ...FU, uScale: { value: innerHeight * 0.5 } }, transparent: true, depthWrite: false,
+  vertexShader: `#include <common>
+  #include <logdepthbuf_pars_vertex>
+  uniform float uTime; uniform float uScale; attribute vec4 seed; attribute vec4 spot; varying float vA; varying float vDepth;
+  void main() {
+    float t = fract(uTime * (0.05 + seed.x * 0.06) + seed.y);
+    float big = spot.w;                       // the fall's height sets the size of its cloud
+    float r = 2.0 + t * (6.0 + big * 0.12) * (0.4 + seed.z);
+    float ang = seed.w * 6.283 + t * 0.6;
+    vec3 p = spot.xyz + vec3(cos(ang) * r, t * (4.0 + big * 0.18) * seed.z, sin(ang) * r);
+    vec4 mv = modelViewMatrix * vec4(p, 1.0); vDepth = -mv.z;
+    gl_Position = projectionMatrix * mv;
+    gl_PointSize = (4.0 + t * (10.0 + big * 0.12)) * uScale / max(1.0, -mv.z);
+    vA = sin(t * 3.14159) * 0.42;
+    #include <logdepthbuf_vertex>
+  }`,
+  fragmentShader: `#include <common>
+  #include <logdepthbuf_pars_fragment>
+  uniform vec3 uFog; uniform float uFogD; uniform float uLight; varying float vA; varying float vDepth;
+  void main() {
+    #include <logdepthbuf_fragment>
+    float d = length(gl_PointCoord - 0.5);
+    float a = vA * smoothstep(0.5, 0.0, d);
+    gl_FragColor = vec4(mix(vec3(0.93, 0.96, 0.98) * uLight, uFog, 1.0 - exp(-uFogD * uFogD * vDepth * vDepth)), a);
+  }` });
+const fallGround = (x, y) => { const [i, j] = cellAt(x, y); return hAt(i, j); };
+const mistSeeds = [], mistSpots = [];
+for (const fl of FALLS) {
+  const lip = new THREE.Vector3(fl.xy[0], fl.lipY, -fl.xy[1]), d3 = new THREE.Vector3(fl.d.x, 0, -fl.d.y), s3 = new THREE.Vector3(fl.side.x, 0, -fl.side.y);
+  const out = Math.min(22, 2 + fl.h * 0.09), W = fl.w, X = 8, Y = Math.min(120, 30 + Math.round(fl.h * 0.4));
+  // the ribbon: leaves the lip level, curves out as it falls, widens toward the pool
+  const g = new THREE.PlaneGeometry(1, 1, X, Y), pos = g.attributes.position, uv = g.attributes.uv;
+  for (let k = 0; k < pos.count; k++) {
+    const u = uv.getX(k), v = 1 - uv.getY(k);
+    const s = out * Math.sqrt(v) + (1 - (2 * u - 1) ** 2) * 0.7, w = W * (1 + 0.8 * v), t = (u - 0.5) * w + Math.sin(v * 9 + u * 3) * 0.25;
+    const p = lip.clone().addScaledVector(d3, s).addScaledVector(s3, t); p.y = fl.lipY - fl.h * v;
+    pos.setXYZ(k, p.x, p.y, p.z); uv.setXY(k, u, v);
+  }
+  const ribbon = new THREE.Mesh(g, fallMat); ribbon.renderOrder = 2; scene.add(ribbon);
+  // the pool, foaming where it lands
+  const land = lip.clone().addScaledVector(d3, out); land.y = fl.poolY + 0.3;
+  const pool = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), foamMat); pool.rotation.x = -Math.PI / 2;
+  const pr = 5 + fl.w * 1.2 + fl.h * 0.05; pool.scale.set(pr * 2, pr * 2, 1); pool.position.copy(land); pool.renderOrder = 1; scene.add(pool);
+  // the run between tiers, flowing on the carved floor to the next lip
+  if (fl.next) {
+    const a = land, b = new THREE.Vector3(fl.next.xy[0], fl.next.lipY + 0.25, -fl.next.xy[1]);
+    const run = new THREE.PlaneGeometry(1, 1, 2, 20), rp = run.attributes.position, ruv = run.attributes.uv, dir = b.clone().sub(a), across = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
+    for (let k = 0; k < rp.count; k++) {
+      const u = ruv.getX(k), v = 1 - ruv.getY(k), p = a.clone().lerp(b, v).addScaledVector(across, (u - 0.5) * (fl.w * 1.4)); p.y = a.y + (b.y - a.y) * v + 0.2;
+      rp.setXYZ(k, p.x, p.y, p.z); ruv.setXY(k, u, v * (dir.length() / 25));
+    }
+    const runMesh = new THREE.Mesh(run, fallMat); runMesh.renderOrder = 2; scene.add(runMesh);
+  }
+  // mist from the pool, and spray shedding off the fall's face
+  const n = Math.min(700, 160 + Math.round(fl.h * 3));
+  for (let k = 0; k < n; k++) {
+    const onFace = k % 3 === 0, v = Math.random();
+    const at = onFace ? lip.clone().addScaledVector(d3, out * Math.sqrt(v) + 1.5).setY(fl.lipY - fl.h * v) : land;
+    mistSpots.push(at.x, at.y, at.z, onFace ? fl.h * 0.25 : fl.h);
+    mistSeeds.push(Math.random(), Math.random(), 0.3 + Math.random() * 0.7, Math.random());
+  }
+  fl.pool = land;
+}
+if (mistSeeds.length) {
+  const mg = new THREE.BufferGeometry();
+  mg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(mistSeeds.length / 4 * 3), 3));
+  mg.setAttribute('seed', new THREE.Float32BufferAttribute(mistSeeds, 4)); mg.setAttribute('spot', new THREE.Float32BufferAttribute(mistSpots, 4));
+  const mist = new THREE.Points(mg, mistMat); mist.frustumCulled = false; mist.renderOrder = 3; scene.add(mist);
+}
+// ARCH BRIDGES at the falls (Benson Bridge): a stone arch across the gap, its deck
+// high over the lower pool, from the footprint OpenStreetMap draws
+for (const ab of (Array.isArray(meta.features) ? meta.features : []).filter((x) => x.kind === 'arch')) {
+  const fl = FALLS.find((x) => x.name === ab.near) || FALLS[0];
+  if (!fl) continue;
+  const a = new THREE.Vector3(ab.a[0], 0, -ab.a[1]), b = new THREE.Vector3(ab.b[0], 0, -ab.b[1]);
+  const mid = a.clone().lerp(b, 0.5), span = a.distanceTo(b) + 8, dir = b.clone().sub(a).normalize();
+  a.copy(mid).addScaledVector(dir, -span / 2); b.copy(mid).addScaledVector(dir, span / 2);
+  const deck = fl.lipY + 11, parts = [], stone = new THREE.MeshStandardMaterial({ color: 0xb3ab9f, roughness: 0.9 });
+  const seg = (p, q, wdt, hgt) => { const g = new THREE.BoxGeometry(p.distanceTo(q) + 0.4, hgt, wdt); g.rotateY(-Math.atan2(q.z - p.z, q.x - p.x)); const c = p.clone().lerp(q, 0.5); g.translate(c.x, c.y, c.z); parts.push(g); };
+  const N = 14, arch = (t) => a.clone().lerp(b, t).setY(deck - 1 - 7 * (1 - (2 * t - 1) ** 2) * 0 - 7 * (1 - (1 - (2 * t - 1) ** 2)));
+  for (let k = 0; k < N; k++) {
+    const t0 = k / N, t1 = (k + 1) / N, p0 = a.clone().lerp(b, t0).setY(deck + 0.6 * (1 - (2 * t0 - 1) ** 2)), p1 = a.clone().lerp(b, t1).setY(deck + 0.6 * (1 - (2 * t1 - 1) ** 2));
+    seg(p0, p1, 3.2, 0.8);                                                            // the deck, a gentle hump
+    seg(arch(t0), arch(t1), 2.8, 1.4);                                                // the arch ring under it
+    const side = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(1.5);
+    seg(p0.clone().add(side).setY(p0.y + 0.9), p1.clone().add(side).setY(p1.y + 0.9), 0.25, 1.0);   // parapets
+    seg(p0.clone().sub(side).setY(p0.y + 0.9), p1.clone().sub(side).setY(p1.y + 0.9), 0.25, 1.0);
+  }
+  const bridgeMesh = new THREE.Mesh(mergeGeometries(parts.map((g) => g.toNonIndexed())), stone); bridgeMesh.castShadow = bridgeMesh.receiveShadow = true; scene.add(bridgeMesh);
+}
+function updateFalls() { FU.uFog.value.copy(scene.fog.color); FU.uFogD.value = scene.fog.density; FU.uLight.value = 0.55 + 0.45 * Math.min(1, sun.intensity / 3.6); }
+
 const birdM = new THREE.Matrix4(), birdQ = new THREE.Quaternion(), birdS = new THREE.Vector3(), birdP = new THREE.Vector3(), birdUp = new THREE.Vector3(0, 1, 0);
 function flyBirds(dt) {
   for (const f of flocks) {
@@ -807,7 +1003,12 @@ const peakAt = (() => { let b = 0; for (let k = 1; k < farH.length; k++) if (far
   return new THREE.Vector3(x, farH[b], -y); })();
 const away = (from, to, dist, rise) => { const d = to.clone().sub(from).setY(0); if (d.lengthSq() < 1) d.set(1, 0, 0); d.normalize(); return from.clone().addScaledVector(d, -dist).add(new THREE.Vector3(0, rise, 0)); };
 const views = {
-  bridge: () => ({ pos: at(focus).add(new THREE.Vector3(-1500, 520, 1300)), target: at(focus, 40) }),
+  bridge: () => {
+    const big = FALLS.slice().sort((a, b) => b.h - a.h)[0];
+    if (!big) return { pos: at(focus).add(new THREE.Vector3(-1500, 520, 1300)), target: at(focus, 40) };
+    const mid = new THREE.Vector3(big.xy[0], big.lipY - big.h * 0.5, -big.xy[1]), d3 = new THREE.Vector3(big.d.x, 0, -big.d.y);
+    return { pos: mid.clone().addScaledVector(d3, Math.max(160, big.h * 1.4)).add(new THREE.Vector3(0, big.h * 0.15, 0)).addScaledVector(new THREE.Vector3(-d3.z, 0, d3.x), big.h * 0.35), target: mid };
+  },
   gorge: () => ({ pos: away(at(focus), at(across), 2600, 900), target: at(across, 200) }),
   hood: () => ({ pos: away(at(focus), peakAt, 9000, 9000), target: peakAt.clone().lerp(at(focus), 0.45) }),
 };
@@ -817,6 +1018,7 @@ function go(name) {
   fly = { t: 0, p0: camera.position.clone(), t0: controls.target.clone(), p1: v.pos, t1: v.target };
 }
 document.getElementById('goClose').onclick = () => go('bridge');
+if (FALLS.length) document.getElementById('goClose').textContent = FALLS.slice().sort((a, b) => b.h - a.h)[0].name;
 document.getElementById('goAcross').onclick = () => go('gorge');
 document.getElementById('goBack').onclick = () => go('hood');
 document.getElementById('goAcross').textContent = 'Toward ' + across;
@@ -831,6 +1033,7 @@ document.getElementById('about').textContent = (meta.core.lidar_share > 0.02
   : 'Trees grow from the photo\'s green, with heights estimated from how green it is.')
   + ' ' + (PROFILE.summary || 'Each tree is grown from a species recipe and chosen by rule: broadleaves by the water, conifers up the slopes, ferns at their roots.');
 document.getElementById('facts').innerHTML += '<br>' + SPECIES.map((s) => s.name).join(' · ')
+  + (FALLS.length ? ' · ' + FALLS.length + ' waterfall' + (FALLS.length > 1 ? 's' : '') : '')
   + (buildingCount ? ' · ' + buildingCount.toLocaleString() + ' buildings' : '')
   + (flocks.length ? ' · ' + flocks.map((f) => f.name).join(', ') + ' overhead' : '');
 
@@ -852,6 +1055,7 @@ renderer.setAnimationLoop(() => {
   relod();
   stream.fill();
   flyBirds(dt);
+  updateFalls();
   // shadows follow what you are looking at, within the forest
   sun.target.position.copy(controls.target); sun.position.copy(sky.material.uniforms.sunPosition.value).multiplyScalar(8000).add(controls.target);
   if (waterNormals) { waterNormals.offset.x += dt * 0.0035; waterNormals.offset.y += dt * 0.0016; }

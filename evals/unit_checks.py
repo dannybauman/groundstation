@@ -3754,6 +3754,7 @@ def t_world_template_loads_embedded_or_beside():
     assert "__TITLE__" in page and "__WORLD__" in page
     assert "inside('meta')" in page and "data:image/jpeg;base64," in page
     assert "pickSpecies" in page and "meta.profile" in page and "meta.buildings" in page   # a studied place grows its own forest, buildings and birds
+    assert "meta.features" in page and "carvedAt" in page   # waterfalls are carved and fall
     for place in ("Bridge of the Gods", "Hood River", "Mount Hood"):
         assert place not in page, place   # every place-specific word comes from the world's data
 
