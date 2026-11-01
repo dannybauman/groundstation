@@ -1,7 +1,0 @@
-<style id="earth-maps-fit">
-html { scrollbar-width: thin; scrollbar-color: rgba(232,74,47,.55) transparent; }
-body { padding-top: 64px !important; }
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(232,74,47,.45); border-radius: 9px; border: 2px solid transparent; background-clip: padding-box; }
-</style>

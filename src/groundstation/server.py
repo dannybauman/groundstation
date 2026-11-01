@@ -8,8 +8,6 @@ Register with Claude Code:
 
 from __future__ import annotations
 
-import os
-
 from importlib.metadata import version
 
 from mcp.server.fastmcp import FastMCP
@@ -63,11 +61,6 @@ for fn in TOOLS:
 
 
 def main() -> None:
-    # the maps gallery (viewer.py) answers from whichever chat binds it first
-    if os.environ.get("GROUNDSTATION_MAPS", "1") != "0":
-        from groundstation import viewer
-
-        viewer.serve_in_background()
     mcp.run()
 
 

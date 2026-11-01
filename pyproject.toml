@@ -28,7 +28,6 @@ Repository = "https://github.com/dannybauman/groundstation"
 [project.scripts]
 groundstation = "groundstation.server:main"
 groundstation-web = "groundstation.web:main"
-groundstation-maps = "groundstation.viewer:main"
 
 [dependency-groups]
 web = ["fastapi>=0.115", "uvicorn>=0.30"]
