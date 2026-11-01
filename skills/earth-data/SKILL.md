@@ -9,7 +9,7 @@ You have groundstation MCP tools. They put the cloud-native geospatial stack in 
 
 ## First: use the tools, never route around them
 
-The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 22 tools in about a second.
+The value here is the groundstation tools. If they aren't visible yet, the server is still starting — on the first use after install, `uv` builds the server's virtualenv (a few seconds), so its tools surface a moment after the other servers. Once warm, it hands over all 21 tools in about a second.
 
 - **Wait and retry discovery** a few times over ~10-15 seconds before doing anything else. The tools almost always appear.
 - **Never fall back to raw STAC / TiTiler / FIRMS / `httpx` calls to work around missing tools.** Hand-rolling the pipeline gives a worse answer and hides a fixable setup problem. Missing tools are a thing to fix, not to route around.
@@ -82,17 +82,6 @@ Triggers: "3D", "fly-through", "terrain", "what does this valley actually look l
 - Then `render_map_3d(title, bbox, layer, exaggeration=1.5)` with that one scene as the layer (same shape as a `render_map` layer). The artifact carries an exaggeration slider, a fly-through orbit, and a reset button.
 - Elevation is the keyless AWS Terrarium tileset, so the page shares as-is. It's global at ~10m-ish over land, sea floor included, and flat terrain looks flat — pick relief-rich AOIs or the 3D adds nothing.
 - Exaggeration 1.5 reads well for mountains; push to 2-3 for gentle terrain, drop to 1 when the shape should stay honest.
-
-## Living worlds
-
-Triggers: "living world", "a world I can fly through", "make it look like a game / Unreal", "real trees", "the forest in 3D", anyone who wants to stand in a place rather than look down on it.
-
-- **Study the place first.** Search for its dominant trees and where each grows (by water, dry slopes, an elevation band), what grows under them, the birds a visitor sees overhead, and the colour of its buildings. Pass that as `profile=` (the shape is in the tool's docstring), so the world grows that place's own forest instead of a default Pacific Northwest one. Keep only what you found support for and say what you assumed.
-- `render_world(place)` builds one from a name, end to end: lidar ground and every treetop the lidar saw where the US has flown USGS 3DEP (with a NAIP aerial photo), Copernicus 30 m terrain and photo-grown trees anywhere else, the clearest Sentinel-2 summer pass for the distance, towns and peaks from OpenStreetMap. Say it takes a few minutes before you start; it does.
-- The page grows the forest the way open-world engines do: species recipes instanced at every tree, wind, per-tree variation, impostors at mid distance, trees streamed round the camera to the horizon, a physical sky with sun shadows (a time-of-day slider), cloud shadows, a rippling river where the data shows one. Its three view buttons are built from the place: close in, toward its biggest neighbour, pull back toward the highest ground.
-- Quote `caveats` with the result. Where `core.lidar_share` is low or zero, tree heights are estimates; tree shapes are always generated (positions and heights are the data). `size_mb` is the one file's weight, usually 15 to 30: it shares as-is but say so before sending it anywhere.
-- Birds come from what GBIF has recorded at the place, at their own wingspans, with their own voices (xeno-canto): songs from birds on the ground, calls from birds in flight, and every waterfall roars; the viewer turns sound on. Name the birds you found in the study (`profile.fauna`) and they come first. Some recordings are non-commercial; the caveat says so.
-- `core_km` (default 4) is the detailed middle; `radius_km` (default 25) is how far the distance reaches. Widen the radius to take in a mountain the user names that sits farther out.
 
 ## Postcards
 
