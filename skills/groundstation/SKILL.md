@@ -27,7 +27,7 @@ On a yes to the field test: 3 prompts around a place they named, or with none, a
 | a demo | the demo checklist |
 | "brief me on X" / "what is Earth saying about X" | a brief |
 | "morning sweep" / "run the fleet" | the fleet sweep |
-| "open the field tests" | every `docs/field-test*.html` through the console, newest opened last so it is the active tab |
+| "open the field tests" | every `docs/samples/*/report.html` and `docs/field-test*.html` through the console, newest opened last so it is the active tab |
 | "try it from the command line" | one brief, two curl calls, the `claude -p` one-liner |
 
 ## Commands
