@@ -9,3 +9,7 @@ selfdoc/skills/
 .ua/.trash-*
 .ua/tmp/
 .playwright-cli/
+
+# field-test output: only docs/samples is tracked
+docs/field-test*
+docs/img/
