@@ -2739,10 +2739,23 @@ if (COMPARE && rasters.length === 2) {
   map.addControl(new maplibregl.NavigationControl());
   let cur = 0, timer = null;
   const name = document.getElementById("tl-name"), play = document.getElementById("tl-play");
-  // MapLibre fetches no tiles for a layer whose visibility is none, so hidden frames cost no bandwidth
+  // Frames crossfade, the next season rising through the last: each frame's opacity
+  // eases over FADE, the one leaving drops out of sight once it has faded. MapLibre
+  // fetches no tiles for a layer whose visibility is none, so only the frame showing,
+  // the one leaving and the one coming next (loaded unseen, so its fade is whole) cost bandwidth.
+  const FADE = Math.min(1800, Math.max(500, __INTERVAL__ * 0.75)), hideAt = {};
+  const op = i => LAYERS[i].opacity ?? 1;
   const show = k => {
+    const prev = cur;
     cur = (k + LAYERS.length) % LAYERS.length;
-    LAYERS.forEach((_, i) => map.setLayoutProperty("layer" + i, "visibility", i === cur ? "visible" : "none"));
+    const nx = (cur + 1) % LAYERS.length;
+    LAYERS.forEach((_, i) => {
+      const id = "layer" + i;
+      if (i === cur || i === nx) { clearTimeout(hideAt[i]); map.setLayoutProperty(id, "visibility", "visible"); }
+      map.setPaintProperty(id, "raster-opacity", i === cur ? op(i) : 0);
+      if (i !== cur && i !== nx && i !== prev) map.setLayoutProperty(id, "visibility", "none");
+    });
+    if (prev >= 0 && prev !== cur && prev !== nx) hideAt[prev] = setTimeout(() => cur !== prev && map.setLayoutProperty("layer" + prev, "visibility", "none"), FADE + 80);
     name.textContent = LAYERS[cur].name + "  (" + (cur + 1) + "/" + LAYERS.length + ")";
   };
   const stop = () => { clearInterval(timer); timer = null; play.textContent = "\u25b6"; };
@@ -2759,6 +2772,12 @@ if (COMPARE && rasters.length === 2) {
   });
   map.on("load", () => {
     LAYERS.forEach((l, i) => addLayerTo(map, l, i));
+    LAYERS.forEach((_, i) => {
+      map.setPaintProperty("layer" + i, "raster-opacity-transition", { duration: FADE, delay: 0 });
+      map.setPaintProperty("layer" + i, "raster-opacity", 0);
+      map.setLayoutProperty("layer" + i, "visibility", "none");
+    });
+    cur = -1;
     show(0);
     window.gsPending--;
   });
@@ -3732,6 +3751,10 @@ window.gsMaps = [map];  // exposed for scripted screenshots and checks
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
 map.on("load", () => {
   map.setTerrain({ source: "dem", exaggeration });
+  // a sky over the horizon, and haze that thickens with distance, so the far edge
+  // fades into air instead of ending on a flat basemap
+  if (map.setSky) map.setSky({ "sky-color": "#7fa8d4", "horizon-color": "#e8dccd", "fog-color": "#ddd3c6",
+    "sky-horizon-blend": 0.6, "horizon-fog-blend": 0.7, "fog-ground-blend": 0.35, "atmosphere-blend": 0.8 });
   // MapLibre 4.7 easeTo freezes the camera's ground height and unfreezes it only with freezeElevation,
   // so without it the height stays at the 0 m read before any DEM tile and a tight box sits under the relief
   map.easeTo({ center: CENTER, pitch: 60, duration: 0, freezeElevation: true });

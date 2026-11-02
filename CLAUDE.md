@@ -2,6 +2,10 @@
 
 A Development Seed labs prototype. Full architecture in `docs/architecture.md`, test conventions in `evals/README.md`, the artifact attribution model in `docs/stack.md`.
 
+## Scope: minimalist, mostly MCP
+
+Groundstation is the MCP tools and the behind-the-scenes functionality agents call. Field tests are its one visual surface. Galleries, viewers, living worlds and other visual products belong in their own repos, which can depend on groundstation. A visual addition earns its place here only when it clearly improves a tool's existing output or the field tests, and it stays small.
+
 ## DevSeed tools first
 
 Before building a capability or reaching for a generic dependency, ask: **does a DevSeed tool already do this?** Prefer it, even when a generic option looks marginally easier — this project exists to show the DS/open-source stack working, so using our own tools IS the product. The family to check first: TiTiler, rio-tiler, titiler-pgstac, cogeo-mosaic/MosaicJSON, rio-cogeo, eoAPI, stac-fastapi, pgstac, Gazet, stactools, lonboard/deck.gl-raster (viz). When unsure, search the developmentseed and cogeotiff GitHub orgs before adding anything.

@@ -2845,8 +2845,9 @@ def t_timelapse_page_controls_and_cap():
         for needle in ('id="tl-prev"', 'id="tl-play"', 'id="tl-next"', 'id="tl-name"', "ArrowLeft", "window.gsPending",
                        "2026-01", "2026-02", "2026-03", ".clean #panel, .clean #credit, .clean #stack-toggle, .clean #stack, .clean #tl"):
             assert needle in html, needle
-        # frames are shown one at a time: show() hides every layer but the current, and starts at 0
-        assert '"visibility", i === cur ? "visible" : "none"' in html and "show(0)" in html
+        # frames crossfade: show() eases opacity over FADE, keeps only the current and the coming
+        # frame visible (the one leaving drops out once faded), and starts at 0
+        assert '"raster-opacity-transition"' in html and "i === cur || i === nx" in html and "show(0)" in html
         assert "__" not in html.replace("__proto__", ""), "unfilled template marker"
         over = tools.render_timelapse("tl", [0, 0, 1, 1], _stub_frames(9), out_path=str(Path(d) / "u.html"))
         assert "error" in over and "cap of 8" in over["error"] and not (Path(d) / "u.html").exists(), over
