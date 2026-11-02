@@ -125,6 +125,15 @@ if [ -d .git ] && command -v git >/dev/null 2>&1; then
   fi
 fi
 
+echo "8. did my release land (GitHub main vs Claude Code vs the Store)"
+# the check is python so Windows users can run it without bash:
+#   uv run python -m groundstation.release_check [--installs path/to/.dashboard-installs.json]
+if [ "${1:-}" = "--installs" ]; then
+  uv run python -m groundstation.release_check --installs "${2:-}" | sed 's/^/  /'
+else
+  uv run python -m groundstation.release_check | sed 's/^/  /'
+fi
+
 echo
 echo "result: $pass ok, $warn to check, $fail broken"
 if [ "$fail" -gt 0 ]; then

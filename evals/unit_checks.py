@@ -3751,12 +3751,26 @@ def t_field_test_marks_cards_without_artifact():
 def t_versions_agree():
     # the plugin version is what installs cache by and what the Store compares;
     # pyproject's is what the MCP handshake reports. One number, three files
-    import tomllib
+    from groundstation.release_check import repo_versions
+    v = repo_versions(Path(__file__).resolve().parents[1])
+    assert len(set(v.values())) == 1, v
+
+
+def t_no_heavy_files_tracked():
+    # a plugin install is a depth-1 clone of main, so every tracked byte is
+    # downloaded by every user. Field-test output is gitignored; only the
+    # samples under docs/samples are tracked
+    import subprocess
     root = Path(__file__).resolve().parents[1]
-    py = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
-    plug = json.loads((root / ".claude-plugin" / "plugin.json").read_text())["version"]
-    mkt = json.loads((root / ".claude-plugin" / "marketplace.json").read_text())["plugins"][0]["version"]
-    assert py == plug == mkt, (py, plug, mkt)
+    r = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True)
+    if r.returncode != 0:
+        return
+    files = [f for f in r.stdout.decode().split("\0") if f and (root / f).is_file()]
+    stray = [f for f in files if f.startswith("docs/img/") or re.match(r"docs/field-test", f)]
+    assert not stray, f"field-test output tracked outside docs/samples: {stray[:5]}"
+    big = [f for f in files if (root / f).stat().st_size > 1_000_000
+           and not f.startswith("docs/samples/") and f != "uv.lock"]
+    assert not big, f"tracked files over 1 MB: {big}"
 
 
 if __name__ == "__main__":

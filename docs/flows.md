@@ -1,6 +1,6 @@
 # Five flows the new tools make possible
 
-Each flow was run live on version 0.20.0 and is shown, with its verbatim output and what went wrong, in [field-test-2026-10-25.html](field-test-2026-10-25.html).
+Each flow was run live on version 0.20.0 and is shown, with its verbatim output and what went wrong, in field-test-2026-10-25.html (in git history at c1472e9).
 
 ## 1. Tomorrow's temperature in Laredo, Texas
 

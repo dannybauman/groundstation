@@ -26,11 +26,9 @@ Everything runs against public, keyless endpoints, so it works anywhere with not
 - Explore before committing. See what data exists for a place, at what resolution and how fresh, before anyone scopes a project around it
 - Watch places and report back. Brief you each morning on what changed, and stay quiet about what didn't
 
-<img src="docs/img/field-test.jpg" width="680" alt="field test 20: the first 4 of its 5 cards, Mt St Helens 1980, Hurricane Patricia 2015, the Great Aletsch glacier and the Eagle Creek fire 2017 (the fifth is Portland right now)">
-
 ## Examples
 
-The 5 examples are the cards from field test 20 ([`docs/field-test-2026-10-27-no20.html`](docs/field-test-2026-10-27-no20.html)), real runs on real data: quick examples that open the door to digging in further, and a way to learn which stack to consider for your own use case (`docs/field-test-*.html`, highest number is newest).
+The 5 examples are the cards from field test 20 (field test 20, kept in git history at commit c1472e9, not on main), real runs on real data: quick examples that open the door to digging in further, and a way to learn which stack to consider for your own use case (`docs/field-test-*.html`, highest number is newest).
 
 "Mt St Helens eruption 1980" The tools found 2 Landsat MSS scenes from the same orbit, 1979-09-12 and 1980-09-15, both 0.0% cloud. Over the box around the mountain the median vegetation index fell from 0.2691 to -0.0043. A swipe map puts the 2 scenes side by side. [Map](docs/img/ft20-st-helens-map.html)
 
@@ -41,8 +39,6 @@ The 5 examples are the cards from field test 20 ([`docs/field-test-2026-10-27-no
 "Eagle Creek fire 2017, Columbia River Gorge" Sentinel-2 has the gorge on 2017-08-26, 7 days before the fire started on 2017-09-02 (a date from outside the tool output), and on 2017-10-05, both under 0.4% cloud and from the same tile. Over the box the mean burn index (NBR) fell from 0.6415 to 0.4305, -32.9%, and the swipe map shows the burn south of the river. [Map](docs/img/ft20-eagle-creek-map.html)
 
 "What's going on around Portland, Oregon right now: fires, floods, weather, and when the next clear satellite pass is" At 04:59 UTC on 2026-10-27, GDACS listed 0 active events but EONET returned a server error, so that is not an all-clear. It rained 15.1 mm on 2026-10-25 with more forecast, the next daylight pass is Sentinel-3B at 18:16 UTC on 2026-10-27, with Landsat 8 at 18:56 (passes are predicted, not cloud), and the clearest Sentinel-2 scene from 2026-10-12 to 2026-10-26 is 2026-10-15 at 0.3% cloud. [Map](docs/img/ft20-portland-map.html)
-
-<img src="docs/img/ft20-st-helens-map.png" width="680" alt="Mt St Helens before and after the 1980 eruption, Landsat MSS swipe">
 
 ## Quickstart
 
@@ -185,7 +181,7 @@ Any TiTiler with the `/stac` router works. One catch: NAIP and Landsat on Earth 
 
 ## More
 
-- `docs/field-test-*.html`: the field tests, one page per round, highest № is newest. Real prompts, graded answers, and what got fixed. `docs/field-test.html` and `docs/examples.md` are the first edition, served at `/docs/field-test.html` when the console is running
+- `docs/samples/`: three field tests kept as samples (№ 19, 21 and 22): real prompts, graded answers, and what got fixed. New field-test output is gitignored, so your own runs never show up in git. Older rounds live in git history (`git checkout c1472e9 -- docs`)
 - `docs/architecture.md`: how it fits together and what is left out on purpose
 - `docs/plan-2026-10-devseed-stack.md`: the plan, most of it shipped (the smoke forecast, Zarr stores, cross-catalog search, stac-geoparquet archives); the open items are at the end
 - For deeper exploration, [stac-map](https://github.com/developmentseed/stac-map) renders COGs in the browser with [deck.gl-raster](https://github.com/developmentseed/deck.gl-raster). Tiles and pixel math use [TiTiler](https://github.com/developmentseed/titiler)
