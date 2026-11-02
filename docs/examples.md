@@ -2,7 +2,7 @@
 
 Thirty prompts across three rounds were run through the real agent path (headless Claude + the groundstation MCP server + the earth-data skill) on 2026-07-09. **30/30 produced correct answers and working maps.** Each round's misses became fixes the same day — the field test is the product loop.
 
-The visual walkthrough of all thirty is in git history: `git checkout c1472e9 -- docs/field-test.html docs/img`.
+The visual walkthrough of all thirty is in git history: `git restore --source c1472e9 --worktree -- docs/field-test.html docs/img`.
 
 ## Round 1: the core workflows
 
