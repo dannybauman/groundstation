@@ -8,6 +8,7 @@ integration breaks.
 from __future__ import annotations
 
 import datetime as dt
+import os
 import sys
 import tempfile
 import traceback
@@ -15,6 +16,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from groundstation import tools  # noqa: E402
+
+# render_map refuses paths outside GROUNDSTATION_OUT or the checkout, so the
+# eval temp file has to sit under it
+os.environ["GROUNDSTATION_OUT"] = tempfile.gettempdir()
 
 FAILURES = []
 
@@ -126,6 +131,7 @@ def t_map():
           "collection_id": it["collection"], "item_id": it["id"], "assets": ["visual"]}],
         out_path=str(Path(tempfile.gettempdir()) / "groundstation-eval-map.html"),
     )
+    assert "error" not in m, m["error"]
     html = Path(m["map_path"]).read_text(encoding="utf-8")
     assert "titiler.xyz/stac/tiles" in html and "maplibre" in html
 
@@ -164,7 +170,8 @@ def t_veda():
 
 @check("planetary-computer search + rendered preview")
 def t_pc():
-    r = tools.search_imagery("planetary-computer", ["sentinel-2-l2a"], place="Munich", max_cloud_cover=30, limit=1)
+    r = tools.search_imagery("planetary-computer", ["sentinel-2-l2a"], bbox=[11.4, 48.05, 11.7, 48.2], max_cloud_cover=30, limit=1)
+    assert "error" not in r, r["error"]
     assert r["count"] >= 1
     p = tools.preview_item("planetary-computer", r["items"][0]["collection"], r["items"][0]["id"])
     assert "preview_url" in p
