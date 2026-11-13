@@ -1922,6 +1922,30 @@ def t_recommended_says_when_the_set_is_starved():
     assert "full_coverage_set" in r and "No single scene" not in r["recommended"]["reason"], r["recommended"]
 
 
+def t_pass_statistics_measure_each_tile_over_what_it_owns():
+    # a box across a tile edge: the overlap counts once, and the means weight by valid pixels
+    sq = lambda x0, x1: {"type": "Polygon", "coordinates": [[[x0, -1], [x1, -1], [x1, 11], [x0, 11], [x0, -1]]]}
+    shapes = {"a": sq(-1, 6), "b": sq(4, 11), "far": sq(30, 40)}
+    def area(g):
+        return sum((r[0][1][0] - r[0][0][0]) * (r[0][2][1] - r[0][1][1]) for r in g["coordinates"])
+    orig, saved_item = tools.compute_statistics, tools._item
+    def fake(cat, coll, iid, **kw):
+        if isinstance(iid, list):
+            return orig(cat, coll, iid, **kw)
+        n = round(area(kw["aoi_geojson"]["geometry"]) * 100)
+        return {"nd": {"mean": {"a": 0.2, "b": 0.6}[iid], "min": 0.0, "max": {"a": 0.5, "b": 0.9}[iid], "std": 0.1, "count": n}, "scaling_applied": True}
+    tools.compute_statistics, tools._item = fake, lambda cat, coll, iid: {"geometry": shapes[iid]}
+    try:
+        r = tools.compute_statistics("earth-search", "sentinel-2-l2a", ["a", "b", "far"], expression="nd", bbox=[0, 0, 10, 10])
+    finally:
+        tools.compute_statistics, tools._item = orig, saved_item
+    assert [t["id"] for t in r["tiles"]] == ["a", "b"] and sum(t["box_share_pct"] for t in r["tiles"]) == 100.0, r["tiles"]
+    share_a = r["tiles"][0]["box_share_pct"] / 100
+    assert abs(r["nd"]["mean"] - (0.2 * share_a + 0.6 * (1 - share_a))) < 1e-3 and r["nd"]["max"] == 0.9, r["nd"]
+    assert "std" not in r["nd"] and r["scaling_applied"] and r["clipped_to"] == [0, 0, 10, 10]
+    assert "error" in tools.compute_statistics("earth-search", "sentinel-2-l2a", ["a"])
+
+
 def _jp2_only(id_, bbox, collection="sentinel-2-l2a"):
     it = _stac_item(id_, bbox)
     it["collection"] = collection
