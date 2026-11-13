@@ -1922,6 +1922,31 @@ def t_recommended_says_when_the_set_is_starved():
     assert "full_coverage_set" in r and "No single scene" not in r["recommended"]["reason"], r["recommended"]
 
 
+def t_area_cloud_is_measured_over_the_box():
+    # a tile's cloud_cover is the whole tile: 72% over Porto Alegre's flood box when the box was clear
+    feats = [_stac_item(f"s{i}", [0, 0, 10, 10]) for i in range(8)]
+    for f in feats:
+        f["assets"] = {"visual": {}, "scl": {}}
+    feats[1]["assets"] = {"visual": {}}  # no SCL layer: skipped, not counted against the cap
+    calls = []
+    saved = tools.compute_statistics
+    tools.compute_statistics = lambda cat, coll, iid, **kw: calls.append((iid, kw)) or {"b1": {"mean": 0.25}, "clipped_to": kw["bbox"]}
+    try:
+        search = lambda **kw: _with_stac_search(feats, lambda: tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[2, 2, 4, 4], **kw))
+        r = search(area_cloud=2)
+        got = {it["id"]: it.get("cloud_over_area_pct") for it in r["items"]}
+        assert got["s0"] == 25.0 and got["s2"] == 25.0 and got["s1"] is None and got["s3"] is None, got
+        assert all(kw["bbox"] == [2, 2, 4, 4] and kw["expression"] == "(scl>=8)&(scl<=10)" for _, kw in calls), calls
+        assert "cloud_over_area_basis" in r and r["items"][0]["cloud_cover"] == 1.0
+        calls.clear()
+        assert len([it for it in search(area_cloud=50)["items"] if "cloud_over_area_pct" in it]) == tools.AREA_CLOUD_MAX
+        calls.clear()
+        r = search()
+        assert not calls and "cloud_over_area_basis" not in r and not any("cloud_over_area_pct" in it for it in r["items"])
+    finally:
+        tools.compute_statistics = saved
+
+
 def _jp2_only(id_, bbox, collection="sentinel-2-l2a"):
     it = _stac_item(id_, bbox)
     it["collection"] = collection
