@@ -1922,6 +1922,26 @@ def t_recommended_says_when_the_set_is_starved():
     assert "full_coverage_set" in r and "No single scene" not in r["recommended"]["reason"], r["recommended"]
 
 
+def t_passes_group_one_satellites_tiles_from_one_date():
+    # Lake Mead takes 5 tiles: a box across tile edges is one pass, not one tile
+    feats = [_stac_item("a", [0, 0, 6, 10]), _stac_item("b", [4, 0, 10, 10]), _stac_item("a2", [0, 0, 6, 10]),
+             _stac_item("c", [0, 0, 6, 10], day="2026-08-20"), _stac_item("d", [4, 0, 10, 10])]
+    feats[1]["properties"]["eo:cloud_cover"] = 10.0
+    for f, p in zip(feats, ["sentinel-2a", "sentinel-2a", "sentinel-2a", "sentinel-2a", "sentinel-2c"]):
+        f["properties"]["platform"] = p
+    search = lambda **kw: _with_stac_search(feats, lambda: tools.search_imagery("earth-search", ["sentinel-2-l2a"], bbox=[0, 0, 10, 10], **kw))
+    r = search(passes=True)
+    got = [(p["date"], p.get("platform"), [it["id"] for it in p["items"]], p["union_covers_aoi_pct"]) for p in r["passes"]]
+    # same day, other satellite stays its own pass; the duplicate tile adds nothing and drops out
+    assert sorted(got) == [("2026-08-20", "sentinel-2a", ["c"], 60.0), ("2026-08-24", "sentinel-2a", ["a", "b"], 100.0),
+                           ("2026-08-24", "sentinel-2c", ["d"], 60.0)], got
+    full = next(p for p in r["passes"] if p["union_covers_aoi_pct"] == 100.0)
+    assert 1.0 < full["cloud_cover"] < 10.0, full  # weighted by the share each tile adds
+    assert len(tools._expand_coverage_set({"type": "coverage_set", "set": full})) == 2
+    assert "passes_cloud_basis" in r
+    assert "passes" not in search() and [it["id"] for it in search()["items"]] == [it["id"] for it in r["items"]]
+
+
 def t_area_cloud_is_measured_over_the_box():
     # a tile's cloud_cover is the whole tile: 72% over Porto Alegre's flood box when the box was clear
     feats = [_stac_item(f"s{i}", [0, 0, 10, 10]) for i in range(8)]
