@@ -2367,7 +2367,8 @@ def tile_url_template(
 
     For index layers (NDVI etc.) pass expression over asset names, e.g.
     "(nir-red)/(nir+red)" with colormap_name="rdylgn" — supported on
-    earth-search; ignored for veda/planetary-computer. Index expressions
+    earth-search and planetary-computer (radar in dB there: "10*log10(vv)" with
+    rescale="-25,0" and a colormap); ignored for veda. Index expressions
     default to rescale="-1,1" (without a rescale they render blank).
 
     With no rescale, a continuous single-asset layer (not visual/image, not
@@ -2408,6 +2409,9 @@ def tile_url_template(
         # sinusoidal, GOES geostationary); the registered mosaic handles all
         # collections. Costs one registration POST per unique item (cached).
         params = [("collection", collection_id)] + [("assets", a) for a in assets]
+        if expression:
+            # same as compute_statistics: PC reads asset names in an expression only with asset_as_band
+            params += [("expression", expression), ("asset_as_band", "true")]
         if rescale:
             params.append(("rescale", rescale))
         if colormap_name:
