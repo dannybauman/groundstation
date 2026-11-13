@@ -448,29 +448,65 @@ def find_full_coverage_set(
         if day and _item_shape(it) and it.get("collection"):
             groups.setdefault((it["collection"], day), []).append(it)
     for coll, day in sorted(groups, key=lambda k: k[1], reverse=True):
-        remaining = list(groups[(coll, day)])
-        chosen: list[dict[str, Any]] = []
-        boxes: list[Any] = []
-        covered = 0.0
-        while remaining:
-            best, best_gain = None, 0.05  # require a real gain, not float noise
-            for it in remaining:
-                gain = _union_coverage_pct(aoi_bbox, boxes + [_item_shape(it)]) - covered
-                if gain > best_gain:
-                    best, best_gain = it, gain
-            if best is None:
-                break
-            chosen.append(best)
-            boxes.append(_item_shape(best))
-            covered = _union_coverage_pct(aoi_bbox, boxes)
-            remaining.remove(best)
-            if covered >= threshold:
-                return {
-                    "date": day,
-                    "union_covers_aoi_pct": covered,
-                    "items": chosen,
-                }
+        chosen, covered, _ = _greedy_cover(groups[(coll, day)], aoi_bbox, threshold)
+        if covered >= threshold:
+            return {
+                "date": day,
+                "union_covers_aoi_pct": covered,
+                "items": chosen,
+            }
     return None
+
+
+def _greedy_cover(tiles: list[dict[str, Any]], aoi_bbox: list[float], threshold: float = 100.0
+                  ) -> tuple[list[dict[str, Any]], float, list[float]]:
+    """Tiles picked by marginal coverage gain until threshold or no gain -> (chosen, covered, each one's gain)."""
+    remaining = list(tiles)
+    chosen: list[dict[str, Any]] = []
+    gains: list[float] = []
+    boxes: list[Any] = []
+    covered = 0.0
+    while remaining and covered < threshold:
+        best, best_gain = None, 0.05  # require a real gain, not float noise
+        for it in remaining:
+            gain = _union_coverage_pct(aoi_bbox, boxes + [_item_shape(it)]) - covered
+            if gain > best_gain:
+                best, best_gain = it, gain
+        if best is None:
+            break
+        chosen.append(best)
+        boxes.append(_item_shape(best))
+        new = _union_coverage_pct(aoi_bbox, boxes)
+        gains.append(new - covered)
+        covered = new
+        remaining.remove(best)
+    return chosen, covered, gains
+
+
+def group_passes(items: list[dict[str, Any]], aoi_bbox: list[float], platforms: dict[str, str] | None = None
+                 ) -> list[dict[str, Any]]:
+    """One entry per pass (collection, platform, day), newest first: the tiles that cover the box, in the
+    full_coverage_set shape so a pass renders as a coverage_set layer. cloud_cover is each tile's
+    cloud_cover weighted by the share of the box it adds."""
+    platforms = platforms or {}
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for it in items:
+        day = (it.get("datetime") or "")[:10]
+        if day and _item_shape(it) and it.get("collection"):
+            groups.setdefault((it["collection"], platforms.get(it["id"]) or "", day), []).append(it)
+    out = []
+    for (coll, platform, day) in sorted(groups, key=lambda k: k[2], reverse=True):
+        chosen, covered, gains = _greedy_cover(groups[(coll, platform, day)], aoi_bbox)
+        if not chosen:
+            continue
+        clouds = [(it["cloud_cover"], g) for it, g in zip(chosen, gains) if it.get("cloud_cover") is not None]
+        out.append({
+            "date": day, "collection": coll, **({"platform": platform} if platform else {}),
+            "union_covers_aoi_pct": round(covered, 1),
+            "cloud_cover": round(sum(c * g for c, g in clouds) / sum(g for _, g in clouds), 1) if clouds else None,
+            "items": chosen,
+        })
+    return out
 
 
 _pc_mosaic_cache: dict[str, str] = {}
@@ -1696,6 +1732,8 @@ def search_imagery(
     datetime_range: str | None = None,
     max_cloud_cover: float | None = None,
     limit: int = 10,
+    area_cloud: int = 0,
+    passes: bool = False,
 ) -> dict[str, Any]:
     """Search a STAC catalog for imagery/data items.
 
@@ -1718,6 +1756,15 @@ def search_imagery(
     .parquet, e.g. one made by write_archive): it is searched with the same
     filters, offline for a local file, and the result carries an `archive`
     block (href, written date, time range) because it is a snapshot.
+    cloud_cover is the whole tile's, so it can say 39% over a box that is clear.
+    area_cloud=N (at most 5, one statistics call each) adds cloud_over_area_pct
+    to the first N readable Sentinel-2 scenes: cloud over the searched box,
+    from the scene's own classification layer (SCL), with cloud_over_area_basis.
+    passes=True adds `passes`: one entry per satellite pass (collection,
+    platform, date), newest first, holding the tiles that cover the box and
+    their union_covers_aoi_pct and cloud_cover. A box across tile edges is one
+    pass of several tiles; pass one to render_map as a coverage_set layer.
+    `limit` counts tiles, so raise it when a pass needs many.
     """
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
@@ -1765,7 +1812,18 @@ def search_imagery(
     if archive:
         result["archive"] = archive
     readable = [it for it in items if "read_note" not in it]
-    rec = _recommend(readable)
+    if area_cloud and not archive:
+        got, failed = _area_cloud(catalog, readable, bbox, area_cloud)
+        if got:
+            result["cloud_over_area_basis"] = AREA_CLOUD_BASIS
+        if failed:
+            result["cloud_over_area_note"] = f"cloud over the box could not be measured on scene {got + 1} (the tiler failed), so it stopped there"
+    if passes:
+        result["passes"] = group_passes(readable, bbox, {f.get("id"): (f.get("properties") or {}).get("platform") for f in feats})
+        result["passes_cloud_basis"] = ("a pass's cloud_cover is each tile's whole-tile cloud_cover, "
+                                        "weighted by the share of the box that tile adds")
+    # where the cloud over the box was measured, it is the cloud the pick should weigh
+    rec = _recommend([{**it, "cloud_cover": it["cloud_over_area_pct"]} if "cloud_over_area_pct" in it else it for it in readable])
     if rec:
         result["recommended"] = rec
     best_single = max((it.get("covers_aoi_pct") or 0.0) for it in readable) if readable else 0.0
@@ -1790,6 +1848,33 @@ def search_imagery(
             # recommendation, or a 49% scene gets rendered as the answer
             rec["reason"] += _starved_note(len(items))
     return result
+
+
+AREA_CLOUD_MAX = 5  # each scene is one statistics call on a shared tiler
+# SCL 8, 9 and 10 are cloud (medium, high) and thin cirrus; 11 is snow, left out so a snowfield is not called cloud
+AREA_CLOUD_BASIS = ("share of the part of the searched box each scene covers (covers_aoi_pct) that its SCL layer marks "
+                    "cloud or thin cirrus (classes 8 to 10); snow (11) and cloud shadow (3) are not counted, cloud_cover "
+                    "is still the whole tile's, and `recommended` ranks on this figure where it was measured")
+
+
+def _area_cloud(catalog: str, items: list[dict[str, Any]], bbox: list[float], n: int) -> tuple[int, int]:
+    """Set cloud_over_area_pct on the first n items that have an SCL asset -> (measured, failed).
+    Stops at the first error: on a rate limit every later call would fail the same way."""
+    tried = got = 0
+    for it in items:
+        scl = next((a for a in ("scl", "SCL") if a in it.get("assets", [])), None)
+        if not scl:
+            continue
+        if tried >= min(n, AREA_CLOUD_MAX):
+            break
+        tried += 1
+        try:
+            s = compute_statistics(catalog, it["collection"], it["id"], expression=f"({scl}>=8)&({scl}<=10)", bbox=bbox)
+            it["cloud_over_area_pct"] = round(100 * next(v for v in s.values() if isinstance(v, dict))["mean"], 1)
+            got += 1
+        except Exception:
+            return got, tried - got
+    return got, tried - got
 
 
 def _starved_note(n: int) -> str:
