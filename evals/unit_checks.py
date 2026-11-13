@@ -3864,6 +3864,26 @@ def t_no_heavy_files_tracked():
     assert not big, f"tracked files over 1 MB: {big}"
 
 
+def t_gem15_tile_urls_and_enumeration():
+    base = "https://x/gem-15"
+    cases = {  # (lon, lat) SW corner -> (id, block); 0 is written p
+        (-123, 45): ("wm123s45", "p40_m130"),
+        (5, 51): ("w5s51", "p50_p0"),
+        (-91, -1): ("wm91sm1", "m10_m100"),
+        (0, 0): ("w0s0", "p0_p0"),
+    }
+    for (lon, lat), (iid, block) in cases.items():
+        assert tools._gem_tile_id(lon, lat) == iid
+        assert tools._gem_item_url(base, iid) == f"{base}/{block}/{iid}/{iid}.json"
+    assert tools._gem_item_url(base, "gem-15_wm123s45") == f"{base}/p40_m130/wm123s45/wm123s45.json"  # id as the item reports it
+    assert len(tools._gem_tile_ids([-122.7, 45.3, -122.5, 45.45])) == 1
+    assert len(tools._gem_tile_ids([-123.5, 45.5, -121.5, 46.5])) == 6
+    assert len(tools._gem_tile_ids([-123.0, 45.0, -122.0, 46.0])) == 1  # edges on boundaries
+    assert len(tools._gem_tile_ids([179.5, 10.5, -179.5, 11.5])) == 4  # antimeridian
+    assert tools._item_url("gem-15", "gem-15", "wm123s45") == tools._gem_item_url(tools.CATALOGS["gem-15"]["stac"], "wm123s45")
+    assert tools._item_url("earth-search", "c", "i").endswith("/collections/c/items/i")
+
+
 if __name__ == "__main__":
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("t_")):
         check(name, fn)

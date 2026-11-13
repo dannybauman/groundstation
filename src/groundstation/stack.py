@@ -48,6 +48,7 @@ _CATALOG_COMPONENT = {
     "veda": "NASA VEDA",
     "planetary-computer": "Planetary Computer",
     "eodh": "UK EO DataHub",
+    "gem-15": "Google GEM-15",
 }
 
 # which bucket actually serves each catalog's pixels — the storage entry names
@@ -57,6 +58,7 @@ _CATALOG_BUCKET = {
     "veda": ("Azure Blob", "VEDA"),
     "planetary-computer": ("Azure Blob", "Planetary Computer"),
     "eodh": ("CEDA archive", "dap.ceda.ac.uk"),
+    "gem-15": ("Google Research", "storage.googleapis.com"),
 }
 
 REQUIRED_FIELDS = ("what", "ds-role", "integration", "speaks-to", "link", "when")
