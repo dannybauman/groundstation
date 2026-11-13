@@ -2125,10 +2125,12 @@ def compute_statistics(
     item_id may be a list: one pass's tiles (the item ids of an entry in
     search_imagery's passes), with bbox required. Each tile is measured over
     the part of the box it owns, first tile first, and the parts combine
-    weighted by valid pixels: mean, min, max and count, plus `tiles` (each
-    one's share of the box) and pass_note. std, median and percentiles do not
-    combine, so they are left out.
+    weighted by the share of the box each owns: mean, min and max, plus `tiles`
+    (each one's share, and its own range_note) and pass_note. std, median,
+    percentiles and count do not combine, so they are left out.
     """
+    if isinstance(item_id, list) and catalog == "zarr":
+        return {"error": "a list of tiles is for one STAC pass; a zarr store takes one variable"}
     if isinstance(item_id, list):
         return _pass_statistics(catalog, collection_id, item_id, bbox,
                                 dict(expression=expression, assets=assets, apply_scaling=apply_scaling))
@@ -2380,23 +2382,28 @@ def _pass_statistics(catalog: str, collection_id: str, item_ids: list[str], bbox
                 catalog, collection_id, iid, aoi_geojson={"type": "Feature", "properties": {}, "geometry": geom}, **kw)))
     if not parts:
         return {"error": "none of these tiles covers the box (or their outlines did not come back)"}
-    if err := next((p[2]["error"] for p in parts if "error" in p[2]), None):
-        return {"error": err}
+    if bad := next((p for p in parts if "error" in p[2]), None):
+        return {"error": f"{bad[0]}: {bad[2]['error']}"}
+    # weighted by owned area, never by pixel count: each part is read at up to 512 px over its own extent,
+    # so a small corner comes back at a far finer pixel size and its count would outweigh the rest
     out: dict[str, Any] = {}
     for key, v in parts[0][2].items():
+        if key in ("range_note", "note", "extent_note"):
+            continue  # one tile's words, not the pass's; range_note rides with its tile below
         if not (isinstance(v, dict) and "mean" in v):
             out.setdefault(key, v)
             continue
-        vs = [p[2][key] for p in parts if isinstance(p[2].get(key), dict) and p[2][key].get("count")]
-        n = sum(x["count"] for x in vs)
-        if n:
-            out[key] = {"mean": sum(x["mean"] * x["count"] for x in vs) / n, "min": min(x["min"] for x in vs),
-                        "max": max(x["max"] for x in vs), "count": round(n)}
+        if missing := [iid for iid, _, st in parts if not isinstance(st.get(key), dict) or st[key].get("mean") is None]:
+            return {"error": f"{', '.join(missing)}: no {key} statistics over the part of the box it owns"}
+        cells = sum(c for _, c, _ in parts)
+        out[key] = {"mean": sum(st[key]["mean"] * c for _, c, st in parts) / cells,
+                    "min": min(st[key]["min"] for _, _, st in parts), "max": max(st[key]["max"] for _, _, st in parts)}
     out["clipped_to"] = bbox
-    out["tiles"] = [{"id": iid, "box_share_pct": round(100.0 * cells / COVER_GRID**2, 1)} for iid, cells, _ in parts]
+    out["tiles"] = [{"id": iid, "box_share_pct": round(100.0 * cells / COVER_GRID**2, 1),
+                     **({"range_note": st["range_note"]} if "range_note" in st else {})} for iid, cells, st in parts]
     covered = round(100.0 * bin(taken).count("1") / COVER_GRID**2, 1)
     out["pass_note"] = (f"{len(parts)} tiles of one pass, each measured over the part of the box it owns, "
-                        f"combined weighted by valid pixels; they cover {covered}% of the box")
+                        f"combined weighted by the share each owns; they cover {covered}% of the box")
     return out
 
 
