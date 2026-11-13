@@ -1943,6 +1943,15 @@ def t_area_cloud_is_measured_over_the_box():
         calls.clear()
         r = search()
         assert not calls and "cloud_over_area_basis" not in r and not any("cloud_over_area_pct" in it for it in r["items"])
+        # the pick weighs the box's cloud: the newest scene is cloudy over its tile, clear over the box
+        feats[0]["properties"]["eo:cloud_cover"] = 72.0
+        tools.compute_statistics = lambda cat, coll, iid, **kw: {"b1": {"mean": 0.0}}
+        assert search()["recommended"]["id"] != "s0" and search(area_cloud=1)["recommended"]["id"] == "s0"
+        # a tiler failure stops the run and says so, never silently
+        calls.clear()
+        tools.compute_statistics = lambda cat, coll, iid, **kw: calls.append(iid) or {"error": "rate-limited (429)"}
+        r = search(area_cloud=3)
+        assert calls == ["s0"] and "cloud_over_area_note" in r and "cloud_over_area_basis" not in r, (calls, r.keys())
     finally:
         tools.compute_statistics = saved
 

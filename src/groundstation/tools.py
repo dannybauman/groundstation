@@ -1770,9 +1770,14 @@ def search_imagery(
     if archive:
         result["archive"] = archive
     readable = [it for it in items if "read_note" not in it]
-    if area_cloud and not archive and _area_cloud(catalog, readable, bbox, area_cloud):
-        result["cloud_over_area_basis"] = AREA_CLOUD_BASIS
-    rec = _recommend(readable)
+    if area_cloud and not archive:
+        got, failed = _area_cloud(catalog, readable, bbox, area_cloud)
+        if got:
+            result["cloud_over_area_basis"] = AREA_CLOUD_BASIS
+        if failed:
+            result["cloud_over_area_note"] = f"cloud over the box could not be measured on scene {got + 1} (the tiler failed), so it stopped there"
+    # where the cloud over the box was measured, it is the cloud the pick should weigh
+    rec = _recommend([{**it, "cloud_cover": it["cloud_over_area_pct"]} if "cloud_over_area_pct" in it else it for it in readable])
     if rec:
         result["recommended"] = rec
     best_single = max((it.get("covers_aoi_pct") or 0.0) for it in readable) if readable else 0.0
@@ -1801,12 +1806,14 @@ def search_imagery(
 
 AREA_CLOUD_MAX = 5  # each scene is one statistics call on a shared tiler
 # SCL 8, 9 and 10 are cloud (medium, high) and thin cirrus; 11 is snow, left out so a snowfield is not called cloud
-AREA_CLOUD_BASIS = ("share of the searched box that the scene's SCL layer marks cloud or thin cirrus (classes 8 to 10); "
-                    "snow (11) and cloud shadow (3) are not counted, and cloud_cover is still the whole tile's")
+AREA_CLOUD_BASIS = ("share of the part of the searched box each scene covers (covers_aoi_pct) that its SCL layer marks "
+                    "cloud or thin cirrus (classes 8 to 10); snow (11) and cloud shadow (3) are not counted, cloud_cover "
+                    "is still the whole tile's, and `recommended` ranks on this figure where it was measured")
 
 
-def _area_cloud(catalog: str, items: list[dict[str, Any]], bbox: list[float], n: int) -> int:
-    """Set cloud_over_area_pct on the first n items that have an SCL asset; returns how many got one."""
+def _area_cloud(catalog: str, items: list[dict[str, Any]], bbox: list[float], n: int) -> tuple[int, int]:
+    """Set cloud_over_area_pct on the first n items that have an SCL asset -> (measured, failed).
+    Stops at the first error: on a rate limit every later call would fail the same way."""
     tried = got = 0
     for it in items:
         scl = next((a for a in ("scl", "SCL") if a in it.get("assets", [])), None)
@@ -1820,8 +1827,8 @@ def _area_cloud(catalog: str, items: list[dict[str, Any]], bbox: list[float], n:
             it["cloud_over_area_pct"] = round(100 * next(v for v in s.values() if isinstance(v, dict))["mean"], 1)
             got += 1
         except Exception:
-            pass
-    return got
+            return got, tried - got
+    return got, tried - got
 
 
 def _starved_note(n: int) -> str:
