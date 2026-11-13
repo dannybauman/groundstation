@@ -37,6 +37,12 @@ TITILER = os.environ.get("GROUNDSTATION_TITILER", "https://titiler.xyz")
 EOAPI = os.environ.get("GROUNDSTATION_EOAPI", "https://raster.eoapi.dev")
 
 CATALOGS: dict[str, dict[str, str]] = {
+    "gem-15": {
+        "stac": "https://storage.googleapis.com/climate-and-sustainability/gem-15/stac/gem-15",
+        "raster": "titiler-xyz",
+        "static": "true",
+        "notes": "Google GEM-15: 15 m global elevation, DSM (surface) and DTM (terrain) in metres above the EGM96 geoid, in 1x1 degree tiles; dsm minus dtm is building and canopy height. Experimental: no Russia, China, Mongolia, Greenland or Antarctica, water masked, some tiles missing. Static catalog (no /search): search_imagery lists tiles by place. This dataset is produced by Google (CC-BY-4.0).",
+    },
     "earth-search": {
         "stac": "https://earth-search.aws.element84.com/v1",
         "raster": "titiler-xyz",
@@ -825,11 +831,79 @@ def list_catalogs() -> list[dict[str, str]]:
     }]
 
 
+def _item_url(catalog: str, collection_id: str, item_id: str) -> str:
+    base = CATALOGS[catalog]["stac"]
+    if CATALOGS[catalog].get("static"):
+        return _gem_item_url(base, item_id)
+    return f"{base}/collections/{collection_id}/items/{item_id}"
+
+
+def _gem_tile_id(lon: int, lat: int) -> str:
+    """GEM-15 item id for the 1x1 degree tile whose SW corner is (lon, lat)."""
+    return f"w{'m' if lon < 0 else ''}{abs(lon)}s{'m' if lat < 0 else ''}{abs(lat)}"
+
+
+def _gem_item_url(base: str, item_id: str) -> str:
+    # the item JSON's own id is "gem-15_<tile>" but its path uses the bare tile id
+    item_id = item_id.removeprefix("gem-15_")
+    m = re.fullmatch(r"w(m?)(\d+)s(m?)(\d+)", item_id)
+    if not m:
+        raise ValueError(f"not a GEM-15 tile id: {item_id!r}")
+    lon = -int(m[2]) if m[1] else int(m[2])
+    lat = -int(m[4]) if m[3] else int(m[4])
+    sg = lambda v: "m" if v < 0 else "p"
+    block = f"{sg(lat)}{abs(lat // 10 * 10)}_{sg(lon)}{abs(lon // 10 * 10)}"
+    return f"{base}/{block}/{item_id}/{item_id}.json"
+
+
+GEM_MAX_TILES = 36
+
+
+def _gem_tile_ids(bbox: list[float]) -> list[str]:
+    """Tile ids intersecting the bbox (antimeridian handled); unbounded, caller caps."""
+    ids: list[str] = []
+    for w, s, e, n in _split_antimeridian(bbox):
+        # a box edge exactly on a tile boundary does not pull in the next tile
+        lons = range(math.floor(w), max(math.ceil(e), math.floor(w) + 1))
+        lats = range(math.floor(s), max(math.ceil(n), math.floor(s) + 1))
+        ids += [_gem_tile_id(lo, la) for la in lats for lo in lons if lo < 180 and la < 90]
+    return list(dict.fromkeys(ids))
+
+
+def _gem_search(catalog: str, bbox: list[float], datetime_range: str | None) -> tuple[list[dict[str, Any]], str | None]:
+    ids = _gem_tile_ids(bbox)
+    note = None
+    if len(ids) > GEM_MAX_TILES:
+        note = f"GEM-15 box spans {len(ids)} tiles; only the first {GEM_MAX_TILES} were fetched, narrow the box"
+        ids = ids[:GEM_MAX_TILES]
+
+    def one(i: str) -> dict[str, Any] | None:
+        try:
+            return _get_json(_gem_item_url(CATALOGS[catalog]["stac"], i))
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (403, 404):
+                return None  # no coverage for this tile
+            raise
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        feats = [f for f in pool.map(one, ids) if f]
+    if datetime_range:
+        lo, _, hi = _rfc3339_window(datetime_range).partition("/")
+        lo, hi = (lo if lo != ".." else ""), (hi if hi != ".." else "")
+        # ISO-8601 UTC strings order lexicographically
+        feats = [f for f in feats if (not lo or (f["properties"].get("datetime") or "") >= lo) and (not hi or (f["properties"].get("datetime") or "") <= hi)]
+    return feats, note
+
+
 def _collections(catalog: str) -> list[dict[str, Any]]:
     cached = _collections_cache.get(catalog)
     if cached and time.time() - cached[0] < 3600:
         return cached[1]
     base = CATALOGS[catalog]["stac"]
+    if CATALOGS[catalog].get("static"):
+        out = [_get_json(f"{base}/collection.json")]
+        _collections_cache[catalog] = (time.time(), out)
+        return out
     out: list[dict[str, Any]] = []
     # limit=500 collapses VEDA's default 10-per-page pagination (25 GETs) to one
     url: str | None = f"{base}/collections?limit=500"
@@ -995,6 +1069,65 @@ def search_datasets(
     return hits[:20]
 
 
+_COLLECTION_DOCS: dict[str, dict[str, Any]] = {}
+
+
+def _collection_doc(catalog: str, collection_id: str) -> dict[str, Any]:
+    """One collection's JSON: from the collections cache, else fetched once per process"""
+    key = f"{catalog}:{collection_id}"
+    cached = _collections_cache.get(catalog)
+    if cached and time.time() - cached[0] < 3600:
+        c = next((col for col in cached[1] if col.get("id") == collection_id), None)
+        if c:
+            return c
+    if key not in _COLLECTION_DOCS:
+        base = CATALOGS[catalog]["stac"]
+        _COLLECTION_DOCS[key] = _get_json(f"{base}/collection.json" if CATALOGS[catalog].get("static") else f"{base}/collections/{collection_id}")
+    return _COLLECTION_DOCS[key]
+
+
+def _band_assets(catalog: str, collection_id: str, assets: list[str], item_id: str | None = None) -> list[str]:
+    """Each name as titiler.xyz should read it: a named band of a multi-band file becomes `file|bidx=i`.
+
+    titiler merges every band of a listed asset, so a one-colour layer on a
+    5-band file fails ("Source data must be 1 band"). GEM-15's dsm file packs
+    dsm, its percentiles and dsm_std. A single-band asset, a whole file whose
+    bands carry other names (Sentinel-2 visual is red, green, blue) and an
+    already-indexed `a|bidx=` stay as they are
+    """
+    if CATALOGS.get(catalog, {}).get("raster") != "titiler-xyz":
+        return assets  # the PC and VEDA tilers take their own band syntax
+    # an API catalog only uses a collection already in hand, so a map whose
+    # caller holds the hrefs still makes no fetch; a static catalog has no
+    # search cache to lean on and its collection is one small file
+    cached = _collections_cache.get(catalog)
+    doc = _COLLECTION_DOCS.get(f"{catalog}:{collection_id}") or next(
+        (c for c in (cached[1] if cached else []) if c.get("id") == collection_id), None)
+    if doc is None and CATALOGS[catalog].get("static"):
+        try:
+            doc = _collection_doc(catalog, collection_id)
+        except Exception:
+            doc = None
+    item_assets = dict((doc or {}).get("item_assets") or {})
+    # a scene already in hand (from a search) can name bands its collection does not
+    item_assets.update(((_ITEMS.get(f"{catalog}:{collection_id}:{item_id}") or {}).get("assets")) or {})
+
+    def names(a: dict[str, Any]) -> list[set[str]]:
+        bands = a.get("raster:bands") or a.get("eo:bands") or a.get("bands") or []
+        return [{str(b.get(k) or "").lower() for k in ("name", "common_name", "eo:common_name")} - {""} for b in bands]
+
+    out = []
+    for n in assets:
+        own = item_assets.get(n)
+        if "|" in n or (own is not None and len(names(own)) < 2):
+            out.append(n)
+            continue
+        hit = next(((k, i) for k, a in ([(n, own)] if own else item_assets.items()) if len(names(a)) > 1
+                    for i, l in enumerate(names(a), start=1) if n.lower() in l), None)
+        out.append(f"{hit[0]}|bidx={hit[1]}" if hit else n)
+    return out
+
+
 def describe_collection(catalog: str, collection_id: str) -> dict[str, Any]:
     """Get a collection's description, extent, and asset/band layout.
 
@@ -1005,12 +1138,7 @@ def describe_collection(catalog: str, collection_id: str) -> dict[str, Any]:
     if catalog == "zarr":
         z = ZARR_STORES.get(collection_id)
         return {"catalog": "zarr", "id": collection_id, **z} if z else {"error": f"unknown zarr store {collection_id!r}; options: {', '.join(ZARR_STORES)}"}
-    cached = _collections_cache.get(catalog)
-    c = None
-    if cached and time.time() - cached[0] < 3600:
-        c = next((col for col in cached[1] if col.get("id") == collection_id), None)
-    if c is None:
-        c = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}")
+    c = _collection_doc(catalog, collection_id)
     item_assets = c.get("item_assets") or {}
     return {
         "catalog": catalog,
@@ -1696,8 +1824,10 @@ def write_archive(
         body["query"] = {"eo:cloud_cover": {"lte": max_cloud_cover}}
     if CATALOGS.get(catalog, {}).get("fields"):
         body["fields"] = {"include": [CATALOGS[catalog]["fields"]]}
-    url = f"{CATALOGS[catalog]['stac']}/search"
+    url = None if CATALOGS[catalog].get("static") else f"{CATALOGS[catalog]['stac']}/search"
     feats: list[dict[str, Any]] = []
+    if CATALOGS[catalog].get("static"):
+        feats = _gem_search(catalog, bbox, datetime_range)[0]
     method = "POST"
     while url and len(feats) < limit:
         r = _client.get(url) if method == "GET" else _client.post(url, json=body)
@@ -1782,7 +1912,10 @@ def search_imagery(
     if CATALOGS.get(catalog, {}).get("fields"):
         body["fields"] = {"include": [CATALOGS[catalog]["fields"]]}
     archive = None
-    if _is_archive(catalog):
+    static_note = None
+    if CATALOGS.get(catalog, {}).get("static"):
+        feats, static_note = _gem_search(catalog, bbox, datetime_range)
+    elif _is_archive(catalog):
         feats, archive = _search_archive(catalog, body, max_cloud_cover)
     else:
         base = CATALOGS[catalog]["stac"]
@@ -1792,6 +1925,13 @@ def search_imagery(
             r = _client.post(f"{base}/search", json=body)
         r.raise_for_status()
         feats = r.json().get("features", [])
+    if not archive and not body.get("fields"):
+        # a search returns whole items, so preview, stats and the band rule
+        # reuse them instead of fetching each again; a fields-trimmed or
+        # archived item is not the live item and stays out
+        for f in feats:
+            if f.get("assets") and f.get("id"):
+                _ITEMS.setdefault(f"{catalog}:{f.get('collection')}:{f['id']}", f)
     feats, folded = _fold_reprocessed(feats)
     items = [_compact_item(catalog, f) for f in feats]
     for it in items:
@@ -1811,6 +1951,8 @@ def search_imagery(
                           "(same sensing time, tile and footprint) dropped; only the newest processing of each scene is kept")
     if archive:
         result["archive"] = archive
+    if static_note:
+        result["note"] = static_note
     readable = [it for it in items if "read_note" not in it]
     if area_cloud and not archive:
         got, failed = _area_cloud(catalog, readable, bbox, area_cloud)
@@ -2016,9 +2158,7 @@ def preview_item(
                 + f"{path}?{httpx.QueryParams(params)}",
                 "backend": "pc-data-api",
             }
-        item = _get_json(
-            f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
-        )
+        item = _get_json(_item_url(catalog, collection_id, item_id))
         rp = item.get("assets", {}).get("rendered_preview", {}).get("href")
         if rp:
             out = {"preview_url": rp, "backend": "pc-data-api"}
@@ -2048,12 +2188,12 @@ def preview_item(
             "backend": "veda-raster-api",
         }
     # earth-search and any catalog with public item URLs -> titiler.xyz
-    self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
+    self_url = _item_url(catalog, collection_id, item_id)
     params = [("url", self_url)]
     if expression:
         expression, assets = _expression_to_bands(expression, assets or None, _item(catalog, collection_id, item_id))
         params.append(("expression", expression))
-    params += [("assets", a) for a in assets]
+    params += [("assets", a) for a in _band_assets(catalog, collection_id, assets, item_id)]
     if rescale:
         params.append(("rescale", rescale))
     if colormap_name:
@@ -2139,7 +2279,7 @@ def compute_statistics(
     if bbox and not aoi_geojson:
         aoi_geojson = _bbox_feature(bbox)
     backend = CATALOGS[catalog]["raster"]
-    item_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
+    item_url = _item_url(catalog, collection_id, item_id)
     try:
         item = _get_json(item_url)
     except Exception:
@@ -2188,7 +2328,7 @@ def compute_statistics(
         else:
             expression, assets = _expression_to_bands(expression, assets, item)
             params.append(("expression", expression))
-    used = assets or _default_assets(collection_id) or ["visual"]
+    used = _band_assets(catalog, collection_id, assets or _default_assets(collection_id) or ["visual"], item_id)
     for a in used:
         params.append(("assets", a))
     if backend == "pc":
@@ -2198,7 +2338,7 @@ def compute_statistics(
         base = f"https://openveda.cloud/api/raster/collections/{collection_id}/items/{item_id}/statistics"
     else:
         base = f"{TITILER}/stac/statistics"
-        params.append(("url", f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"))
+        params.append(("url", _item_url(catalog, collection_id, item_id)))
     if aoi_geojson:
         r = _client.post(base, params=params, json=aoi_geojson, timeout=60)
     else:
@@ -2570,12 +2710,12 @@ def tile_url_template(
             f"https://openveda.cloud/api/raster/collections/{collection_id}/items/{item_id}"
             "/tiles/WebMercatorQuad/{z}/{x}/{y}.png?" + q
         )
-    self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
+    self_url = _item_url(catalog, collection_id, item_id)
     params = [("url", self_url)]
     if expression:
         expression, assets = _expression_to_bands(expression, assets or None, _item(catalog, collection_id, item_id))
         params.append(("expression", expression))
-    params += [("assets", a) for a in assets]
+    params += [("assets", a) for a in _band_assets(catalog, collection_id, assets, item_id)]
     if rescale:
         params.append(("rescale", rescale))
     if colormap_name:
@@ -2977,7 +3117,7 @@ def stac_map_link(catalog: str, collection_id: str, item_id: str) -> str:
     """stac-map opens any STAC URL from ?href= (src/utils/href.ts)."""
     if catalog not in CATALOGS or "stac" not in CATALOGS[catalog]:
         return ""
-    self_url = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}"
+    self_url = _item_url(catalog, collection_id, item_id)
     return "https://developmentseed.org/stac-map/?href=" + quote(self_url, safe="")
 
 
@@ -2993,7 +3133,7 @@ def _item(catalog: str, collection_id: str, item_id: str) -> dict[str, Any] | No
     key = f"{catalog}:{collection_id}:{item_id}"
     if key not in _ITEMS:
         try:
-            _ITEMS[key] = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{item_id}")
+            _ITEMS[key] = _get_json(_item_url(catalog, collection_id, item_id))
         except Exception:
             _ITEMS[key] = None
     return _ITEMS[key]
@@ -4266,7 +4406,6 @@ def _mosaic_png(
     from rio_tiler.io import STACReader
     from rio_tiler.mosaic import mosaic_reader
 
-    base = f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/"
 
     def _read(url: str, bbox: tuple, **kw: Any):
         with STACReader(url) as r:
@@ -4279,7 +4418,7 @@ def _mosaic_png(
         rescale = rescale or "-1,1"
     else:
         kw["assets"] = assets or _default_assets(collection_id)
-    img, used = mosaic_reader([base + i for i in item_ids], _read, tuple(bbox), **kw)
+    img, used = mosaic_reader([_item_url(catalog, collection_id, i) for i in item_ids], _read, tuple(bbox), **kw)
     if rescale:
         lo, hi = (float(v) for v in rescale.split(","))
         img = img.rescale(((lo, hi),))
@@ -4399,7 +4538,7 @@ def render_postcard(
         try:
             boxes = []
             for i in (item_id, *(fill_item_ids or [])):
-                item = _get_json(f"{CATALOGS[catalog]['stac']}/collections/{collection_id}/items/{i}")
+                item = _get_json(_item_url(catalog, collection_id, i))
                 if item.get("bbox"):
                     boxes.append(item["bbox"])
                     shapes[i] = item.get("geometry") if (item.get("geometry") or {}).get("type") in ("Polygon", "MultiPolygon") else item["bbox"]

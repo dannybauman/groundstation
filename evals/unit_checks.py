@@ -2638,6 +2638,24 @@ def t_smoke_forecast_failures_are_data():
     assert r["now_ugm3"] is None and r["forecast_ugm3"] is None and any("empty" in c for c in r["caveat"])
 
 
+def t_band_assets_picks_named_band_of_packed_file():
+    rb = lambda *n: {"raster:bands": [{"name": x} for x in n]}
+    tools._COLLECTION_DOCS["gem-15:gem-15"] = {"item_assets": {
+        "dsm": rb("dsm", "dsm_percentile_5", "dsm_percentile_50", "dsm_percentile_95", "dsm_std"), "dtm": rb("dtm")}}
+    tools._COLLECTION_DOCS["earth-search:s2"] = {"item_assets": {
+        "visual": {"eo:bands": [{"common_name": c} for c in ("red", "green", "blue")]}, "red": {"eo:bands": [{"common_name": "red"}]}}}
+    try:
+        assert tools._band_assets("gem-15", "gem-15", ["dsm", "dtm", "dsm_std", "dsm|bidx=3"]) == ["dsm|bidx=1", "dtm", "dsm|bidx=5", "dsm|bidx=3"]
+        assert tools._band_assets("earth-search", "s2", ["visual", "red"]) == ["visual", "red"]  # whole RGB file and a single-band asset stay
+        assert tools._band_assets("planetary-computer", "gem-15", ["dsm"]) == ["dsm"]  # other tilers keep their own syntax
+        tools._ITEMS["eodh:ard:x1"] = {"assets": {"cube": rb("blue", "green", "red", "nir")}}
+        assert tools._band_assets("eodh", "ard", ["nir"], "x1") == ["cube|bidx=4"]  # bands named only on a scene already in hand
+        assert tools._band_assets("eodh", "ard", ["nir"], "x2") == ["nir"]  # a scene not in hand is never fetched for this
+    finally:
+        tools._COLLECTION_DOCS.clear()
+        tools._ITEMS.clear()
+
+
 def t_asset_href_cache_and_scheme():
     calls = []
     saved = tools._get_json
@@ -3862,6 +3880,26 @@ def t_no_heavy_files_tracked():
     big = [f for f in files if (root / f).stat().st_size > 1_000_000
            and not f.startswith("docs/samples/") and f != "uv.lock"]
     assert not big, f"tracked files over 1 MB: {big}"
+
+
+def t_gem15_tile_urls_and_enumeration():
+    base = "https://x/gem-15"
+    cases = {  # (lon, lat) SW corner -> (id, block); 0 is written p
+        (-123, 45): ("wm123s45", "p40_m130"),
+        (5, 51): ("w5s51", "p50_p0"),
+        (-91, -1): ("wm91sm1", "m10_m100"),
+        (0, 0): ("w0s0", "p0_p0"),
+    }
+    for (lon, lat), (iid, block) in cases.items():
+        assert tools._gem_tile_id(lon, lat) == iid
+        assert tools._gem_item_url(base, iid) == f"{base}/{block}/{iid}/{iid}.json"
+    assert tools._gem_item_url(base, "gem-15_wm123s45") == f"{base}/p40_m130/wm123s45/wm123s45.json"  # id as the item reports it
+    assert len(tools._gem_tile_ids([-122.7, 45.3, -122.5, 45.45])) == 1
+    assert len(tools._gem_tile_ids([-123.5, 45.5, -121.5, 46.5])) == 6
+    assert len(tools._gem_tile_ids([-123.0, 45.0, -122.0, 46.0])) == 1  # edges on boundaries
+    assert len(tools._gem_tile_ids([179.5, 10.5, -179.5, 11.5])) == 4  # antimeridian
+    assert tools._item_url("gem-15", "gem-15", "wm123s45") == tools._gem_item_url(tools.CATALOGS["gem-15"]["stac"], "wm123s45")
+    assert tools._item_url("earth-search", "c", "i").endswith("/collections/c/items/i")
 
 
 if __name__ == "__main__":
