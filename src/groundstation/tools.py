@@ -1086,7 +1086,7 @@ def _collection_doc(catalog: str, collection_id: str) -> dict[str, Any]:
     return _COLLECTION_DOCS[key]
 
 
-def _band_assets(catalog: str, collection_id: str, assets: list[str]) -> list[str]:
+def _band_assets(catalog: str, collection_id: str, assets: list[str], item_id: str | None = None) -> list[str]:
     """Each name as titiler.xyz should read it: a named band of a multi-band file becomes `file|bidx=i`.
 
     titiler merges every band of a listed asset, so a one-colour layer on a
@@ -1108,7 +1108,9 @@ def _band_assets(catalog: str, collection_id: str, assets: list[str]) -> list[st
             doc = _collection_doc(catalog, collection_id)
         except Exception:
             doc = None
-    item_assets = (doc or {}).get("item_assets") or {}
+    item_assets = dict((doc or {}).get("item_assets") or {})
+    # a scene already in hand (from a search) can name bands its collection does not
+    item_assets.update(((_ITEMS.get(f"{catalog}:{collection_id}:{item_id}") or {}).get("assets")) or {})
 
     def names(a: dict[str, Any]) -> list[set[str]]:
         bands = a.get("raster:bands") or a.get("eo:bands") or a.get("bands") or []
@@ -1923,6 +1925,13 @@ def search_imagery(
             r = _client.post(f"{base}/search", json=body)
         r.raise_for_status()
         feats = r.json().get("features", [])
+    if not archive and not body.get("fields"):
+        # a search returns whole items, so preview, stats and the band rule
+        # reuse them instead of fetching each again; a fields-trimmed or
+        # archived item is not the live item and stays out
+        for f in feats:
+            if f.get("assets") and f.get("id"):
+                _ITEMS.setdefault(f"{catalog}:{f.get('collection')}:{f['id']}", f)
     feats, folded = _fold_reprocessed(feats)
     items = [_compact_item(catalog, f) for f in feats]
     for it in items:
@@ -2184,7 +2193,7 @@ def preview_item(
     if expression:
         expression, assets = _expression_to_bands(expression, assets or None, _item(catalog, collection_id, item_id))
         params.append(("expression", expression))
-    params += [("assets", a) for a in _band_assets(catalog, collection_id, assets)]
+    params += [("assets", a) for a in _band_assets(catalog, collection_id, assets, item_id)]
     if rescale:
         params.append(("rescale", rescale))
     if colormap_name:
@@ -2319,7 +2328,7 @@ def compute_statistics(
         else:
             expression, assets = _expression_to_bands(expression, assets, item)
             params.append(("expression", expression))
-    used = _band_assets(catalog, collection_id, assets or _default_assets(collection_id) or ["visual"])
+    used = _band_assets(catalog, collection_id, assets or _default_assets(collection_id) or ["visual"], item_id)
     for a in used:
         params.append(("assets", a))
     if backend == "pc":
@@ -2706,7 +2715,7 @@ def tile_url_template(
     if expression:
         expression, assets = _expression_to_bands(expression, assets or None, _item(catalog, collection_id, item_id))
         params.append(("expression", expression))
-    params += [("assets", a) for a in _band_assets(catalog, collection_id, assets)]
+    params += [("assets", a) for a in _band_assets(catalog, collection_id, assets, item_id)]
     if rescale:
         params.append(("rescale", rescale))
     if colormap_name:

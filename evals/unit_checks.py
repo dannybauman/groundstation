@@ -2648,8 +2648,12 @@ def t_band_assets_picks_named_band_of_packed_file():
         assert tools._band_assets("gem-15", "gem-15", ["dsm", "dtm", "dsm_std", "dsm|bidx=3"]) == ["dsm|bidx=1", "dtm", "dsm|bidx=5", "dsm|bidx=3"]
         assert tools._band_assets("earth-search", "s2", ["visual", "red"]) == ["visual", "red"]  # whole RGB file and a single-band asset stay
         assert tools._band_assets("planetary-computer", "gem-15", ["dsm"]) == ["dsm"]  # other tilers keep their own syntax
+        tools._ITEMS["eodh:ard:x1"] = {"assets": {"cube": rb("blue", "green", "red", "nir")}}
+        assert tools._band_assets("eodh", "ard", ["nir"], "x1") == ["cube|bidx=4"]  # bands named only on a scene already in hand
+        assert tools._band_assets("eodh", "ard", ["nir"], "x2") == ["nir"]  # a scene not in hand is never fetched for this
     finally:
         tools._COLLECTION_DOCS.clear()
+        tools._ITEMS.clear()
 
 
 def t_asset_href_cache_and_scheme():
