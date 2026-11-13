@@ -2493,7 +2493,9 @@ def tile_url_template(
     "(nir-red)/(nir+red)" with colormap_name="rdylgn" — supported on
     earth-search and planetary-computer (radar in dB there: "10*log10(vv)" with
     rescale="-25,0" and a colormap); ignored for veda. Index expressions
-    default to rescale="-1,1" (without a rescale they render blank).
+    default to rescale="-1,1" (without a rescale they render blank). A comparison
+    such as "vv<0.02" comes back as raw 0 and 1, which rescale does not
+    stretch: write "(vv<0.02)*1.0" with rescale="0,1" for black and white.
 
     With no rescale, a continuous single-asset layer (not visual/image, not
     categorical, no expression) is stretched 2nd to 98th percentile of the raw
