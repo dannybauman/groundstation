@@ -2081,7 +2081,7 @@ def _bbox_feature(bbox: list[float]) -> dict[str, Any]:
 def compute_statistics(
     catalog: str,
     collection_id: str,
-    item_id: str,
+    item_id: str | list[str],
     expression: str | None = None,
     assets: list[str] | None = None,
     aoi_geojson: dict[str, Any] | None = None,
@@ -2121,7 +2121,19 @@ def compute_statistics(
     {"valid_time": "2026-10-26T21:00"} (UTC) on a forecast store. Returns
     {variable: stats, clipped_to, dataset, units, sel (what was actually
     used), caveats}: read the caveats before quoting the number.
+
+    item_id may be a list: one pass's tiles (the item ids of an entry in
+    search_imagery's passes), with bbox required. Each tile is measured over
+    the part of the box it owns, first tile first, and the parts combine
+    weighted by the share of the box each owns: mean, min and max, plus `tiles`
+    (each one's share, and its own range_note) and pass_note. std, median,
+    percentiles and count do not combine, so they are left out.
     """
+    if isinstance(item_id, list) and catalog == "zarr":
+        return {"error": "a list of tiles is for one STAC pass; a zarr store takes one variable"}
+    if isinstance(item_id, list):
+        return _pass_statistics(catalog, collection_id, item_id, bbox,
+                                dict(expression=expression, assets=assets, apply_scaling=apply_scaling))
     if catalog == "zarr":
         return _zarr_statistics(collection_id, item_id, bbox, sel)
     if bbox and not aoi_geojson:
@@ -2333,6 +2345,65 @@ def compute_statistics(
                 )
     except Exception:
         pass
+    return out
+
+
+def _owned_cells(aoi: list[float], mask: int) -> dict[str, Any] | None:
+    """The COVER_GRID cells set in mask as a MultiPolygon, one rectangle per run of cells in a row."""
+    w, s, e, n = aoi
+    dx, dy = (e - w) / COVER_GRID, (n - s) / COVER_GRID
+    rects = []
+    for r in range(COVER_GRID):
+        c = 0
+        while c < COVER_GRID:
+            if mask >> (r * COVER_GRID + c) & 1:
+                c0 = c
+                while c < COVER_GRID and mask >> (r * COVER_GRID + c) & 1:
+                    c += 1
+                x0, x1, y0, y1 = w + c0 * dx, w + c * dx, s + r * dy, s + (r + 1) * dy
+                rects.append([[[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]])
+            c += 1
+    return {"type": "MultiPolygon", "coordinates": rects} if rects else None
+
+
+def _pass_statistics(catalog: str, collection_id: str, item_ids: list[str], bbox: list[float] | None,
+                     kw: dict[str, Any]) -> dict[str, Any]:
+    # ponytail: ownership is the 64x64 coverage grid, so a tile edge is placed to 1/64 of the box;
+    # a box across the antimeridian is refused rather than split
+    if not bbox or bbox[0] > bbox[2]:
+        return {"error": "statistics over a pass need a bbox that does not cross the antimeridian"}
+    taken, parts = 0, []
+    for iid in item_ids:
+        m = _cover_mask(bbox, (_item(catalog, collection_id, iid) or {}).get("geometry")) & ~taken
+        taken |= m
+        if m:
+            geom = _owned_cells(bbox, m)
+            parts.append((iid, bin(m).count("1"), compute_statistics(
+                catalog, collection_id, iid, aoi_geojson={"type": "Feature", "properties": {}, "geometry": geom}, **kw)))
+    if not parts:
+        return {"error": "none of these tiles covers the box (or their outlines did not come back)"}
+    if bad := next((p for p in parts if "error" in p[2]), None):
+        return {"error": f"{bad[0]}: {bad[2]['error']}"}
+    # weighted by owned area, never by pixel count: each part is read at up to 512 px over its own extent,
+    # so a small corner comes back at a far finer pixel size and its count would outweigh the rest
+    out: dict[str, Any] = {}
+    for key, v in parts[0][2].items():
+        if key in ("range_note", "note", "extent_note"):
+            continue  # one tile's words, not the pass's; range_note rides with its tile below
+        if not (isinstance(v, dict) and "mean" in v):
+            out.setdefault(key, v)
+            continue
+        if missing := [iid for iid, _, st in parts if not isinstance(st.get(key), dict) or st[key].get("mean") is None]:
+            return {"error": f"{', '.join(missing)}: no {key} statistics over the part of the box it owns"}
+        cells = sum(c for _, c, _ in parts)
+        out[key] = {"mean": sum(st[key]["mean"] * c for _, c, st in parts) / cells,
+                    "min": min(st[key]["min"] for _, _, st in parts), "max": max(st[key]["max"] for _, _, st in parts)}
+    out["clipped_to"] = bbox
+    out["tiles"] = [{"id": iid, "box_share_pct": round(100.0 * cells / COVER_GRID**2, 1),
+                     **({"range_note": st["range_note"]} if "range_note" in st else {})} for iid, cells, st in parts]
+    covered = round(100.0 * bin(taken).count("1") / COVER_GRID**2, 1)
+    out["pass_note"] = (f"{len(parts)} tiles of one pass, each measured over the part of the box it owns, "
+                        f"combined weighted by the share each owns; they cover {covered}% of the box")
     return out
 
 

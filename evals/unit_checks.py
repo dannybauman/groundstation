@@ -1922,6 +1922,30 @@ def t_recommended_says_when_the_set_is_starved():
     assert "full_coverage_set" in r and "No single scene" not in r["recommended"]["reason"], r["recommended"]
 
 
+def t_pass_statistics_measure_each_tile_over_what_it_owns():
+    # a box across a tile edge: the overlap counts once, and the means weight by valid pixels
+    sq = lambda x0, x1: {"type": "Polygon", "coordinates": [[[x0, -1], [x1, -1], [x1, 11], [x0, 11], [x0, -1]]]}
+    shapes = {"a": sq(-1, 6), "b": sq(4, 11), "far": sq(30, 40)}
+    orig, saved_item = tools.compute_statistics, tools._item
+    def fake(cat, coll, iid, **kw):
+        if isinstance(iid, list):
+            return orig(cat, coll, iid, **kw)
+        # each part is read at up to 512 px over its own extent, so a pixel count says nothing about its area
+        return {"nd": {"mean": {"a": 0.2, "b": 0.6}[iid], "min": 0.0, "max": {"a": 0.5, "b": 0.9}[iid], "std": 0.1, "count": 262144},
+                "scaling_applied": True, **({"range_note": "b ran past 1"} if iid == "b" else {})}
+    tools.compute_statistics, tools._item = fake, lambda cat, coll, iid: {"geometry": shapes[iid]}
+    try:
+        r = tools.compute_statistics("earth-search", "sentinel-2-l2a", ["a", "b", "far"], expression="nd", bbox=[0, 0, 10, 10])
+    finally:
+        tools.compute_statistics, tools._item = orig, saved_item
+    assert [t["id"] for t in r["tiles"]] == ["a", "b"] and sum(t["box_share_pct"] for t in r["tiles"]) == 100.0, r["tiles"]
+    share_a = r["tiles"][0]["box_share_pct"] / 100
+    assert abs(r["nd"]["mean"] - (0.2 * share_a + 0.6 * (1 - share_a))) < 1e-3 and r["nd"]["max"] == 0.9, r["nd"]
+    assert "std" not in r["nd"] and "count" not in r["nd"] and r["scaling_applied"] and r["clipped_to"] == [0, 0, 10, 10]
+    assert "range_note" not in r and r["tiles"][1]["range_note"] == "b ran past 1", r["tiles"]
+    assert "error" in tools.compute_statistics("earth-search", "sentinel-2-l2a", ["a"])
+
+
 def t_passes_group_one_satellites_tiles_from_one_date():
     # Lake Mead takes 5 tiles: a box across tile edges is one pass, not one tile
     feats = [_stac_item("a", [0, 0, 6, 10]), _stac_item("b", [4, 0, 10, 10]), _stac_item("a2", [0, 0, 6, 10]),
