@@ -3666,6 +3666,19 @@ def t_stretch_one_range_across_a_coverage_set():
         restore()
 
 
+def t_pc_tiles_carry_the_expression():
+    # PC dropped the expression, so radar drew only plain gray vv; it honours one with asset_as_band
+    from urllib.parse import parse_qs, urlsplit
+    tools._pc_mosaic_cache["sentinel-1-rtc:R"] = "mid"
+    try:
+        q = parse_qs(urlsplit(tools.tile_url_template("planetary-computer", "sentinel-1-rtc", "R", expression="10*log10(vv)", rescale="-25,0")).query)
+        assert q["expression"] == ["10*log10(vv)"] and q["asset_as_band"] == ["true"] and q["rescale"] == ["-25,0"], q
+        q = parse_qs(urlsplit(tools.tile_url_template("planetary-computer", "sentinel-1-rtc", "R", assets=["vv"], rescale="0,0.3")).query)
+        assert "expression" not in q and "asset_as_band" not in q and q["assets"] == ["vv"], q
+    finally:
+        tools._pc_mosaic_cache.pop("sentinel-1-rtc:R", None)
+
+
 def t_pc_mosaic_register_reads_searchid_or_id():
     # field test 16: Planetary Computer's register reply switched "id" to
     # "searchid" and every WorldCover map died on KeyError; both keys serve
