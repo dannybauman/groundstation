@@ -2638,6 +2638,20 @@ def t_smoke_forecast_failures_are_data():
     assert r["now_ugm3"] is None and r["forecast_ugm3"] is None and any("empty" in c for c in r["caveat"])
 
 
+def t_band_assets_picks_named_band_of_packed_file():
+    rb = lambda *n: {"raster:bands": [{"name": x} for x in n]}
+    tools._COLLECTION_DOCS["gem-15:gem-15"] = {"item_assets": {
+        "dsm": rb("dsm", "dsm_percentile_5", "dsm_percentile_50", "dsm_percentile_95", "dsm_std"), "dtm": rb("dtm")}}
+    tools._COLLECTION_DOCS["earth-search:s2"] = {"item_assets": {
+        "visual": {"eo:bands": [{"common_name": c} for c in ("red", "green", "blue")]}, "red": {"eo:bands": [{"common_name": "red"}]}}}
+    try:
+        assert tools._band_assets("gem-15", "gem-15", ["dsm", "dtm", "dsm_std", "dsm|bidx=3"]) == ["dsm|bidx=1", "dtm", "dsm|bidx=5", "dsm|bidx=3"]
+        assert tools._band_assets("earth-search", "s2", ["visual", "red"]) == ["visual", "red"]  # whole RGB file and a single-band asset stay
+        assert tools._band_assets("planetary-computer", "gem-15", ["dsm"]) == ["dsm"]  # other tilers keep their own syntax
+    finally:
+        tools._COLLECTION_DOCS.clear()
+
+
 def t_asset_href_cache_and_scheme():
     calls = []
     saved = tools._get_json

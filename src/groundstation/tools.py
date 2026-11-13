@@ -1069,6 +1069,63 @@ def search_datasets(
     return hits[:20]
 
 
+_COLLECTION_DOCS: dict[str, dict[str, Any]] = {}
+
+
+def _collection_doc(catalog: str, collection_id: str) -> dict[str, Any]:
+    """One collection's JSON: from the collections cache, else fetched once per process"""
+    key = f"{catalog}:{collection_id}"
+    cached = _collections_cache.get(catalog)
+    if cached and time.time() - cached[0] < 3600:
+        c = next((col for col in cached[1] if col.get("id") == collection_id), None)
+        if c:
+            return c
+    if key not in _COLLECTION_DOCS:
+        base = CATALOGS[catalog]["stac"]
+        _COLLECTION_DOCS[key] = _get_json(f"{base}/collection.json" if CATALOGS[catalog].get("static") else f"{base}/collections/{collection_id}")
+    return _COLLECTION_DOCS[key]
+
+
+def _band_assets(catalog: str, collection_id: str, assets: list[str]) -> list[str]:
+    """Each name as titiler.xyz should read it: a named band of a multi-band file becomes `file|bidx=i`.
+
+    titiler merges every band of a listed asset, so a one-colour layer on a
+    5-band file fails ("Source data must be 1 band"). GEM-15's dsm file packs
+    dsm, its percentiles and dsm_std. A single-band asset, a whole file whose
+    bands carry other names (Sentinel-2 visual is red, green, blue) and an
+    already-indexed `a|bidx=` stay as they are
+    """
+    if CATALOGS.get(catalog, {}).get("raster") != "titiler-xyz":
+        return assets  # the PC and VEDA tilers take their own band syntax
+    # an API catalog only uses a collection already in hand, so a map whose
+    # caller holds the hrefs still makes no fetch; a static catalog has no
+    # search cache to lean on and its collection is one small file
+    cached = _collections_cache.get(catalog)
+    doc = _COLLECTION_DOCS.get(f"{catalog}:{collection_id}") or next(
+        (c for c in (cached[1] if cached else []) if c.get("id") == collection_id), None)
+    if doc is None and CATALOGS[catalog].get("static"):
+        try:
+            doc = _collection_doc(catalog, collection_id)
+        except Exception:
+            doc = None
+    item_assets = (doc or {}).get("item_assets") or {}
+
+    def names(a: dict[str, Any]) -> list[set[str]]:
+        bands = a.get("raster:bands") or a.get("eo:bands") or a.get("bands") or []
+        return [{str(b.get(k) or "").lower() for k in ("name", "common_name", "eo:common_name")} - {""} for b in bands]
+
+    out = []
+    for n in assets:
+        own = item_assets.get(n)
+        if "|" in n or (own is not None and len(names(own)) < 2):
+            out.append(n)
+            continue
+        hit = next(((k, i) for k, a in ([(n, own)] if own else item_assets.items()) if len(names(a)) > 1
+                    for i, l in enumerate(names(a), start=1) if n.lower() in l), None)
+        out.append(f"{hit[0]}|bidx={hit[1]}" if hit else n)
+    return out
+
+
 def describe_collection(catalog: str, collection_id: str) -> dict[str, Any]:
     """Get a collection's description, extent, and asset/band layout.
 
@@ -1079,12 +1136,7 @@ def describe_collection(catalog: str, collection_id: str) -> dict[str, Any]:
     if catalog == "zarr":
         z = ZARR_STORES.get(collection_id)
         return {"catalog": "zarr", "id": collection_id, **z} if z else {"error": f"unknown zarr store {collection_id!r}; options: {', '.join(ZARR_STORES)}"}
-    cached = _collections_cache.get(catalog)
-    c = None
-    if cached and time.time() - cached[0] < 3600:
-        c = next((col for col in cached[1] if col.get("id") == collection_id), None)
-    if c is None:
-        c = _get_json(f"{CATALOGS[catalog]['stac']}/collection.json" if CATALOGS[catalog].get("static") else f"{CATALOGS[catalog]['stac']}/collections/{collection_id}")
+    c = _collection_doc(catalog, collection_id)
     item_assets = c.get("item_assets") or {}
     return {
         "catalog": catalog,
@@ -2132,7 +2184,7 @@ def preview_item(
     if expression:
         expression, assets = _expression_to_bands(expression, assets or None, _item(catalog, collection_id, item_id))
         params.append(("expression", expression))
-    params += [("assets", a) for a in assets]
+    params += [("assets", a) for a in _band_assets(catalog, collection_id, assets)]
     if rescale:
         params.append(("rescale", rescale))
     if colormap_name:
@@ -2267,7 +2319,7 @@ def compute_statistics(
         else:
             expression, assets = _expression_to_bands(expression, assets, item)
             params.append(("expression", expression))
-    used = assets or _default_assets(collection_id) or ["visual"]
+    used = _band_assets(catalog, collection_id, assets or _default_assets(collection_id) or ["visual"])
     for a in used:
         params.append(("assets", a))
     if backend == "pc":
@@ -2654,7 +2706,7 @@ def tile_url_template(
     if expression:
         expression, assets = _expression_to_bands(expression, assets or None, _item(catalog, collection_id, item_id))
         params.append(("expression", expression))
-    params += [("assets", a) for a in assets]
+    params += [("assets", a) for a in _band_assets(catalog, collection_id, assets)]
     if rescale:
         params.append(("rescale", rescale))
     if colormap_name:
