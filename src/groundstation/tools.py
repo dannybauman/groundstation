@@ -448,29 +448,65 @@ def find_full_coverage_set(
         if day and _item_shape(it) and it.get("collection"):
             groups.setdefault((it["collection"], day), []).append(it)
     for coll, day in sorted(groups, key=lambda k: k[1], reverse=True):
-        remaining = list(groups[(coll, day)])
-        chosen: list[dict[str, Any]] = []
-        boxes: list[Any] = []
-        covered = 0.0
-        while remaining:
-            best, best_gain = None, 0.05  # require a real gain, not float noise
-            for it in remaining:
-                gain = _union_coverage_pct(aoi_bbox, boxes + [_item_shape(it)]) - covered
-                if gain > best_gain:
-                    best, best_gain = it, gain
-            if best is None:
-                break
-            chosen.append(best)
-            boxes.append(_item_shape(best))
-            covered = _union_coverage_pct(aoi_bbox, boxes)
-            remaining.remove(best)
-            if covered >= threshold:
-                return {
-                    "date": day,
-                    "union_covers_aoi_pct": covered,
-                    "items": chosen,
-                }
+        chosen, covered, _ = _greedy_cover(groups[(coll, day)], aoi_bbox, threshold)
+        if covered >= threshold:
+            return {
+                "date": day,
+                "union_covers_aoi_pct": covered,
+                "items": chosen,
+            }
     return None
+
+
+def _greedy_cover(tiles: list[dict[str, Any]], aoi_bbox: list[float], threshold: float = 100.0
+                  ) -> tuple[list[dict[str, Any]], float, list[float]]:
+    """Tiles picked by marginal coverage gain until threshold or no gain -> (chosen, covered, each one's gain)."""
+    remaining = list(tiles)
+    chosen: list[dict[str, Any]] = []
+    gains: list[float] = []
+    boxes: list[Any] = []
+    covered = 0.0
+    while remaining and covered < threshold:
+        best, best_gain = None, 0.05  # require a real gain, not float noise
+        for it in remaining:
+            gain = _union_coverage_pct(aoi_bbox, boxes + [_item_shape(it)]) - covered
+            if gain > best_gain:
+                best, best_gain = it, gain
+        if best is None:
+            break
+        chosen.append(best)
+        boxes.append(_item_shape(best))
+        new = _union_coverage_pct(aoi_bbox, boxes)
+        gains.append(new - covered)
+        covered = new
+        remaining.remove(best)
+    return chosen, covered, gains
+
+
+def group_passes(items: list[dict[str, Any]], aoi_bbox: list[float], platforms: dict[str, str] | None = None
+                 ) -> list[dict[str, Any]]:
+    """One entry per pass (collection, platform, day), newest first: the tiles that cover the box, in the
+    full_coverage_set shape so a pass renders as a coverage_set layer. cloud_cover is each tile's
+    cloud_cover weighted by the share of the box it adds."""
+    platforms = platforms or {}
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for it in items:
+        day = (it.get("datetime") or "")[:10]
+        if day and _item_shape(it) and it.get("collection"):
+            groups.setdefault((it["collection"], platforms.get(it["id"]) or "", day), []).append(it)
+    out = []
+    for (coll, platform, day) in sorted(groups, key=lambda k: k[2], reverse=True):
+        chosen, covered, gains = _greedy_cover(groups[(coll, platform, day)], aoi_bbox)
+        if not chosen:
+            continue
+        clouds = [(it["cloud_cover"], g) for it, g in zip(chosen, gains) if it.get("cloud_cover") is not None]
+        out.append({
+            "date": day, "collection": coll, **({"platform": platform} if platform else {}),
+            "union_covers_aoi_pct": round(covered, 1),
+            "cloud_cover": round(sum(c * g for c, g in clouds) / sum(g for _, g in clouds), 1) if clouds else None,
+            "items": chosen,
+        })
+    return out
 
 
 _pc_mosaic_cache: dict[str, str] = {}
@@ -1696,6 +1732,7 @@ def search_imagery(
     datetime_range: str | None = None,
     max_cloud_cover: float | None = None,
     limit: int = 10,
+    passes: bool = False,
 ) -> dict[str, Any]:
     """Search a STAC catalog for imagery/data items.
 
@@ -1718,6 +1755,11 @@ def search_imagery(
     .parquet, e.g. one made by write_archive): it is searched with the same
     filters, offline for a local file, and the result carries an `archive`
     block (href, written date, time range) because it is a snapshot.
+    passes=True adds `passes`: one entry per satellite pass (collection,
+    platform, date), newest first, holding the tiles that cover the box and
+    their union_covers_aoi_pct and cloud_cover. A box across tile edges is one
+    pass of several tiles; pass one to render_map as a coverage_set layer.
+    `limit` counts tiles, so raise it when a pass needs many.
     """
     bbox = _resolve_bbox(place, bbox)
     if isinstance(bbox, dict):
@@ -1765,6 +1807,8 @@ def search_imagery(
     if archive:
         result["archive"] = archive
     readable = [it for it in items if "read_note" not in it]
+    if passes:
+        result["passes"] = group_passes(readable, bbox, {f.get("id"): (f.get("properties") or {}).get("platform") for f in feats})
     rec = _recommend(readable)
     if rec:
         result["recommended"] = rec
