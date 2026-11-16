@@ -77,7 +77,7 @@ Done looks like: a search against a parquet archive returns the same item shape 
 ## Parked, with the person to ask
 
 - HEALPix layer in `render_map`: Daniel da Silva's healpix-ts and deck.gl-healpix. Waits for an open HEALPix store; the island's DGGS position is still open (Pete: do Zarr well first).
-- 3D Zarr cube artifact: Gjore's labs#507. Waits for the reusable component he and Kyle are designing.
+- 3D Zarr volume in `render_map_3d`: Gjore's [deck.gl-voxel](https://github.com/dzole0311/deck.gl-voxel) (labs#507, Nov 16), a WebGPU ray marching `VoxelLayer` with a live ERA5/GFS hurricane example. Waits for an npm release (artifacts load from a CDN only) and view-driven chunk loading (its #2); WebGPU only, so it needs a 2D fallback. Until then, offer our curated Zarr stores as his benchmark datasets.
 - Montandon as an events source: token from the Montandon team, so it breaks the keyless rule; worth it for the IFRC disaster record once a public tier exists.
 - Time series from Zarr through titiler-covjson (Chuck, Emmanuel): early alpha.
 - openEO processes through titiler-openeo for pixel math beyond band expressions.
