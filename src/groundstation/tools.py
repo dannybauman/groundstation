@@ -88,6 +88,17 @@ POINT_DEG = 0.001
 GAZET_TIMEOUT_S = 10.0  # geocode is a hot path: a cold Space takes ~8s, a dead one must not hang the tool
 
 
+def out_root() -> Path:
+    """Where maps go when no folder is given: GROUNDSTATION_OUT, else demo/ in a
+    repository checkout, else ~/Groundstation. An installed plugin starts inside
+    its own versioned install folder, so a cwd default there strands every map
+    at the next update"""
+    if os.environ.get("GROUNDSTATION_OUT"):
+        return Path(os.environ["GROUNDSTATION_OUT"])
+    cwd = Path.cwd()
+    return cwd / "demo" if (cwd / ".git").exists() else Path.home() / "Groundstation"
+
+
 def slugify(text: str, max_len: int = 60) -> str:
     return "".join(ch if ch.isalnum() else "-" for ch in text.lower())[:max_len].strip("-")
 
@@ -1814,7 +1825,7 @@ def write_archive(
     if isinstance(bbox, dict):
         return bbox
     if not out_path:
-        out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
+        out_dir = out_root()
         slug = slugify("-".join([*collections, where or "-".join(f"{x:.2f}" for x in bbox)]))
         out_path = str(out_dir / "archives" / f"{slug}.parquet")
     body: dict[str, Any] = {"collections": collections, "bbox": bbox, "limit": min(limit, 100)}
@@ -3391,7 +3402,7 @@ def _fill(template: str, mapping: dict[str, str]) -> str:
 
 def _artifact_path(out_path: str | None, prefix: str, title: str) -> str:
     """Resolve where an HTML artifact goes; raises ValueError for a path it will not write."""
-    out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
+    out_dir = out_root()
     if not out_path:
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = str(out_dir / f"{prefix}-{slugify(title)}.html")
@@ -4915,7 +4926,7 @@ def classify_embeddings(
         if pred >= OVERCALL_RATIO * lab and pred - lab >= OVERCALL_POINTS:
             caveats.append(f"over-calls {names[k - 1]}: {pred:.0f}% of held-out pixels predicted vs {lab:.0f}% labelled, so {names[k - 1]} area is overstated")
 
-    out_dir = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo"))
+    out_dir = out_root()
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = hashlib.sha1(json.dumps([bbox, label_year, method, names], sort_keys=True).encode()).hexdigest()[:8]
     colormap = {str(k): CLASS_COLORS[(k - 1) % len(CLASS_COLORS)] for k in kept}
@@ -5939,7 +5950,7 @@ def field_test(cases: dict[str, Any], out_dir: str) -> dict[str, Any]:
     if not out.is_absolute():
         return {"error": "out_dir must be an absolute path"}
     out = out.resolve()
-    demo = Path(os.environ.get("GROUNDSTATION_OUT", Path.cwd() / "demo")).resolve()
+    demo = out_root().resolve()
     own = Path(__file__).resolve().parents[2]
     if any(out == r or out.is_relative_to(r) for r in (own, demo)):
         return {"error": "out_dir must be outside groundstation's own folder; pick a folder you own"}
