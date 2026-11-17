@@ -3811,6 +3811,22 @@ def t_field_test_copies_artifacts_and_refuses_bad_out_dirs():
         os.environ["GROUNDSTATION_OUT"] = saved
 
 
+def t_out_root_leaves_an_install_folder_for_home():
+    saved, cwd = os.environ.pop("GROUNDSTATION_OUT"), os.getcwd()
+    install, repo = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
+    (repo / ".git").mkdir()
+    try:
+        os.chdir(install)
+        assert tools.out_root() == Path.home() / "Groundstation"
+        os.chdir(repo)
+        assert tools.out_root() == Path.cwd() / "demo"
+        os.environ["GROUNDSTATION_OUT"] = str(install)
+        assert tools.out_root() == install
+    finally:
+        os.chdir(cwd)
+        os.environ["GROUNDSTATION_OUT"] = saved
+
+
 def _ft_run(cases_list, name="r", **extra):
     demo = Path(tempfile.mkdtemp()) / "demo"
     demo.mkdir()
