@@ -3211,12 +3211,16 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
     """
     if l.get("type") == "file":
         return _file_layer(l, view)
-    if l.get("type") == "geojson" and "data" not in l and (l.get("path") or l.get("url")):
+    if l.get("type") == "geojson" and "data" not in l and l.get("path"):
         # read here and embedded, so the artifact stays self-contained and the
         # caller never pastes a FeatureCollection through the tool call
-        text = (Path(l["path"]).expanduser().read_text() if l.get("path")
-                else _client.get(l["url"]).raise_for_status().text)
-        return {**l, "data": json.loads(text)}
+        path = str(Path(l["path"]).expanduser())
+        _require_local_file(path, "geojson layer path")
+        if Path(path).suffix.lower() not in (".geojson", ".json"):
+            raise ValueError("geojson layer path must be a .geojson or .json file")
+        if Path(path).stat().st_size > GEOJSON_MAX_BYTES:
+            raise ValueError(f"geojson layer over {GEOJSON_MAX_BYTES // 1_000_000} MB; simplify it first, the map embeds it whole")
+        return {**l, "data": json.loads(Path(path).read_text())}
     if l.get("type") != "item":
         return l
     l = _shared_stretch([l], view)[0]
@@ -3258,6 +3262,9 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
         **({"fallback_tiles": fallback} if fallback else {}),
         **({"rescale_used": rescale, "rescale_basis": basis} if rescale else {}),
     }
+
+
+GEOJSON_MAX_BYTES = 20_000_000
 
 
 def _require_local_file(path: str, what: str) -> None:
@@ -3771,8 +3778,8 @@ def render_map(
       {"type": "geojson", "name": ..., "data": <FeatureCollection>, "color": "#hex",
        "fill_opacity": 0.35}  # polygons are filled, lines and points are not;
                               # every feature's name pops up on click
-       # instead of data, "path": "/local/file.geojson" or "url": "https://..."
-       # is read and embedded for you: never paste a big FeatureCollection
+       # instead of data, "path": "/local/file.geojson" (local only, up to
+       # 20 MB) is read and embedded for you: never paste a big FeatureCollection
       {"type": "coverage_set", "set": <full_coverage_set from search_imagery>,
        "name": "True colour",  # optional prefix, tiles get N/S/E/W-ish suffixes
        "assets"/"expression"/"colormap_name"/"rescale"/"opacity": ...}

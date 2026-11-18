@@ -443,6 +443,13 @@ def t_geojson_layer_reads_a_path():
         tools.render_map("t", [0, 0, 10, 10], [{"type": "geojson", "name": "x", "path": str(src)}], out_path=str(out))
         html = out.read_text()
         assert "Ian 2022" in html and '["-fill", "-area", "-line"]' in html
+        # local files only, the way file layers already are: a URL would let a prompt probe internal hosts
+        for bad in ("https://169.254.169.254/latest", str(Path(d) / "a.html")):
+            try:
+                tools.render_map("t", [0, 0, 10, 10], [{"type": "geojson", "name": "x", "path": bad}], out_path=str(out))
+                raise AssertionError(f"accepted {bad}")
+            except ValueError:
+                pass
 
 
 def t_local_overlay_on_vectors_is_named_as_such():
