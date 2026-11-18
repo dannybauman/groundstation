@@ -432,6 +432,39 @@ def t_map_with_no_imagery_says_so():
         assert "coverage_note" not in r
 
 
+def t_geojson_layer_reads_a_path():
+    # the Florida hurricane run pasted 16 KB of tracks through the tool call;
+    # a path layer is read and embedded, and every geometry kind pops up a name
+    gj = {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"name": "Ian 2022"},
+          "geometry": {"type": "LineString", "coordinates": [[0, 0], [5, 5]]}}]}
+    with tempfile.TemporaryDirectory() as d:
+        src, out = Path(d) / "t.geojson", Path(d) / "a.html"
+        src.write_text(json.dumps(gj))
+        tools.render_map("t", [0, 0, 10, 10], [{"type": "geojson", "name": "x", "path": str(src)}], out_path=str(out))
+        html = out.read_text()
+        assert "Ian 2022" in html and '["-fill", "-area", "-line"]' in html
+        # local files only, the way file layers already are: a URL would let a prompt probe internal hosts
+        for bad in ("https://169.254.169.254/latest", str(Path(d) / "a.html")):
+            try:
+                tools.render_map("t", [0, 0, 10, 10], [{"type": "geojson", "name": "x", "path": bad}], out_path=str(out))
+                raise AssertionError(f"accepted {bad}")
+            except ValueError:
+                pass
+
+
+def t_local_overlay_on_vectors_is_named_as_such():
+    # a small damage raster over statewide tracks is a deliberate overlay; the
+    # note says vectors draw on blank there instead of only "render blank"
+    gj = {"type": "FeatureCollection", "features": []}
+    with tempfile.TemporaryDirectory() as d:
+        r = tools.render_map("t", [0, 0, 10, 10],
+                             [{"type": "raster", "name": "r", "tiles": "https://x/{z}/{x}/{y}.png",
+                               "bounds": [0, 0, 1, 1]},
+                              {"type": "geojson", "name": "x", "data": gj}],
+                             out_path=str(Path(d) / "a.html"))
+        assert "vector layers draw on a blank background" in r["coverage_note"]
+
+
 def t_geojson_polygons_are_filled():
     # ForTy forest classes drawn as outlines only were unreadable over imagery;
     # a polygon layer gets a fill, and the layer toggle has to hide it too
