@@ -80,9 +80,12 @@ _gazet_skip_until = 0.0
 # miss: "Salinas Valley" came back as Salinas, Mexico at 0.9
 GAZET_URL = os.environ.get("GAZET_URL", "https://developmentseed-gazet.hf.space/api/search")
 GAZET_MIN_SIMILARITY = 0.95
-# two candidates in different places whose scores sit this close are both
-# real contenders, and the place-taking tools refuse the name
-AMBIGUITY_MARGIN = 0.15
+# two candidates in different places are both real contenders, and the
+# place-taking tools refuse the name, when the runner-up scores within this
+# share of the top score. A share, not a fixed gap: the old 0.15 gap was
+# bigger than most whole scores (#152, Florida 0.172 vs Florida, Uruguay
+# 0.129). Set between Florida's runner-up at 75% and Portland's at 85%
+AMBIGUITY_SHARE = 0.2
 # a box under this in both directions is a point (a Nominatim node), not an extent
 POINT_DEG = 0.001
 GAZET_TIMEOUT_S = 10.0  # geocode is a hot path: a cold Space takes ~8s, a dead one must not hang the tool
@@ -146,7 +149,7 @@ def _candidate(name: str, bbox: list[float], source: str, where: str, kind: str,
     Lake Charles city at importance 0.55 still beats the lake at 0.18 with
     both bonuses, the Shasta Lake reservoir at 0.34 beats the town at 0.44
     with them, and the Kilauea volcano at 0.48 clears the village at 0.35
-    by more than AMBIGUITY_MARGIN without a feature word
+    by more than AMBIGUITY_SHARE without a feature word
 
     extent_basis says where the box comes from: own, or for a point (extent
     under POINT_DEG) kind when _KIND_HALF_KM sizes it, else default (the 0.3 deg square)
@@ -635,7 +638,7 @@ def geocode(query: str) -> dict[str, Any]:
     its kind's half-width (a bay 2 km, a town or volcano 5, a city 10),
     or the 0.3 deg square when the kind is unknown. extent_basis on the result
     and each candidate says which: own, kind or default. ambiguous
-    is true when a candidate in another place scores within AMBIGUITY_MARGIN
+    is true when a candidate in another place scores within AMBIGUITY_SHARE
     of the top; each candidate's where then names its state and country, and
     the place-taking tools refuse the name until a fuller name or bbox is passed.
     """
@@ -789,7 +792,7 @@ def _settle(out: dict[str, Any], cands: list[dict[str, Any]]) -> bool:
     """The tail both sources share: candidates on out, ambiguity, a point widened. Returns ambiguous"""
     out["candidates"] = cands
     top = cands[0]
-    ambiguous = any(top["score"] - c["score"] <= AMBIGUITY_MARGIN and not _bboxes_overlap(top["bbox"], c["bbox"])
+    ambiguous = any(top["score"] - c["score"] <= AMBIGUITY_SHARE * abs(top["score"]) and not _bboxes_overlap(top["bbox"], c["bbox"])
                     for c in cands[1:])
     if ambiguous:
         out["ambiguous"] = True

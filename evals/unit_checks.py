@@ -2463,6 +2463,20 @@ def t_geocode_real_extent_stays_however_small():
     assert out["candidates"][0]["extent"] == [0.024, 0.013], out["candidates"]
 
 
+def t_geocode_clear_winner_is_not_ambiguous():
+    # #152: Florida refused at 0.172 vs Florida, Uruguay at 0.129, because the
+    # old fixed 0.15 gap was bigger than both scores. The state is the clear winner
+    gz = {"ids": [
+        {"source": "divisions_area", "id": "fl", "name": "Florida", "country": "US", "subtype": "region",
+         "bbox": [-87.635, 24.396, -79.974, 31.001], "similarity": 1.0},
+        {"source": "divisions_area", "id": "uy", "name": "Florida", "country": "UY", "subtype": "region",
+         "bbox": [-56.62, -34.44, -55.04, -33.25], "similarity": 1.0},
+    ]}
+    out, _ = _with_geocoders(gz, [], lambda: tools.geocode("Florida"), reverse=_STATE_OF)
+    s = [c["score"] for c in out["candidates"]]
+    assert 0.7 < s[1] / s[0] < 0.8, ("fixture keeps #152's 75% runner-up", s)
+    assert not out.get("ambiguous") and out["candidates"][0]["bbox"] == [-87.635, 24.396, -79.974, 31.001], out
+
 def t_geocode_refusal_names_state_or_country():
     # Field test No.13: the Portland refusal named no states
     ore = _nom("Portland, Multnomah County, Oregon, United States", "city", [-122.8, 45.4, -122.5, 45.7], 0.71)
