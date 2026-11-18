@@ -2993,7 +2993,7 @@ function addLayerTo(m, l, i) {
     m.addLayer({ id: id + "-line", type: "line", source: id,
       paint: { "line-color": l.color || "#d63b3b", "line-width": 2 },
       filter: ["!=", ["geometry-type"], "Point"] });
-    m.on("click", id + "-fill", (e) => {
+    for (const part of ["-fill", "-area", "-line"]) m.on("click", id + part, (e) => {
       const p = e.features[0].properties;
       new maplibregl.Popup().setLngLat(e.lngLat)
         .setHTML("<b>" + esc(p.title || p.name || "") + "</b><br>" + esc(p.description || p.date || ""))
@@ -3211,6 +3211,12 @@ def _resolve_layer(l: dict[str, Any], view: list[float] | None = None) -> dict[s
     """
     if l.get("type") == "file":
         return _file_layer(l, view)
+    if l.get("type") == "geojson" and "data" not in l and (l.get("path") or l.get("url")):
+        # read here and embedded, so the artifact stays self-contained and the
+        # caller never pastes a FeatureCollection through the tool call
+        text = (Path(l["path"]).expanduser().read_text() if l.get("path")
+                else _client.get(l["url"]).raise_for_status().text)
+        return {**l, "data": json.loads(text)}
     if l.get("type") != "item":
         return l
     l = _shared_stretch([l], view)[0]
@@ -3763,7 +3769,10 @@ def render_map(
        "opacity": ...}  # a raster with no STAC item and no tiler: read over bbox
                         # with rio-tiler and embedded in the HTML as one image
       {"type": "geojson", "name": ..., "data": <FeatureCollection>, "color": "#hex",
-       "fill_opacity": 0.35}  # polygons are filled, lines and points are not
+       "fill_opacity": 0.35}  # polygons are filled, lines and points are not;
+                              # every feature's name pops up on click
+       # instead of data, "path": "/local/file.geojson" or "url": "https://..."
+       # is read and embedded for you: never paste a big FeatureCollection
       {"type": "coverage_set", "set": <full_coverage_set from search_imagery>,
        "name": "True colour",  # optional prefix, tiles get N/S/E/W-ish suffixes
        "assets"/"expression"/"colormap_name"/"rescale"/"opacity": ...}
@@ -3886,10 +3895,17 @@ def render_map(
         out["state"]["coverage_pct"] = _cov
         if _unc:
             out["state"]["uncovered_pct"], out["state"]["uncovered_side"] = _unc
-            out["coverage_note"] = (
-                f"layers cover {_cov:.0f}% of the requested view ({_hole_text(bbox, _boxes)}), so the rest renders blank. "
-                "Pass the whole full_coverage_set from search_imagery, or tighten bbox to what you have"
-            )
+            if any(l.get("type") == "geojson" for l in resolved):
+                out["coverage_note"] = (
+                    f"imagery covers {_cov:.0f}% of the requested view ({_hole_text(bbox, _boxes)}); outside it the "
+                    "vector layers draw on a blank background. Fine for a deliberate local overlay; otherwise add "
+                    "a scene or pass the whole full_coverage_set from search_imagery"
+                )
+            else:
+                out["coverage_note"] = (
+                    f"layers cover {_cov:.0f}% of the requested view ({_hole_text(bbox, _boxes)}), so the rest renders blank. "
+                    "Pass the whole full_coverage_set from search_imagery, or tighten bbox to what you have"
+                )
     if postcard:
         card_path, card_note = _artifact_postcard(
             out_path, postcard, _map_stack_facts(resolved, layers, stack_facts, bbox), layers, stack_layer,
