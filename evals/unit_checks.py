@@ -2565,7 +2565,9 @@ def t_render_map_says_when_the_tiler_refuses_a_layer():
     tools._client.get, tools._tile_refusal = fake, _real_tile_refusal
     try:
         with tempfile.TemporaryDirectory() as d:
-            layers = [{"type": "raster", "name": n, "tiles": f"https://t/{n}/{{z}}/{{x}}/{{y}}.png"} for n in ("bad", "gap", "ok")]
+            layers = [{"type": "item", "name": n, "catalog": "veda", "collection_id": "c", "item_id": n, "rescale": "0,1",
+                       "bbox": [-122.62, 45.37, -122.58, 45.40]} for n in ("bad", "gap", "ok")]
+            layers.append({"type": "raster", "name": "mine", "tiles": "http://127.0.0.1/bad/{z}/{x}/{y}.png"})
             m = tools.render_map("t", [-122.62, 45.37, -122.58, 45.40], layers, out_path=str(Path(d) / "m.html"))
         assert m["tile_errors"] == {"bad": "424 data could not be read"}, m.get("tile_errors")
         assert "bad will draw blank" in m["note"], m["note"]

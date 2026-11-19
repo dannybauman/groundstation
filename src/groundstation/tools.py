@@ -3912,7 +3912,8 @@ def render_map(
     if stack_note:
         out["note"] = stack_note
     _notes_result(out, notes, stack_facts, bbox)
-    probed = [l for l in resolved if l.get("type") == "raster" and "{z}" in (l.get("tiles") or "")]
+    # only tiles built here from an item: a caller's own tile URL could point the check at an internal host
+    probed = [r for l, r in zip(layers, resolved) if l.get("type") == "item" and "{z}" in (r.get("tiles") or "")]
     with ThreadPoolExecutor(max_workers=8) as pool:
         refusals = {label(l): r for l, r in zip(probed, pool.map(lambda l: _tile_refusal(l["tiles"], bbox), probed)) if r}
     if refusals:
