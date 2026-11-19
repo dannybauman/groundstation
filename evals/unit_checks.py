@@ -2576,6 +2576,43 @@ def t_render_map_says_when_the_tiler_refuses_a_layer():
         tools._client.get, tools._tile_refusal = saved_get, saved_check
 
 
+def t_pc_four_band_image_picks_true_color():
+    # NAIP's image packs red, green, blue, nir; PC answers 424 to a tile that
+    # names the asset with no band pick, so the map drew blank (2026-11-19)
+    from urllib.parse import parse_qs, urlsplit
+    bands = [{"common_name": c} for c in ("red", "green", "blue", "nir")]
+    tools._ITEMS["planetary-computer:naip:N4"] = {"assets": {"image": {"eo:bands": bands}}}
+    tools._pc_mosaic_cache["naip:N4"] = "M"
+    try:
+        for url in (tools.tile_url_template("planetary-computer", "naip", "N4", assets=["image"]),
+                    tools.preview_item("planetary-computer", "naip", "N4", assets=["image"])["preview_url"]):
+            assert parse_qs(urlsplit(url).query)["asset_bidx"] == ["image|1,2,3"], url
+        cmap = tools.tile_url_template("planetary-computer", "naip", "N4", assets=["image"], colormap_name="viridis")
+        assert "asset_bidx" not in cmap, cmap
+    finally:
+        tools._ITEMS.pop("planetary-computer:naip:N4", None)
+        tools._pc_mosaic_cache.pop("naip:N4", None)
+
+
+def t_pc_band_named_expression_drops_asset_as_band():
+    # image_b4 means band 4 of asset image only without asset_as_band; with it
+    # PC looks for an asset called image_b4 and answers 424 (NAIP NDVI, 2026-11-19)
+    from urllib.parse import parse_qs, urlsplit
+    tools._ITEMS["planetary-computer:naip:N5"] = {"assets": {"image": {}}}
+    tools._pc_mosaic_cache["naip:N5"] = "M"
+    ndvi = "(image_b4-image_b1)/(image_b4+image_b1)"
+    try:
+        for url in (tools.tile_url_template("planetary-computer", "naip", "N5", expression=ndvi),
+                    tools.preview_item("planetary-computer", "naip", "N5", expression=ndvi)["preview_url"]):
+            q = parse_qs(urlsplit(url).query)
+            assert "asset_as_band" not in q and q["assets"] == ["image"], url
+        named = tools.tile_url_template("planetary-computer", "naip", "N5", expression="(nir-red)/(nir+red)")
+        assert "asset_as_band=true" in named, named
+    finally:
+        tools._ITEMS.pop("planetary-computer:naip:N5", None)
+        tools._pc_mosaic_cache.pop("naip:N5", None)
+
+
 def t_burned_area_tiles_draw_unburned_clear():
     # Field test on Danny's Mac, 2026-10-25: MODIS burned area stores "did not
     # burn" as 0, and an unmasked layer laid a black wash over eastern Oregon
