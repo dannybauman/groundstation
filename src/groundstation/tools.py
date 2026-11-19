@@ -4526,7 +4526,14 @@ def _mosaic_png(
     kw: dict[str, Any] = {"bounds_crs": "epsg:4326", "dst_crs": "epsg:3857", "max_size": max_size}
     if expression:
         named = _band_named_assets(_item(catalog, collection_id, item_ids[0]), expression) if item_ids else None
-        kw.update(expression=expression, asset_as_band=not named)
+        if named and len(named) == 1:
+            # rio-tiler 9 names one asset's bands b1..bN, not image_b1 as PC's tiler does
+            expression = re.sub(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b",
+                                lambda m: "b" + m[0].rpartition("_b")[2] if m[0].startswith(named[0] + "_b") else m[0],
+                                expression)
+            kw.update(expression=expression, assets=named)
+        else:
+            kw.update(expression=expression, asset_as_band=True)
         rescale = rescale or "-1,1"
     else:
         kw["assets"] = assets or _default_assets(collection_id)
