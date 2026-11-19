@@ -2071,6 +2071,22 @@ def _band_select(item: dict[str, Any] | None, names: list[str]) -> str | None:
     return None
 
 
+def _pc_true_color(catalog: str, collection_id: str, item_id: str, assets: list[str]) -> list[tuple[str, str]]:
+    """asset_bidx for one Planetary Computer asset that packs more than 3 bands.
+
+    PC answers 424 when an image has a 4th band and no band pick (NAIP's red,
+    green, blue, nir), so true colour names its 3 bands; an expression still
+    reaches the rest as image_b4
+    """
+    if len(assets) != 1:
+        return []
+    a = ((_item(catalog, collection_id, item_id) or {}).get("assets") or {}).get(assets[0]) or {}
+    if len(a.get("eo:bands") or a.get("bands") or []) <= 3:
+        return []
+    sel = _band_select({"assets": {assets[0]: a}}, ["red", "green", "blue"])
+    return [("asset_bidx", sel.replace("|bidx=", "|"))] if sel else []
+
+
 def _expression_to_bands(
     expression: str, assets: list[str] | None, item: dict[str, Any] | None = None
 ) -> tuple[str, list[str]]:
@@ -2159,6 +2175,8 @@ def preview_item(
             params = [("collection", collection_id), ("item", item_id)] + [("assets", a) for a in assets]
             if expression:
                 params += [("expression", expression), ("asset_as_band", "true")]
+            elif not colormap_name:
+                params += _pc_true_color(catalog, collection_id, item_id, assets)
             if rescale:
                 params.append(("rescale", rescale))
             if colormap_name:
@@ -2692,6 +2710,8 @@ def tile_url_template(
         if expression:
             # same as compute_statistics: PC reads asset names in an expression only with asset_as_band
             params += [("expression", expression), ("asset_as_band", "true")]
+        elif not colormap_name:
+            params += _pc_true_color(catalog, collection_id, item_id, assets)
         if rescale:
             params.append(("rescale", rescale))
         if colormap_name:
