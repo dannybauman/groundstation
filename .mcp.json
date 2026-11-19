@@ -2,7 +2,14 @@
   "mcpServers": {
     "groundstation": {
       "command": "uv",
-      "args": ["--directory", "${CLAUDE_PLUGIN_ROOT}", "run", "groundstation"]
+      "args": [
+        "--directory",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "run",
+        "python",
+        "-c",
+        "from groundstation.server import main; main()"
+      ]
     }
   }
 }
