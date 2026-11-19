@@ -532,6 +532,7 @@ def group_passes(items: list[dict[str, Any]], aoi_bbox: list[float], platforms: 
 _pc_mosaic_cache: dict[str, str] = {}
 
 
+TILE_CHECK_TIMEOUT_S = 8.0
 PC_REGISTER_TIMEOUT_S = 15.0  # field test No.8: registration hung 30s three times and took the whole render down
 _PC_FALLBACKS: set[str] = set()  # items whose mosaic registration failed and got item tiles instead
 
@@ -3785,6 +3786,34 @@ def _artifact_postcard(
     return card_path, None
 
 
+def _tile_refusal(tiles: str, bbox: list[float]) -> str | None:
+    """The tiler's own reason when it refuses the tile at the map's centre, else None.
+
+    A refused layer draws blank and the browser keeps the reason to itself.
+    404 means no data there and 429 is a busy tiler, so neither counts; a
+    check that cannot reach the tiler says nothing
+    """
+    w, s, e, n = bbox
+    z = max(0, min(18, int(math.log2(360 / max(e - w, 1e-6)))))
+    lat = math.radians(max(-85.0, min(85.0, (s + n) / 2)))
+    x = int(((w + e) / 2 + 180) / 360 * 2**z)
+    y = int((1 - math.asinh(math.tan(lat)) / math.pi) / 2 * 2**z)
+    url = tiles.replace("{z}", str(z)).replace("{x}", str(x)).replace("{y}", str(y))
+    try:
+        r = _client.get(url, timeout=TILE_CHECK_TIMEOUT_S)
+    except httpx.HTTPError:
+        return None
+    if r.status_code < 400 or r.status_code in (404, 429):
+        return None
+    try:
+        j = r.json()
+    except ValueError:
+        j = {}
+    err = j.get("error") if isinstance(j, dict) else None
+    msg = (err.get("message") if isinstance(err, dict) else err) or (j.get("detail") if isinstance(j, dict) else None)
+    return f"{r.status_code} {str(msg or r.reason_phrase).splitlines()[0][:200]}"
+
+
 def render_map(
     title: str,
     bbox: list[float],
@@ -3920,6 +3949,14 @@ def render_map(
     if stack_note:
         out["note"] = stack_note
     _notes_result(out, notes, stack_facts, bbox)
+    # only tiles built here from an item: a caller's own tile URL could point the check at an internal host
+    probed = [r for l, r in zip(layers, resolved) if l.get("type") == "item" and "{z}" in (r.get("tiles") or "")]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        refusals = {label(l): r for l, r in zip(probed, pool.map(lambda l: _tile_refusal(l["tiles"], bbox), probed)) if r}
+    if refusals:
+        out["tile_errors"] = refusals
+        out["note"] = (out["note"] + ". " if out.get("note") else "") + "; ".join(
+            f"{k} will draw blank: the tiler answered {v}" for k, v in refusals.items())
     fb = [label(l) for l in resolved if l.get("pc_fallback")]
     if fb:
         out["note"] = (out["note"] + ". " if out.get("note") else "") + (
